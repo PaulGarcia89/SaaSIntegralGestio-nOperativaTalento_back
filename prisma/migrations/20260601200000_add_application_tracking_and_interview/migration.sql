@@ -1,0 +1,6 @@
+ALTER TYPE "ApplicationStatus" ADD VALUE IF NOT EXISTS 'APPROVED';
+ALTER TYPE "ApplicationStatus" ADD VALUE IF NOT EXISTS 'TRAINING';
+
+ALTER TABLE "VacancyApplication"
+ADD COLUMN "interview" JSONB,
+ADD COLUMN "tracking" JSONB;
