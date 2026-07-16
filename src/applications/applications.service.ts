@@ -58,7 +58,12 @@ export class ApplicationsService {
     ) as Prisma.InputJsonValue | undefined;
 
     const candidate = await this.prisma.candidate.upsert({
-      where: { email: dto.email },
+      where: {
+        tenantId_email: {
+          tenantId: vacancy.tenantId,
+          email: dto.email,
+        },
+      },
       update: {
         fullName: dto.fullName,
         phone: dto.phone,
@@ -68,6 +73,7 @@ export class ApplicationsService {
         resumeUrl: dto.resumeUrl,
       },
       create: {
+        tenantId: vacancy.tenantId,
         fullName: dto.fullName,
         email: dto.email,
         phone: dto.phone,

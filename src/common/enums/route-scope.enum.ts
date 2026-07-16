@@ -1,4 +1,5 @@
 export enum RouteScope {
-  TENANT_WIDE = 'tenant-wide',
+  GLOBAL_ONLY = 'global-only',
+  TENANT_WIDE = 'tenant-scoped',
   BRANCH_LOCAL = 'branch-local',
 }

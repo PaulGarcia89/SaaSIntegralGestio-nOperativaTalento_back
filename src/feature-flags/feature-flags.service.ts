@@ -12,10 +12,11 @@ export class FeatureFlagsService {
     private readonly platformAccessService: PlatformAccessService,
   ) {}
 
-  async findAll(actor: JwtPayload) {
+  async findAll(actor: JwtPayload, tenantId: string) {
+    const scopedTenantId = actor.isSuperAdmin ? tenantId : actor.tenantId;
     const [catalog, capabilities] = await Promise.all([
       this.platformAccessService.getModuleCatalog(),
-      this.platformAccessService.getTenantCapabilities(actor.tenantId),
+      this.platformAccessService.getTenantCapabilities(scopedTenantId),
     ]);
 
     const flagsByModule = new Map(
@@ -31,10 +32,12 @@ export class FeatureFlagsService {
   }
 
   async upsert(actor: JwtPayload, dto: UpsertFeatureFlagDto) {
+    const scopedTenantId = actor.isSuperAdmin ? dto.tenantId ?? actor.tenantId : actor.tenantId;
+
     await this.prisma.tenantFeatureFlag.upsert({
       where: {
         tenantId_moduleCode: {
-          tenantId: actor.tenantId,
+          tenantId: scopedTenantId,
           moduleCode: dto.moduleCode,
         },
       },
@@ -43,13 +46,13 @@ export class FeatureFlagsService {
         metadata: dto.metadata as Prisma.InputJsonValue | undefined,
       },
       create: {
-        tenantId: actor.tenantId,
+        tenantId: scopedTenantId,
         moduleCode: dto.moduleCode,
         enabled: dto.enabled,
         metadata: dto.metadata as Prisma.InputJsonValue | undefined,
       },
     });
 
-    return this.platformAccessService.getTenantCapabilities(actor.tenantId);
+    return this.platformAccessService.getTenantCapabilities(scopedTenantId);
   }
 }

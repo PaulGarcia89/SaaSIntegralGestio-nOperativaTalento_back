@@ -11,9 +11,9 @@ export class CompaniesService {
     private readonly platformAccessService: PlatformAccessService,
   ) {}
 
-  async getCurrentCompany(actor: JwtPayload) {
+  async getCurrentCompany(actor: JwtPayload, tenantId: string) {
     const tenant = await this.prisma.tenant.findUniqueOrThrow({
-      where: { id: actor.tenantId },
+      where: { id: actor.isSuperAdmin ? tenantId : actor.tenantId },
       include: {
         _count: {
           select: {
@@ -31,17 +31,17 @@ export class CompaniesService {
     };
   }
 
-  getCurrentCapabilities(actor: JwtPayload) {
-    return this.platformAccessService.getTenantCapabilities(actor.tenantId);
+  getCurrentCapabilities(actor: JwtPayload, tenantId: string) {
+    return this.platformAccessService.getTenantCapabilities(actor.isSuperAdmin ? tenantId : actor.tenantId);
   }
 
-  async updateCurrentCompany(actor: JwtPayload, dto: UpdateCompanyDto) {
+  async updateCurrentCompany(actor: JwtPayload, tenantId: string, dto: UpdateCompanyDto) {
     if (!actor.isSuperAdmin && !actor.permissions.includes('tenants.update')) {
       throw new ForbiddenException('You do not have permission to update the company profile');
     }
 
     return this.prisma.tenant.update({
-      where: { id: actor.tenantId },
+      where: { id: actor.isSuperAdmin ? tenantId : actor.tenantId },
       data: dto,
     });
   }

@@ -1,4 +1,5 @@
 import { ModuleCode } from '@prisma/client';
+import { AccessScope } from '../enums/access-scope.enum';
 import { RoleScope } from '../enums/role-scope.enum';
 
 export interface JwtPayload {
@@ -11,6 +12,8 @@ export interface JwtPayload {
   email: string;
   firstName: string;
   lastName: string;
+  role: string | null;
+  scope: AccessScope;
   isSuperAdmin: boolean;
   roleScope: RoleScope;
   allowedBranchIds: string[];

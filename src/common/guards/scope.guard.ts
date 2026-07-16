@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ROUTE_SCOPE_KEY } from '../constants/auth.constants';
+import { REQUIRED_SCOPE_KEY, ROUTE_SCOPE_KEY } from '../constants/auth.constants';
+import { AccessScope } from '../enums/access-scope.enum';
 import { RoleScope } from '../enums/role-scope.enum';
 import { RouteScope } from '../enums/route-scope.enum';
 import { RequestWithUser } from '../types/request-with-user.type';
@@ -12,21 +13,17 @@ export class ScopeGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const scope = this.reflector.getAllAndOverride<RouteScope | undefined>(ROUTE_SCOPE_KEY, [
+    const routeScope = this.reflector.getAllAndOverride<RouteScope | undefined>(ROUTE_SCOPE_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const requiredScopes = this.reflector.getAllAndOverride<AccessScope[] | undefined>(REQUIRED_SCOPE_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    if (!scope) {
-      return true;
-    }
-
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const user = request.user;
-
-    if (user?.isSuperAdmin) {
-      return true;
-    }
 
     if (!user) {
       throw new AppException(
@@ -36,7 +33,35 @@ export class ScopeGuard implements CanActivate {
       );
     }
 
-    if (scope === RouteScope.BRANCH_LOCAL) {
+    if (requiredScopes && requiredScopes.length > 0 && !requiredScopes.includes(user.scope)) {
+      throw new AppException(
+        'User does not have the required actor scope',
+        ErrorCode.FORBIDDEN,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (!routeScope) {
+      return true;
+    }
+
+    if (routeScope === RouteScope.GLOBAL_ONLY) {
+      if (user.scope === AccessScope.GLOBAL) {
+        return true;
+      }
+
+      throw new AppException(
+        'User does not have global governance access',
+        ErrorCode.FORBIDDEN,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (user?.isSuperAdmin) {
+      return true;
+    }
+
+    if (routeScope === RouteScope.BRANCH_LOCAL) {
       if (
         user.roleScope === RoleScope.TENANT_ADMIN ||
         user.roleScope === RoleScope.BRANCH_ADMIN ||
@@ -52,7 +77,7 @@ export class ScopeGuard implements CanActivate {
       );
     }
 
-    if (scope === RouteScope.TENANT_WIDE) {
+    if (routeScope === RouteScope.TENANT_WIDE) {
       if (request.method === 'GET') {
         if (
           user.roleScope === RoleScope.TENANT_ADMIN ||

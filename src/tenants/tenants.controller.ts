@@ -1,4 +1,3 @@
-import { ModuleCode } from '@prisma/client';
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { TenantsService } from './tenants.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -6,16 +5,16 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
-import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
-import { RequireModule } from '../common/decorators/module-access.decorator';
+import { ScopeGuard } from '../common/guards/scope.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
+import { GlobalOnly } from '../common/decorators/global-only.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 
-@Controller('tenants')
-@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, PermissionGuard)
-@RequireModule(ModuleCode.ATS)
+@Controller(['tenants', 'admin/tenants'])
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ScopeGuard, PermissionGuard)
+@GlobalOnly()
 export class TenantsController {
   constructor(private readonly tenantsService: TenantsService) {}
 

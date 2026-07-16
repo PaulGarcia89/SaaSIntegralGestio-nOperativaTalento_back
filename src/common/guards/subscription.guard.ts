@@ -1,18 +1,31 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestWithUser } from '../types/request-with-user.type';
 import { PlatformAccessService } from '../../platform/platform-access.service';
+import { ROUTE_SCOPE_KEY } from '../constants/auth.constants';
+import { RouteScope } from '../enums/route-scope.enum';
 
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
   constructor(
     private readonly prisma: PrismaService,
     private readonly platformAccessService: PlatformAccessService,
+    private readonly reflector: Reflector,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
+    const routeScope = this.reflector.getAllAndOverride<RouteScope | undefined>(ROUTE_SCOPE_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (routeScope === RouteScope.GLOBAL_ONLY) {
+      return true;
+    }
+
     const tenantId = request.tenant?.id ?? request.user?.tenantId;
 
     if (!tenantId) {

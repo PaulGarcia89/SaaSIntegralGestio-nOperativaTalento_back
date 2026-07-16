@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { REQUIRED_PERMISSIONS_KEY } from '../constants/auth.constants';
+import { AccessScope } from '../enums/access-scope.enum';
 import { RequestWithUser } from '../types/request-with-user.type';
 
 @Injectable()
@@ -18,7 +19,7 @@ export class PermissionGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
-    if (request.user?.isSuperAdmin) {
+    if (request.user?.scope === AccessScope.GLOBAL) {
       return true;
     }
 

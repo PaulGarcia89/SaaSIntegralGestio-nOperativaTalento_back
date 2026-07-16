@@ -1,4 +1,9 @@
 import {
+  AccessScope,
+  AutomationConsequenceType,
+  AutomationScope,
+  AutomationTriggerEvent,
+  EmployeeStatus,
   ModuleCode,
   PlanCode,
   PrismaClient,
@@ -38,7 +43,9 @@ const permissionCatalog = [
   'permissions.read',
   'plans.read', 'plans.create', 'plans.update', 'plans.delete',
   'modules.read', 'modules.create', 'modules.update', 'modules.delete',
-  'subscriptions.read', 'subscriptions.create', 'subscriptions.update', 'subscriptions.delete'
+  'subscriptions.read', 'subscriptions.create', 'subscriptions.update', 'subscriptions.delete',
+  'automation.read', 'automation.create', 'automation.update',
+  'automation.audit.read', 'workflow_master.read', 'domain_events.create',
 ];
 
 const scopedRoleCatalog = [
@@ -67,6 +74,56 @@ const scopedRoleCatalog = [
       permission === 'employees.update' ||
       permission === 'branches.read',
     ),
+  },
+];
+
+const automationRuleTemplates = [
+  {
+    name: 'Alta operativa al contratar',
+    triggerEvent: AutomationTriggerEvent.CANDIDATE_HIRED,
+    scope: AutomationScope.BRANCH,
+    consequences: [
+      { type: AutomationConsequenceType.CREATE_ONBOARDING },
+      { type: AutomationConsequenceType.ASSIGN_ASSET },
+      { type: AutomationConsequenceType.ACTIVATE_TRAINING },
+      { type: AutomationConsequenceType.MARK_WORKFLOW_STAGE, stepKey: 'ONBOARDING' },
+      { type: AutomationConsequenceType.NOTIFY_ACTOR, title: 'Contratación recibida', message: 'Se disparó el flujo de alta automática.' },
+    ],
+  },
+  {
+    name: 'Habilitar operación al completar onboarding',
+    triggerEvent: AutomationTriggerEvent.ONBOARDING_COMPLETED,
+    scope: AutomationScope.BRANCH,
+    consequences: [
+      { type: AutomationConsequenceType.MARK_WORKFLOW_STAGE, stepKey: 'TRAINING' },
+      { type: AutomationConsequenceType.NOTIFY_ACTOR, title: 'Onboarding completado', message: 'El empleado puede pasar a formación.' },
+    ],
+  },
+  {
+    name: 'Cerrar formación y habilitar handoff',
+    triggerEvent: AutomationTriggerEvent.TRAINING_COMPLETED,
+    scope: AutomationScope.BRANCH,
+    consequences: [
+      { type: AutomationConsequenceType.MARK_WORKFLOW_STAGE, stepKey: 'OPERATION' },
+      { type: AutomationConsequenceType.CREATE_POLICY_CHECK, title: 'Validación operativa', policyCode: 'handoff-operativo' },
+    ],
+  },
+  {
+    name: 'Cerrar cumplimiento al finalizar operación',
+    triggerEvent: AutomationTriggerEvent.OPERATION_HANDOFF_COMPLETED,
+    scope: AutomationScope.BRANCH,
+    consequences: [
+      { type: AutomationConsequenceType.PROVISION_ACCESS },
+      { type: AutomationConsequenceType.MARK_WORKFLOW_STAGE, stepKey: 'ADMIN_COMPLIANCE' },
+    ],
+  },
+  {
+    name: 'Cierre final de cumplimiento',
+    triggerEvent: AutomationTriggerEvent.COMPLIANCE_CLOSED,
+    scope: AutomationScope.BRANCH,
+    consequences: [
+      { type: AutomationConsequenceType.NOTIFY_ACTOR, title: 'Workflow completado', message: 'El flujo maestro quedó cerrado.' },
+    ],
   },
 ];
 
@@ -146,6 +203,7 @@ async function main() {
           tenantId: tenant.id,
           code: 'SUPERADMIN',
           name: 'Super Admin',
+          scope: AccessScope.GLOBAL,
           isSystem: true,
         },
       });
@@ -171,6 +229,7 @@ async function main() {
           data: {
             name: scopedRoleEntry.name,
             description: scopedRoleEntry.description,
+            scope: scopedRoleEntry.code === 'TENANT_ADMIN' ? AccessScope.TENANT : AccessScope.BRANCH,
             isSystem: true,
           },
         })
@@ -180,6 +239,7 @@ async function main() {
             code: scopedRoleEntry.code,
             name: scopedRoleEntry.name,
             description: scopedRoleEntry.description,
+            scope: scopedRoleEntry.code === 'TENANT_ADMIN' ? AccessScope.TENANT : AccessScope.BRANCH,
             isSystem: true,
           },
         });
@@ -259,6 +319,420 @@ async function main() {
         permissionId: permission.id,
       })),
       skipDuplicates: true,
+    });
+  }
+
+  const planMap = new Map(
+    (await prisma.plan.findMany()).map((plan) => [plan.code, plan.id]),
+  );
+  const permissionMap = new Map(permissions.map((permission) => [permission.code, permission.id]));
+
+  const demoTenants = [
+    {
+      name: 'TalentOS Cloud USA',
+      slug: 'talentos-cloud-usa',
+      status: TenantStatus.ACTIVE,
+      planCode: PlanCode.ENTERPRISE,
+      branches: [
+        { name: 'Sede principal de Miami', location: 'Miami, FL' },
+      ],
+      featureFlags: [ModuleCode.REPORTS, ModuleCode.AI_PRODUCTIVITY, ModuleCode.INVENTORY, ModuleCode.TRAINING],
+      users: [
+        {
+          email: 'ava.thompson@talentoscloud.com',
+          firstName: 'Ava',
+          lastName: 'Thompson',
+          roleCode: 'TENANT_ADMIN',
+          status: UserStatus.ACTIVE,
+        },
+      ],
+    },
+    {
+      name: 'Sunrise Health Florida',
+      slug: 'sunrise-health-florida',
+      status: TenantStatus.ACTIVE,
+      planCode: PlanCode.PRO,
+      branches: [
+        { name: 'Centro asistencial de Orlando', location: 'Orlando, FL' },
+        { name: 'Hub clinico de Tampa', location: 'Tampa, FL' },
+      ],
+      featureFlags: [ModuleCode.REPORTS],
+      users: [
+        {
+          email: 'olivia.carter@sunrisehealthfl.com',
+          firstName: 'Olivia',
+          lastName: 'Carter',
+          roleCode: 'HR_MANAGER',
+          status: UserStatus.ACTIVE,
+        },
+      ],
+    },
+    {
+      name: 'Gulfshore Logistics',
+      slug: 'gulfshore-logistics',
+      status: TenantStatus.ACTIVE,
+      planCode: PlanCode.BASIC,
+      branches: [
+        { name: 'Patio de distribucion de Jacksonville', location: 'Jacksonville, FL' },
+      ],
+      featureFlags: [ModuleCode.INVENTORY],
+      users: [
+        {
+          email: 'emma.collins@gulfshorelogistics.com',
+          firstName: 'Emma',
+          lastName: 'Collins',
+          roleCode: 'SUPERVISOR',
+          status: UserStatus.ACTIVE,
+        },
+      ],
+    },
+  ] as const;
+
+  const demoRoleTemplates = [
+    {
+      code: 'TENANT_ADMIN',
+      name: 'Tenant Admin',
+      permissions: permissionCatalog,
+    },
+    {
+      code: 'HR_MANAGER',
+      name: 'HR Manager',
+      permissions: permissionCatalog.filter((permission) =>
+        permission.startsWith('vacancies.') ||
+        permission.startsWith('applications.') ||
+        permission.startsWith('training.') ||
+        permission.startsWith('users.read') ||
+        permission.startsWith('branches.read') ||
+        permission === 'roles.read' ||
+        permission === 'permissions.read' ||
+        permission === 'tenants.read',
+      ),
+    },
+    {
+      code: 'SUPERVISOR',
+      name: 'Supervisor',
+      permissions: permissionCatalog.filter((permission) =>
+        permission.endsWith('.read') ||
+        permission === 'branches.update' ||
+        permission === 'employees.update',
+      ),
+    },
+  ] as const;
+
+  for (const demoTenant of demoTenants) {
+    const tenantRecord = await prisma.tenant.upsert({
+      where: { slug: demoTenant.slug },
+      update: {
+        name: demoTenant.name,
+        status: demoTenant.status,
+      },
+      create: {
+        name: demoTenant.name,
+        slug: demoTenant.slug,
+        status: demoTenant.status,
+      },
+    });
+
+    await prisma.subscription.upsert({
+      where: { tenantId: tenantRecord.id },
+      update: {
+        planId: planMap.get(demoTenant.planCode)!,
+        status: SubscriptionStatus.ACTIVE,
+        startsAt: new Date(),
+        endsAt: null,
+        trialEndsAt: null,
+      },
+      create: {
+        tenantId: tenantRecord.id,
+        planId: planMap.get(demoTenant.planCode)!,
+        status: SubscriptionStatus.ACTIVE,
+        startsAt: new Date(),
+      },
+    });
+
+    for (const moduleCode of demoTenant.featureFlags) {
+      await prisma.tenantFeatureFlag.upsert({
+        where: {
+          tenantId_moduleCode: {
+            tenantId: tenantRecord.id,
+            moduleCode,
+          },
+        },
+        update: { enabled: true },
+        create: {
+          tenantId: tenantRecord.id,
+          moduleCode,
+          enabled: true,
+        },
+      });
+    }
+
+    const branchIdsByName = new Map<string, string>();
+    for (const branchEntry of demoTenant.branches) {
+      const branch = await prisma.branch.upsert({
+        where: {
+          tenantId_name: {
+            tenantId: tenantRecord.id,
+            name: branchEntry.name,
+          },
+        },
+        update: { location: branchEntry.location },
+        create: {
+          tenantId: tenantRecord.id,
+          name: branchEntry.name,
+          location: branchEntry.location,
+        },
+      });
+      branchIdsByName.set(branchEntry.name, branch.id);
+    }
+
+    for (const roleTemplate of demoRoleTemplates) {
+      const role = await prisma.role.upsert({
+        where: {
+          tenantId_code: {
+            tenantId: tenantRecord.id,
+            code: roleTemplate.code,
+          },
+        },
+        update: {
+          name: roleTemplate.name,
+          scope: roleTemplate.code === 'TENANT_ADMIN' ? AccessScope.TENANT : AccessScope.BRANCH,
+          isSystem: true,
+        },
+        create: {
+          tenantId: tenantRecord.id,
+          code: roleTemplate.code,
+          name: roleTemplate.name,
+          scope: roleTemplate.code === 'TENANT_ADMIN' ? AccessScope.TENANT : AccessScope.BRANCH,
+          isSystem: true,
+        },
+      });
+
+      await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
+      await prisma.rolePermission.createMany({
+        data: roleTemplate.permissions.map((permissionCode) => ({
+          roleId: role.id,
+          permissionId: permissionMap.get(permissionCode)!,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    for (const userEntry of demoTenant.users) {
+      const demoUser = await prisma.user.upsert({
+        where: {
+          tenantId_email: {
+            tenantId: tenantRecord.id,
+            email: userEntry.email,
+          },
+        },
+        update: {
+          firstName: userEntry.firstName,
+          lastName: userEntry.lastName,
+          passwordHash,
+          status: userEntry.status,
+          activeBranchId: branchIdsByName.get(demoTenant.branches[0].name) ?? null,
+        },
+        create: {
+          tenantId: tenantRecord.id,
+          email: userEntry.email,
+          passwordHash,
+          firstName: userEntry.firstName,
+          lastName: userEntry.lastName,
+          status: userEntry.status,
+          activeBranchId: branchIdsByName.get(demoTenant.branches[0].name) ?? null,
+        },
+      });
+
+      const role = await prisma.role.findUniqueOrThrow({
+        where: {
+          tenantId_code: {
+            tenantId: tenantRecord.id,
+            code: userEntry.roleCode,
+          },
+        },
+      });
+
+      await prisma.userRole.upsert({
+        where: { userId_roleId: { userId: demoUser.id, roleId: role.id } },
+        update: {},
+        create: { userId: demoUser.id, roleId: role.id },
+      });
+
+      await prisma.userBranchAccess.deleteMany({ where: { userId: demoUser.id } });
+      await prisma.userBranchAccess.createMany({
+        data: [...branchIdsByName.values()].map((branchId) => ({
+          userId: demoUser.id,
+          branchId,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    const firstBranchId = branchIdsByName.get(demoTenant.branches[0].name)!;
+    const firstUser = await prisma.user.findFirst({
+      where: {
+        tenantId: tenantRecord.id,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    for (const ruleTemplate of automationRuleTemplates) {
+      const existingRule = await prisma.automationRule.findFirst({
+        where: {
+          tenantId: tenantRecord.id,
+          branchId: firstBranchId,
+          triggerEvent: ruleTemplate.triggerEvent,
+          name: ruleTemplate.name,
+        },
+      });
+
+      if (existingRule) {
+        await prisma.automationRule.update({
+          where: { id: existingRule.id },
+          data: {
+            scope: ruleTemplate.scope,
+            enabled: true,
+            version: existingRule.version + 1,
+            consequences: ruleTemplate.consequences as never,
+            conditions: [] as never,
+          },
+        });
+      } else {
+        await prisma.automationRule.create({
+          data: {
+            tenantId: tenantRecord.id,
+            branchId: firstBranchId,
+            name: ruleTemplate.name,
+            triggerEvent: ruleTemplate.triggerEvent,
+            scope: ruleTemplate.scope,
+            conditions: [] as never,
+            enabled: true,
+            version: 1,
+            consequences: ruleTemplate.consequences as never,
+            createdBy: firstUser?.id,
+          },
+        });
+      }
+    }
+
+    const sampleEmployee = await prisma.employee.upsert({
+      where: {
+        tenantId_email: {
+          tenantId: tenantRecord.id,
+          email: `employee.${demoTenant.slug}@example.com`,
+        },
+      },
+      update: {
+        name: `Employee ${demoTenant.name}`,
+        status: EmployeeStatus.ACTIVE,
+      },
+      create: {
+        tenantId: tenantRecord.id,
+        name: `Employee ${demoTenant.name}`,
+        email: `employee.${demoTenant.slug}@example.com`,
+        status: EmployeeStatus.ACTIVE,
+      },
+    });
+
+    const employeePrimaryAssignment = await prisma.employeeBranch.findFirst({
+      where: {
+        tenantId: tenantRecord.id,
+        employeeId: sampleEmployee.id,
+        branchId: firstBranchId,
+        isPrimary: true,
+        releasedAt: null,
+      },
+    });
+
+    if (!employeePrimaryAssignment) {
+      await prisma.employeeBranch.create({
+        data: {
+          tenantId: tenantRecord.id,
+          employeeId: sampleEmployee.id,
+          branchId: firstBranchId,
+          role: 'Operations Associate',
+          isPrimary: true,
+        },
+      });
+    }
+
+    const sampleCandidate = await prisma.candidate.upsert({
+      where: {
+        tenantId_email: {
+          tenantId: tenantRecord.id,
+          email: `candidate.${demoTenant.slug}@example.com`,
+        },
+      },
+      update: {
+        fullName: `Candidate ${demoTenant.name}`,
+        city: demoTenant.branches[0].location,
+      },
+      create: {
+        tenantId: tenantRecord.id,
+        fullName: `Candidate ${demoTenant.name}`,
+        email: `candidate.${demoTenant.slug}@example.com`,
+        city: demoTenant.branches[0].location,
+      },
+    });
+
+    const sampleVacancy =
+      (await prisma.vacancy.findFirst({
+        where: {
+          tenantId: tenantRecord.id,
+          branchId: firstBranchId,
+          title: `Operations Coordinator - ${demoTenant.name}`,
+        },
+      })) ??
+      (await prisma.vacancy.create({
+        data: {
+          tenantId: tenantRecord.id,
+          branchId: firstBranchId,
+          createdByUserId: firstUser?.id,
+          title: `Operations Coordinator - ${demoTenant.name}`,
+          summary: 'Workflow-ready operational vacancy',
+          description: 'Sample vacancy for workflow orchestration testing.',
+          department: 'Operations',
+          city: demoTenant.branches[0].location,
+          status: 'OPEN',
+        },
+      }));
+
+    await prisma.vacancyApplication.upsert({
+      where: {
+        vacancyId_candidateId: {
+          vacancyId: sampleVacancy.id,
+          candidateId: sampleCandidate.id,
+        },
+      },
+      update: {
+        status: 'INTERVIEW',
+      },
+      create: {
+        tenantId: tenantRecord.id,
+        vacancyId: sampleVacancy.id,
+        candidateId: sampleCandidate.id,
+        status: 'INTERVIEW',
+      },
+    });
+
+    await prisma.inventoryItem.upsert({
+      where: {
+        tenantId_sku: {
+          tenantId: tenantRecord.id,
+          sku: `LAP-${demoTenant.slug.toUpperCase()}`,
+        },
+      },
+      update: {
+        name: `Laptop bundle ${demoTenant.name}`,
+        qtyGlobal: 10,
+      },
+      create: {
+        tenantId: tenantRecord.id,
+        sku: `LAP-${demoTenant.slug.toUpperCase()}`,
+        name: `Laptop bundle ${demoTenant.name}`,
+        qtyGlobal: 10,
+      },
     });
   }
 

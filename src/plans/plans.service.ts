@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { AccessControlService } from '../access-control/access-control.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -6,10 +7,13 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 
 @Injectable()
 export class PlansService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accessControl: AccessControlService,
+  ) {}
 
   async create(dto: CreatePlanDto, actor: JwtPayload) {
-    this.assertSuperAdmin(actor);
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can manage plans');
     const { moduleIds = [], priceMonthly, priceYearly, ...rest } = dto;
     const plan = await this.prisma.plan.create({
       data: {
@@ -41,7 +45,7 @@ export class PlansService {
   }
 
   async update(id: string, dto: UpdatePlanDto, actor: JwtPayload) {
-    this.assertSuperAdmin(actor);
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can manage plans');
     const { moduleIds, priceMonthly, priceYearly, ...rest } = dto;
     await this.prisma.plan.update({ where: { id }, data: rest });
     await this.prisma.plan.update({
@@ -60,7 +64,7 @@ export class PlansService {
   }
 
   remove(id: string, actor: JwtPayload) {
-    this.assertSuperAdmin(actor);
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can manage plans');
     return this.prisma.plan.delete({ where: { id } });
   }
 
@@ -72,12 +76,6 @@ export class PlansService {
         data: moduleIds.map((moduleId) => ({ planId, moduleId })),
         skipDuplicates: true,
       });
-    }
-  }
-
-  private assertSuperAdmin(actor: JwtPayload) {
-    if (!actor.isSuperAdmin) {
-      throw new ForbiddenException('Only superadmins can manage plans');
     }
   }
 }

@@ -1,4 +1,3 @@
-import { ModuleCode } from '@prisma/client';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -6,17 +5,17 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
-import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
-import { RequireModule } from '../common/decorators/module-access.decorator';
+import { ScopeGuard } from '../common/guards/scope.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
+import { TenantScoped } from '../common/decorators/tenant-scoped.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { RequestWithUser } from '../common/types/request-with-user.type';
 
-@Controller('users')
-@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, PermissionGuard)
-@RequireModule(ModuleCode.ATS)
+@Controller(['users', 'company/users'])
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ScopeGuard, PermissionGuard)
+@TenantScoped()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

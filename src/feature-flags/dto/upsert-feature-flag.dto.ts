@@ -1,7 +1,11 @@
-import { IsBoolean, IsEnum, IsObject, IsOptional } from 'class-validator';
+import { IsBoolean, IsEnum, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { ModuleCode } from '@prisma/client';
 
 export class UpsertFeatureFlagDto {
+  @IsOptional()
+  @IsUUID()
+  tenantId?: string;
+
   @IsEnum(ModuleCode)
   moduleCode!: ModuleCode;
 

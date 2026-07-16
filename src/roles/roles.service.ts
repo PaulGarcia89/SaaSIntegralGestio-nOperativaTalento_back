@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessControlService } from '../access-control/access-control.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -6,10 +7,13 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accessControl: AccessControlService,
+  ) {}
 
   async create(dto: CreateRoleDto, actor: JwtPayload, tenantId: string) {
-    const targetTenantId = actor.isSuperAdmin ? tenantId : actor.tenantId;
+    const targetTenantId = this.accessControl.resolveTenantId(actor, tenantId);
     await this.assertPermissionsExist(dto.permissionIds ?? []);
 
     const role = await this.prisma.role.create({
@@ -18,6 +22,7 @@ export class RolesService {
         code: dto.code,
         name: dto.name,
         description: dto.description,
+        scope: actor.scope === 'branch' ? 'BRANCH' : 'TENANT',
       },
     });
 
@@ -27,28 +32,29 @@ export class RolesService {
 
   findAll(actor: JwtPayload, tenantId: string) {
     return this.prisma.role.findMany({
-      where: { tenantId: actor.isSuperAdmin ? tenantId : actor.tenantId },
+      where: this.accessControl.buildTenantWhere(actor, tenantId),
       include: {
         rolePermissions: { include: { permission: true } },
+        _count: { select: { userRoles: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async findOne(id: string, actor: JwtPayload, tenantId: string) {
-    const role = await this.prisma.role.findUnique({
-      where: { id },
+    const role = await this.prisma.role.findFirst({
+      where: {
+        id,
+        ...this.accessControl.buildTenantWhere(actor, tenantId),
+      },
       include: {
         rolePermissions: { include: { permission: true } },
+        _count: { select: { userRoles: true } },
       },
     });
 
     if (!role) {
       throw new NotFoundException('Role not found');
-    }
-
-    if (role.tenantId !== (actor.isSuperAdmin ? tenantId : actor.tenantId)) {
-      throw new ForbiddenException('You do not have access to this role');
     }
 
     return role;

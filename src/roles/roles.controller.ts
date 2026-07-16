@@ -1,22 +1,21 @@
-import { ModuleCode } from '@prisma/client';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { RequireModule } from '../common/decorators/module-access.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
+import { ScopeGuard } from '../common/guards/scope.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { RequestWithUser } from '../common/types/request-with-user.type';
+import { TenantScoped } from '../common/decorators/tenant-scoped.decorator';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { RolesService } from './roles.service';
 
-@Controller('roles')
-@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, PermissionGuard)
-@RequireModule(ModuleCode.ATS)
+@Controller(['roles', 'company/roles'])
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ScopeGuard, PermissionGuard)
+@TenantScoped()
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 

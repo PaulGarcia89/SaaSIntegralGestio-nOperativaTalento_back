@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessControlService } from '../access-control/access-control.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
@@ -6,10 +7,13 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 
 @Injectable()
 export class SubscriptionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accessControl: AccessControlService,
+  ) {}
 
   create(dto: CreateSubscriptionDto, actor: JwtPayload) {
-    this.assertSuperAdmin(actor);
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can manage subscriptions');
     return this.prisma.subscription.create({
       data: {
         ...dto,
@@ -21,15 +25,17 @@ export class SubscriptionsService {
     });
   }
 
-  findAll(actor: JwtPayload, tenantId: string) {
+  findAll(actor: JwtPayload, tenantId?: string) {
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can list subscriptions');
     return this.prisma.subscription.findMany({
-      where: actor.isSuperAdmin ? undefined : { tenantId },
+      where: tenantId ? { tenantId } : undefined,
       include: { tenant: true, plan: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findOne(id: string, actor: JwtPayload, tenantId: string) {
+  async findOne(id: string, actor: JwtPayload) {
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can view subscriptions');
     const subscription = await this.prisma.subscription.findUnique({
       where: { id },
       include: { tenant: true, plan: { include: { planModules: { include: { module: true } } } } },
@@ -39,15 +45,11 @@ export class SubscriptionsService {
       throw new NotFoundException('Subscription not found');
     }
 
-    if (!actor.isSuperAdmin && subscription.tenantId !== tenantId) {
-      throw new ForbiddenException('You do not have access to this subscription');
-    }
-
     return subscription;
   }
 
   update(id: string, dto: UpdateSubscriptionDto, actor: JwtPayload) {
-    this.assertSuperAdmin(actor);
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can manage subscriptions');
     return this.prisma.subscription.update({
       where: { id },
       data: {
@@ -61,13 +63,7 @@ export class SubscriptionsService {
   }
 
   remove(id: string, actor: JwtPayload) {
-    this.assertSuperAdmin(actor);
+    this.accessControl.assertGlobalAccess(actor, 'Only superadmins can manage subscriptions');
     return this.prisma.subscription.delete({ where: { id } });
-  }
-
-  private assertSuperAdmin(actor: JwtPayload) {
-    if (!actor.isSuperAdmin) {
-      throw new ForbiddenException('Only superadmins can manage subscriptions');
-    }
   }
 }

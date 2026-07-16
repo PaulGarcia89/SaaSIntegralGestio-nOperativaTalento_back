@@ -11,7 +11,11 @@ import * as bcrypt from 'bcrypt';
 import { Request } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
-import { deriveRoleScope } from '../common/auth/role-scope.util';
+import {
+  deriveAccessScope,
+  derivePrimaryRole,
+  deriveRoleScope,
+} from '../common/auth/role-scope.util';
 import { RoleScope } from '../common/enums/role-scope.enum';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -178,6 +182,7 @@ export class AuthService {
     }
 
     const roleScope = deriveRoleScope(roleCodes, user.isSuperAdmin);
+    const accessScope = deriveAccessScope(roleScope, user.isSuperAdmin);
     const allowedBranchIds =
       roleScope === RoleScope.TENANT_ADMIN
         ? (
@@ -214,6 +219,8 @@ export class AuthService {
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      role: derivePrimaryRole(roleCodes, user.isSuperAdmin),
+      scope: accessScope,
       isSuperAdmin: user.isSuperAdmin,
       roleScope,
       allowedBranchIds,
@@ -272,6 +279,8 @@ export class AuthService {
       tenantId: payload.tenantId,
       tenantSlug: payload.tenantSlug,
       tenantName: payload.tenantName,
+      role: payload.role,
+      scope: payload.scope,
       roleScope: payload.roleScope,
       allowedBranchIds: payload.allowedBranchIds,
       activeBranchId: payload.activeBranchId,

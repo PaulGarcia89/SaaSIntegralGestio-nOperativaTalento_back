@@ -5,3 +5,4 @@ export const TENANT_HEADER = 'x-tenant-id';
 export const BRANCH_HEADER = 'x-branch-id';
 export const PLATFORM_ADMIN_ROLE = 'SUPERADMIN';
 export const ROUTE_SCOPE_KEY = 'route-scope';
+export const REQUIRED_SCOPE_KEY = 'required-scope';

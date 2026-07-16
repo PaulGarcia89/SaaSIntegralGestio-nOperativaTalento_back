@@ -28,11 +28,17 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { BillingModule } from './billing/billing.module';
 import { CompaniesModule } from './companies/companies.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { WorkflowsModule } from './workflows/workflows.module';
+import { AccessControlModule } from './access-control/access-control.module';
+import { AutomationModule } from './automation/automation.module';
+import { DomainEventsModule } from './domain-events/domain-events.module';
+import { WorkflowMasterModule } from './workflow-master/workflow-master.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    AccessControlModule,
     PlatformModule,
     AuditModule,
     AuthModule,
@@ -54,6 +60,10 @@ import { AuditLogsModule } from './audit-logs/audit-logs.module';
     VacanciesModule,
     ApplicationsModule,
     TrainingModule,
+    WorkflowsModule,
+    AutomationModule,
+    DomainEventsModule,
+    WorkflowMasterModule,
   ],
   providers: [
     {

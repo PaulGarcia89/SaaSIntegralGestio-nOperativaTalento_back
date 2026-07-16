@@ -78,6 +78,17 @@ enum RoleScope {
   BRANCH_USER
 }
 
+enum AccessScope {
+  GLOBAL
+  TENANT
+  BRANCH
+}
+
+enum AuditDomain {
+  GOVERNANCE_GLOBAL
+  TENANT_OPERATIONS
+}
+
 enum SubscriptionStatus {
   TRIALING
   ACTIVE
@@ -208,69 +219,345 @@ enum TrainingFavoriteEntityType {
   RESOURCE
 }
 
+enum WorkflowType {
+  HIRING
+  BRANCH_TRANSFER
+  OFFBOARDING
+}
+
+enum WorkflowStatus {
+  PENDING
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+enum WorkflowStageKey {
+  CANDIDACY
+  HIRING
+  ONBOARDING
+  TRAINING
+  OPERATION
+  ADMIN_COMPLIANCE
+}
+
+enum WorkflowStepType {
+  CANDIDACY
+  HIRING
+  ONBOARDING
+  DOCUMENTS
+  SIGNATURES
+  ASSET_ASSIGNMENT
+  TRAINING
+  TRAINING_ACTIVATION
+  OPERATION
+  ACCESS_PROVISIONING
+  ADMIN_COMPLIANCE
+  PRODUCTIVITY_REVIEW
+  ASSET_RECOVERY
+  ACCESS_CLOSURE
+  ARCHIVE_RECORD
+}
+
+enum WorkflowOwnerType {
+  SYSTEM
+  USER
+  EMPLOYEE
+  CANDIDATE
+  BRANCH
+  INVENTORY
+  TRAINING
+  ACCESS
+  SIGNATURE
+  ONBOARDING
+  PRODUCTIVITY
+}
+
+enum WorkflowSourceModule {
+  ATS
+  ONBOARDING
+  INVENTORY
+  TRAINING
+  PRODUCTIVITY
+  ADMIN
+  HR
+}
+
+enum WorkflowTaskStatus {
+  PENDING
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+enum WorkflowRiskStatus {
+  ON_TIME
+  AT_RISK
+  OVERDUE
+}
+
+enum WorkflowBlockerSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum WorkflowMasterSlaStatus {
+  ON_TIME
+  AT_RISK
+  OVERDUE
+}
+
+enum AutomationScope {
+  TENANT
+  BRANCH
+}
+
+enum AutomationTriggerEvent {
+  CANDIDATE_HIRED
+  EMPLOYEE_BRANCH_CHANGED
+  EMPLOYEE_OFFBOARDING_STARTED
+  ONBOARDING_COMPLETED
+  INVENTORY_ASSET_ASSIGNED
+  TRAINING_COMPLETED
+  OPERATION_HANDOFF_COMPLETED
+  COMPLIANCE_CLOSED
+}
+
+enum AutomationExecutionStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+enum AutomationStepStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum AutomationConsequenceType {
+  CREATE_ONBOARDING
+  ASSIGN_ASSET
+  PROVISION_ACCESS
+  ACTIVATE_TRAINING
+  CREATE_POLICY_CHECK
+  MARK_WORKFLOW_STAGE
+  NOTIFY_ACTOR
+  ARCHIVE_RECORD
+  REVOKE_ACCESS
+}
+
+enum AutomationAuditStatus {
+  RECEIVED
+  STARTED
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum PolicyCheckStatus {
+  PENDING
+  IN_PROGRESS
+  PASSED
+  FAILED
+}
+
+enum AssetAssignmentStatus {
+  PENDING
+  ASSIGNED
+  CANCELLED
+}
+
+enum TrainingActivationStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum OnboardingTaskType {
+  DOCUMENT_COLLECTION
+  POLICY_REVIEW
+  MANAGER_CHECKLIST
+  HR_CHECKLIST
+  DAY_ONE_READINESS
+}
+
+enum SignaturePackageStatus {
+  DRAFT
+  PENDING
+  PARTIALLY_SIGNED
+  COMPLETED
+  CANCELLED
+}
+
+enum SignatureParticipantStatus {
+  PENDING
+  SIGNED
+  REJECTED
+}
+
+enum InventoryAssignmentStatus {
+  PENDING
+  ASSIGNED
+  CANCELLED
+}
+
+enum InventoryRecoveryStatus {
+  PENDING
+  IN_PROGRESS
+  RECOVERED
+  CANCELLED
+}
+
+enum AccessTaskType {
+  PROVISION
+  UPDATE
+  CLOSE
+}
+
+enum AccessTaskStatus {
+  PENDING
+  IN_PROGRESS
+  PROVISIONED
+  CLOSED
+  BLOCKED
+  CANCELLED
+}
+
+enum ProductivityReviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+  CANCELLED
+}
+
+enum ProductivityReviewType {
+  HIRING
+  BRANCH_TRANSFER
+  OFFBOARDING
+}
+
+enum OperationalEventType {
+  HIRING_INITIATED
+  BRANCH_TRANSFER_INITIATED
+  OFFBOARDING_INITIATED
+  CANDIDACY_COMPLETED
+  HIRING_COMPLETED
+  ONBOARDING_COMPLETED
+  TRAINING_COMPLETED
+  OPERATION_CONFIRMED
+  COMPLIANCE_COMPLETED
+  SIGNATURE_COMPLETED
+  ASSET_ASSIGNED
+  TRAINING_ACTIVATED
+  ACCESS_PROVISIONED
+  ASSET_RECOVERED
+  ACCESS_CLOSED
+  RECORD_ARCHIVED
+  PRODUCTIVITY_REVIEW_CREATED
+  WORKFLOW_STEP_STARTED
+  WORKFLOW_STEP_COMPLETED
+  WORKFLOW_NOTE_ADDED
+  WORKFLOW_BLOCKER_CREATED
+  WORKFLOW_BLOCKER_RESOLVED
+  MASTER_WORKFLOW_RECOMPUTED
+}
+
 model Tenant {
-  id           String        @id @default(uuid())
-  name         String
-  slug         String        @unique
-  status       TenantStatus  @default(ACTIVE)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  users        User[]
-  roles        Role[]
-  subscription Subscription?
-  auditLogs    AuditLog[]
-  branches     Branch[]
-  employees    Employee[]
-  employeeBranches EmployeeBranch[]
-  vacancies    Vacancy[]
-  vacancyFormTemplates VacancyFormTemplate[]
-  applications VacancyApplication[]
-  inventoryItems InventoryItem[]
-  inventoryStocks InventoryStock[]
-  trainingModuleAccesses TenantTrainingModuleAccess[]
-  trainingCategories TrainingCategory[]
-  trainingCurriculums TrainingCurriculum[]
-  trainingCourses TrainingCourse[]
-  trainingAssignments TrainingAssignment[]
-  trainingProgressRecords TrainingProgress[]
+  id                          String                       @id @default(uuid())
+  name                        String
+  slug                        String                       @unique
+  status                      TenantStatus                 @default(ACTIVE)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  users                       User[]
+  roles                       Role[]
+  subscription                Subscription?
+  auditLogs                   AuditLog[]
+  candidates                  Candidate[]
+  branches                    Branch[]
+  employees                   Employee[]
+  employeeBranches            EmployeeBranch[]
+  vacancies                   Vacancy[]
+  vacancyFormTemplates        VacancyFormTemplate[]
+  applications                VacancyApplication[]
+  inventoryItems              InventoryItem[]
+  inventoryStocks             InventoryStock[]
+  trainingModuleAccesses      TenantTrainingModuleAccess[]
+  trainingCategories          TrainingCategory[]
+  trainingCurriculums         TrainingCurriculum[]
+  trainingCourses             TrainingCourse[]
+  trainingAssignments         TrainingAssignment[]
+  trainingProgressRecords     TrainingProgress[]
   trainingStepProgressRecords TrainingStepProgress[]
-  trainingEvents TrainingEvent[]
-  trainingLibraryResources TrainingLibraryResource[]
-  trainingQuizAttempts TrainingQuizAttempt[]
-  trainingCertificates TrainingCertificate[]
-  trainingFavorites TrainingFavorite[]
-  trainingAnalyticsSnapshots TrainingAnalyticsSnapshot[]
-  featureFlags TenantFeatureFlag[]
-  notifications Notification[]
-  billingCustomer BillingCustomer?
-  billingInvoices BillingInvoice[]
-  userSessions UserSession[]
+  trainingEvents              TrainingEvent[]
+  trainingLibraryResources    TrainingLibraryResource[]
+  trainingQuizAttempts        TrainingQuizAttempt[]
+  trainingCertificates        TrainingCertificate[]
+  trainingFavorites           TrainingFavorite[]
+  trainingAnalyticsSnapshots  TrainingAnalyticsSnapshot[]
+  featureFlags                TenantFeatureFlag[]
+  notifications               Notification[]
+  billingCustomer             BillingCustomer?
+  billingInvoices             BillingInvoice[]
+  userSessions                UserSession[]
+  masterWorkflows             MasterWorkflow[]
+  workflowSteps               WorkflowStep[]
+  hiringFlows                 HiringFlow[]
+  onboardingFlows             OnboardingFlow[]
+  onboardingTasks             OnboardingTask[]
+  signaturePackages           SignaturePackage[]
+  signatureParticipants       SignatureParticipant[]
+  inventoryAssignments        InventoryAssignment[]
+  inventoryRecoveries         InventoryRecovery[]
+  workflowTrainingAssignments WorkflowTrainingAssignment[]
+  accessTasks                 AccessTask[]
+  productivityReviews         ProductivityReview[]
+  operationalEvents           OperationalEvent[]
+  workflowBlockers            WorkflowBlocker[]
+  automationRules             AutomationRule[]
+  automationExecutions        AutomationExecution[]
+  automationExecutionSteps    AutomationExecutionStep[]
+  automationAuditLogs         AutomationAuditLog[]
+  policyChecks                PolicyCheck[]
+  assetAssignments            AssetAssignment[]
+  trainingActivations         TrainingActivation[]
 }
 
 model User {
-  id               String           @id @default(uuid())
-  tenantId         String
-  activeBranchId   String?
-  email            String
-  passwordHash     String
-  firstName        String
-  lastName         String
-  status           UserStatus       @default(ACTIVE)
-  isSuperAdmin     Boolean          @default(false)
-  refreshTokenHash String?
-  lastLoginAt      DateTime?
-  lastSeenAt       DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  activeBranch     Branch?          @relation("UserActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
-  userRoles        UserRole[]
-  userPermissions  UserPermission[]
-  auditLogs        AuditLog[]
-  branchAccesses   UserBranchAccess[]
-  createdVacancies Vacancy[]         @relation("VacancyCreatedBy")
-  assignedTrainingAssignments TrainingAssignment[] @relation("TrainingAssignmentsUser")
-  createdTrainingAssignments  TrainingAssignment[] @relation("TrainingAssignmentsAssignedBy")
+  id                          String                      @id @default(uuid())
+  tenantId                    String
+  activeBranchId              String?
+  email                       String
+  passwordHash                String
+  firstName                   String
+  lastName                    String
+  status                      UserStatus                  @default(ACTIVE)
+  isSuperAdmin                Boolean                     @default(false)
+  refreshTokenHash            String?
+  lastLoginAt                 DateTime?
+  lastSeenAt                  DateTime?
+  createdAt                   DateTime                    @default(now())
+  updatedAt                   DateTime                    @updatedAt
+  tenant                      Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  activeBranch                Branch?                     @relation("UserActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
+  userRoles                   UserRole[]
+  userPermissions             UserPermission[]
+  auditLogs                   AuditLog[]
+  branchAccesses              UserBranchAccess[]
+  createdVacancies            Vacancy[]                   @relation("VacancyCreatedBy")
+  assignedTrainingAssignments TrainingAssignment[]        @relation("TrainingAssignmentsUser")
+  createdTrainingAssignments  TrainingAssignment[]        @relation("TrainingAssignmentsAssignedBy")
   trainingProgressRecords     TrainingProgress[]
   trainingStepProgressRecords TrainingStepProgress[]
   trainingEventAttendances    TrainingEventAttendance[]
@@ -280,10 +567,17 @@ model User {
   trainingAnalyticsSnapshots  TrainingAnalyticsSnapshot[]
   notifications               Notification[]
   sessions                    UserSession[]
+  triggeredWorkflows          MasterWorkflow[]            @relation("WorkflowTriggeredBy")
+  operationalEvents           OperationalEvent[]          @relation("OperationalEventActor")
+  productivityReviews         ProductivityReview[]        @relation("ProductivityReviewActor")
+  createdAutomationRules      AutomationRule[]            @relation("AutomationRuleCreatedBy")
+  automationExecutions        AutomationExecution[]       @relation("AutomationExecutionActor")
+  automationAuditLogs         AutomationAuditLog[]        @relation("AutomationAuditActor")
+  policyChecks                PolicyCheck[]               @relation("PolicyCheckCreatedBy")
 
+  @@unique([tenantId, email])
   @@index([activeBranchId])
   @@index([tenantId])
-  @@unique([tenantId, email])
 }
 
 model Role {
@@ -292,6 +586,7 @@ model Role {
   code            String
   name            String
   description     String?
+  scope           AccessScope      @default(TENANT)
   isSystem        Boolean          @default(false)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -299,8 +594,8 @@ model Role {
   userRoles       UserRole[]
   rolePermissions RolePermission[]
 
-  @@index([tenantId])
   @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 model Permission {
@@ -343,16 +638,16 @@ model UserPermission {
 }
 
 model Plan {
-  id            String         @id @default(uuid())
-  code          PlanCode       @unique
-  name          String
-  description   String?
-  priceMonthly  Decimal?       @db.Decimal(10, 2)
-  priceYearly   Decimal?       @db.Decimal(10, 2)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  subscriptions Subscription[]
-  planModules   PlanModule[]
+  id                           String                       @id @default(uuid())
+  code                         PlanCode                     @unique
+  name                         String
+  description                  String?
+  priceMonthly                 Decimal?                     @db.Decimal(10, 2)
+  priceYearly                  Decimal?                     @db.Decimal(10, 2)
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+  subscriptions                Subscription[]
+  planModules                  PlanModule[]
   tenantTrainingModuleAccesses TenantTrainingModuleAccess[]
 }
 
@@ -377,23 +672,23 @@ model PlanModule {
 }
 
 model Subscription {
-  id          String             @id @default(uuid())
-  tenantId    String             @unique
-  planId      String
-  status      SubscriptionStatus @default(ACTIVE)
-  startsAt    DateTime
-  endsAt      DateTime?
-  trialEndsAt DateTime?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  billingProvider BillingProvider?
-  billingExternalId String?
-  billingCustomerId String?
-  currency    String?            @default("USD")
-  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan        Plan               @relation(fields: [planId], references: [id])
+  id                     String                       @id @default(uuid())
+  tenantId               String                       @unique
+  planId                 String
+  status                 SubscriptionStatus           @default(ACTIVE)
+  startsAt               DateTime
+  endsAt                 DateTime?
+  trialEndsAt            DateTime?
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
+  billingProvider        BillingProvider?
+  billingExternalId      String?
+  billingCustomerId      String?
+  currency               String?                      @default("USD")
+  tenant                 Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                   Plan                         @relation(fields: [planId], references: [id])
   trainingModuleAccesses TenantTrainingModuleAccess[]
-  billingInvoices BillingInvoice[]
+  billingInvoices        BillingInvoice[]
 
   @@index([planId])
 }
@@ -413,18 +708,18 @@ model TenantFeatureFlag {
 }
 
 model Notification {
-  id         String           @id @default(uuid())
-  tenantId   String
-  userId     String?
-  type       NotificationType @default(INFO)
-  title      String
-  message    String
-  payload    Json?
-  readAt     DateTime?
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
-  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user       User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id        String           @id @default(uuid())
+  tenantId  String
+  userId    String?
+  type      NotificationType @default(INFO)
+  title     String
+  message   String
+  payload   Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([tenantId, userId, createdAt])
@@ -472,99 +767,538 @@ model BillingInvoice {
 }
 
 model UserSession {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   tenantId         String
   userId           String
   refreshTokenHash String
   userAgent        String?
   ipAddress        String?
   expiresAt        DateTime
-  lastUsedAt       DateTime @default(now())
+  lastUsedAt       DateTime  @default(now())
   revokedAt        DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, userId, createdAt])
   @@index([userId, revokedAt, expiresAt])
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  tenantId   String?
-  branchId   String?
-  userId     String?
-  email      String?
-  route      String
-  method     String
-  statusCode Int
-  ip         String?
-  userAgent  String?
-  action     String?
-  createdAt  DateTime @default(now())
-  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id             String       @id @default(uuid())
+  tenantId       String?
+  actorTenantId  String?
+  targetTenantId String?
+  branchId       String?
+  userId         String?
+  email          String?
+  actorRole      String?
+  actorScope     AccessScope?
+  domain         AuditDomain?
+  entityType     String?
+  entityId       String?
+  before         Json?
+  after          Json?
+  correlationId  String?
+  route          String
+  method         String
+  statusCode     Int
+  ip             String?
+  userAgent      String?
+  action         String?
+  createdAt      DateTime     @default(now())
+  tenant         Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  branch         Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@index([tenantId, createdAt])
+  @@index([actorTenantId, createdAt])
+  @@index([targetTenantId, createdAt])
   @@index([branchId, createdAt])
   @@index([tenantId, branchId, createdAt])
   @@index([userId, createdAt])
+  @@index([actorRole, createdAt])
+  @@index([actorScope, createdAt])
+  @@index([domain, createdAt])
   @@index([email, createdAt])
   @@index([action, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([correlationId, createdAt])
   @@index([route, method, createdAt])
   @@map("audit_logs")
 }
 
-model Branch {
-  id               String           @id @default(uuid())
-  tenantId         String
-  name             String
-  location         String
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeBranches EmployeeBranch[]
-  vacancies        Vacancy[]
-  inventoryStocks  InventoryStock[]
-  userBranchAccesses UserBranchAccess[]
-  activeUsers      User[]           @relation("UserActiveBranch")
-  auditLogs        AuditLog[]
+model MasterWorkflow {
+  id                          String                       @id @default(uuid())
+  tenantId                    String
+  branchId                    String
+  employeeId                  String?
+  candidateId                 String?
+  workflowType                WorkflowType
+  status                      WorkflowStatus               @default(PENDING)
+  progressPercent             Int                          @default(0)
+  currentStage                WorkflowStepType?
+  currentStageKey             WorkflowStageKey?
+  blockersSnapshot            Json?
+  ownerSummary                Json?
+  slaStatus                   WorkflowMasterSlaStatus      @default(ON_TIME)
+  targetDate                  DateTime?
+  lastEventAt                 DateTime?
+  startedAt                   DateTime                     @default(now())
+  completedAt                 DateTime?
+  triggeredByUserId           String
+  sourceModule                WorkflowSourceModule
+  metadata                    Json?
+  lastComputedAt              DateTime?
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  tenant                      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                      Branch                       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  employee                    Employee?                    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  candidate                   Candidate?                   @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  triggeredByUser             User                         @relation("WorkflowTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: Restrict)
+  steps                       WorkflowStep[]
+  hiringFlow                  HiringFlow?
+  onboardingFlow              OnboardingFlow?
+  signaturePackages           SignaturePackage[]
+  inventoryAssignments        InventoryAssignment[]
+  inventoryRecoveries         InventoryRecovery[]
+  workflowTrainingAssignments WorkflowTrainingAssignment[]
+  accessTasks                 AccessTask[]
+  productivityReviews         ProductivityReview[]
+  operationalEvents           OperationalEvent[]
+  onboardingTasks             OnboardingTask[]
+  blockers                    WorkflowBlocker[]
+  automationExecutions        AutomationExecution[]
+  automationAuditLogs         AutomationAuditLog[]
+  policyChecks                PolicyCheck[]
+  assetAssignments            AssetAssignment[]
+  trainingActivations         TrainingActivation[]
 
-  @@index([tenantId])
+  @@index([tenantId, branchId])
+  @@index([tenantId, workflowType, status])
+  @@index([tenantId, employeeId])
+  @@index([tenantId, candidateId])
+  @@index([tenantId, currentStageKey])
+  @@index([tenantId, branchId, slaStatus])
+}
+
+model WorkflowStep {
+  id              String             @id @default(uuid())
+  tenantId        String
+  branchId        String
+  workflowId      String
+  stageKey        WorkflowStageKey?
+  stepType        WorkflowStepType
+  title           String?
+  detail          String?
+  status          WorkflowTaskStatus @default(PENDING)
+  progressPercent Int                @default(0)
+  ownerType       WorkflowOwnerType  @default(SYSTEM)
+  ownerId         String?
+  ownerLabel      String?
+  slaLabel        String?
+  dueDate         DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  riskStatus      WorkflowRiskStatus @default(ON_TIME)
+  blockingReason  String?
+  metadata        Json?
+  isCritical      Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow        MasterWorkflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, stageKey])
+  @@index([tenantId, branchId, status])
+  @@index([workflowId, stepType])
+  @@index([workflowId, stageKey])
+  @@index([tenantId, riskStatus, dueDate])
+}
+
+model HiringFlow {
+  id            String              @id @default(uuid())
+  tenantId      String
+  branchId      String
+  workflowId    String              @unique
+  candidateId   String
+  employeeId    String?
+  applicationId String?
+  status        WorkflowTaskStatus  @default(PENDING)
+  hiredAt       DateTime?
+  metadata      Json?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow      MasterWorkflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  candidate     Candidate           @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  employee      Employee?           @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  application   VacancyApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, branchId, status])
+  @@index([candidateId])
+  @@index([employeeId])
+}
+
+model OnboardingFlow {
+  id              String             @id @default(uuid())
+  tenantId        String
+  branchId        String
+  workflowId      String             @unique
+  employeeId      String
+  candidateId     String?
+  status          WorkflowTaskStatus @default(PENDING)
+  readinessStatus String?
+  startedAt       DateTime           @default(now())
+  completedAt     DateTime?
+  metadata        Json?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow        MasterWorkflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee        Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  candidate       Candidate?         @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  tasks           OnboardingTask[]
+
+  @@index([tenantId, branchId, status])
+  @@index([employeeId])
+}
+
+model OnboardingTask {
+  id               String             @id @default(uuid())
+  tenantId         String
+  branchId         String
+  workflowId       String
+  onboardingFlowId String
+  employeeId       String
+  taskType         OnboardingTaskType
+  title            String
+  status           WorkflowTaskStatus @default(PENDING)
+  progressPercent  Int                @default(0)
+  dueDate          DateTime?
+  completedAt      DateTime?
+  ownerType        WorkflowOwnerType  @default(SYSTEM)
+  ownerId          String?
+  blockingReason   String?
+  metadata         Json?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow         MasterWorkflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  onboardingFlow   OnboardingFlow     @relation(fields: [onboardingFlowId], references: [id], onDelete: Cascade)
+  employee         Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, status])
+  @@index([workflowId, taskType])
+}
+
+model SignaturePackage {
+  id                String                 @id @default(uuid())
+  tenantId          String
+  branchId          String
+  workflowId        String
+  employeeId        String?
+  status            SignaturePackageStatus @default(PENDING)
+  title             String
+  externalProvider  String?
+  externalPackageId String?
+  signedAt          DateTime?
+  metadata          Json?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch                 @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow          MasterWorkflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee          Employee?              @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  participants      SignatureParticipant[]
+
+  @@index([tenantId, branchId, status])
+  @@index([workflowId])
+}
+
+model SignatureParticipant {
+  id               String                     @id @default(uuid())
+  tenantId         String
+  packageId        String
+  email            String
+  fullName         String
+  roleLabel        String?
+  status           SignatureParticipantStatus @default(PENDING)
+  signedAt         DateTime?
+  metadata         Json?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  tenant           Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  signaturePackage SignaturePackage           @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([packageId])
+}
+
+model InventoryAssignment {
+  id               String                    @id @default(uuid())
+  tenantId         String
+  branchId         String
+  workflowId       String
+  employeeId       String
+  itemId           String?
+  status           InventoryAssignmentStatus @default(PENDING)
+  quantity         Int                       @default(1)
+  assignedAt       DateTime?
+  dueDate          DateTime?
+  metadata         Json?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  tenant           Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch                    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow         MasterWorkflow            @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee         Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  item             InventoryItem?            @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  assetAssignments AssetAssignment[]
+
+  @@index([tenantId, branchId, status])
+  @@index([workflowId])
+  @@index([employeeId])
+}
+
+model InventoryRecovery {
+  id          String                  @id @default(uuid())
+  tenantId    String
+  branchId    String
+  workflowId  String
+  employeeId  String
+  itemId      String?
+  status      InventoryRecoveryStatus @default(PENDING)
+  requestedAt DateTime                @default(now())
+  recoveredAt DateTime?
+  dueDate     DateTime?
+  metadata    Json?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch                  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow    MasterWorkflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee    Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  item        InventoryItem?          @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, branchId, status])
+  @@index([workflowId])
+  @@index([employeeId])
+}
+
+model WorkflowTrainingAssignment {
+  id                  String               @id @default(uuid())
+  tenantId            String
+  branchId            String
+  workflowId          String
+  employeeId          String
+  courseId            String?
+  curriculumId        String?
+  status              WorkflowTaskStatus   @default(PENDING)
+  progressPercent     Int                  @default(0)
+  activatedAt         DateTime?
+  completedAt         DateTime?
+  dueDate             DateTime?
+  metadata            Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch              Branch               @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow            MasterWorkflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee            Employee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  course              TrainingCourse?      @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  curriculum          TrainingCurriculum?  @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+  trainingActivations TrainingActivation[]
+
+  @@index([tenantId, branchId, status])
+  @@index([workflowId])
+  @@index([employeeId])
+}
+
+model AccessTask {
+  id          String           @id @default(uuid())
+  tenantId    String
+  branchId    String
+  workflowId  String
+  employeeId  String
+  taskType    AccessTaskType
+  status      AccessTaskStatus @default(PENDING)
+  requestedAt DateTime         @default(now())
+  completedAt DateTime?
+  dueDate     DateTime?
+  permissions Json?
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow    MasterWorkflow   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee    Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, status])
+  @@index([workflowId, taskType])
+  @@index([employeeId])
+}
+
+model ProductivityReview {
+  id              String                   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  workflowId      String
+  employeeId      String
+  createdByUserId String?
+  reviewType      ProductivityReviewType
+  status          ProductivityReviewStatus @default(PENDING)
+  scheduledAt     DateTime?
+  completedAt     DateTime?
+  notes           String?
+  metadata        Json?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch                   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow        MasterWorkflow           @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee        Employee                 @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdByUser   User?                    @relation("ProductivityReviewActor", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, branchId, status])
+  @@index([workflowId])
+  @@index([employeeId])
+}
+
+model OperationalEvent {
+  id            String               @id @default(uuid())
+  tenantId      String
+  branchId      String
+  workflowId    String
+  actorUserId   String?
+  eventType     OperationalEventType
+  title         String?
+  description   String?
+  payload       Json?
+  correlationId String?
+  occurredAt    DateTime             @default(now())
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch               @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow      MasterWorkflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  actorUser     User?                @relation("OperationalEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, branchId, eventType])
+  @@index([workflowId, occurredAt])
+  @@index([correlationId, occurredAt])
+}
+
+model WorkflowBlocker {
+  id         String                  @id @default(uuid())
+  tenantId   String
+  branchId   String
+  workflowId String
+  stepKey    WorkflowStageKey
+  message    String
+  severity   WorkflowBlockerSeverity @default(MEDIUM)
+  resolvedAt DateTime?
+  metadata   Json?
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+  tenant     Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch     Branch                  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow   MasterWorkflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, resolvedAt])
+  @@index([workflowId, stepKey, resolvedAt])
+}
+
+model Branch {
+  id                          String                       @id @default(uuid())
+  tenantId                    String
+  name                        String
+  location                    String
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  tenant                      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeBranches            EmployeeBranch[]
+  vacancies                   Vacancy[]
+  inventoryStocks             InventoryStock[]
+  userBranchAccesses          UserBranchAccess[]
+  activeUsers                 User[]                       @relation("UserActiveBranch")
+  auditLogs                   AuditLog[]
+  masterWorkflows             MasterWorkflow[]
+  workflowSteps               WorkflowStep[]
+  hiringFlows                 HiringFlow[]
+  onboardingFlows             OnboardingFlow[]
+  onboardingTasks             OnboardingTask[]
+  signaturePackages           SignaturePackage[]
+  inventoryAssignments        InventoryAssignment[]
+  inventoryRecoveries         InventoryRecovery[]
+  workflowTrainingAssignments WorkflowTrainingAssignment[]
+  accessTasks                 AccessTask[]
+  productivityReviews         ProductivityReview[]
+  operationalEvents           OperationalEvent[]
+  WorkflowBlocker             WorkflowBlocker[]
+  automationRules             AutomationRule[]
+  automationExecutions        AutomationExecution[]
+  automationExecutionSteps    AutomationExecutionStep[]
+  automationAuditLogs         AutomationAuditLog[]
+  policyChecks                PolicyCheck[]
+  assetAssignments            AssetAssignment[]
+  trainingActivations         TrainingActivation[]
+
   @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model Employee {
-  id               String           @id @default(uuid())
-  tenantId         String
-  name             String
-  email            String
-  status           EmployeeStatus   @default(ACTIVE)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchAssignments EmployeeBranch[]
+  id                          String                       @id @default(uuid())
+  tenantId                    String
+  name                        String
+  email                       String
+  status                      EmployeeStatus               @default(ACTIVE)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  tenant                      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchAssignments           EmployeeBranch[]
+  masterWorkflows             MasterWorkflow[]
+  hiringFlows                 HiringFlow[]
+  onboardingFlows             OnboardingFlow[]
+  onboardingTasks             OnboardingTask[]
+  signaturePackages           SignaturePackage[]
+  inventoryAssignments        InventoryAssignment[]
+  inventoryRecoveries         InventoryRecovery[]
+  workflowTrainingAssignments WorkflowTrainingAssignment[]
+  accessTasks                 AccessTask[]
+  productivityReviews         ProductivityReview[]
+  automationExecutions        AutomationExecution[]
+  automationAuditLogs         AutomationAuditLog[]
+  policyChecks                PolicyCheck[]
+  assetAssignments            AssetAssignment[]
+  trainingActivations         TrainingActivation[]
 
+  @@unique([tenantId, email])
   @@index([tenantId])
   @@index([tenantId, status])
-  @@unique([tenantId, email])
 }
 
 model EmployeeBranch {
-  id          String    @id @default(uuid())
-  tenantId    String
-  employeeId  String
-  branchId    String
-  role        String
-  isPrimary   Boolean   @default(false)
-  assignedAt  DateTime  @default(now())
-  releasedAt  DateTime?
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  branch      Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  tenantId   String
+  employeeId String
+  branchId   String
+  role       String
+  isPrimary  Boolean   @default(false)
+  assignedAt DateTime  @default(now())
+  releasedAt DateTime?
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branch     Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, employeeId])
   @@index([tenantId, branchId])
@@ -573,35 +1307,38 @@ model EmployeeBranch {
 }
 
 model InventoryItem {
-  id          String           @id @default(uuid())
-  tenantId    String
-  sku         String
-  name        String
-  qtyGlobal   Int              @default(0)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  stocks      InventoryStock[]
+  id                   String                @id @default(uuid())
+  tenantId             String
+  sku                  String
+  name                 String
+  qtyGlobal            Int                   @default(0)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stocks               InventoryStock[]
+  inventoryAssignments InventoryAssignment[]
+  inventoryRecoveries  InventoryRecovery[]
+  assetAssignments     AssetAssignment[]
 
-  @@index([tenantId])
   @@unique([tenantId, sku])
+  @@index([tenantId])
 }
 
 model InventoryStock {
-  id         String         @id @default(uuid())
-  tenantId   String
-  itemId     String
-  branchId   String
-  qtyLocal   Int            @default(0)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
-  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  item       InventoryItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  branch     Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  id        String        @id @default(uuid())
+  tenantId  String
+  itemId    String
+  branchId  String
+  qtyLocal  Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  branch    Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
+  @@unique([itemId, branchId])
   @@index([tenantId, branchId])
   @@index([tenantId, itemId])
-  @@unique([itemId, branchId])
 }
 
 model UserBranchAccess {
@@ -616,35 +1353,35 @@ model UserBranchAccess {
 }
 
 model Vacancy {
-  id             String                @id @default(uuid())
-  tenantId       String
-  branchId       String
-  createdByUserId String?
-  title          String
-  summary        String?
-  description    String?
-  requirements   String?
-  responsibilities String?
-  benefits       String?
-  city           String?
-  country        String?
-  department     String?
-  seniority      String?
-  workMode       VacancyWorkMode       @default(ON_SITE)
-  employmentType VacancyEmploymentType @default(FULL_TIME)
-  openings       Int                   @default(1)
-  salaryMin      Int?
-  salaryMax      Int?
-  currency       String?               @default("COP")
-  imageUrl       String?
+  id                    String                @id @default(uuid())
+  tenantId              String
+  branchId              String
+  createdByUserId       String?
+  title                 String
+  summary               String?
+  description           String?
+  requirements          String?
+  responsibilities      String?
+  benefits              String?
+  city                  String?
+  country               String?
+  department            String?
+  seniority             String?
+  workMode              VacancyWorkMode       @default(ON_SITE)
+  employmentType        VacancyEmploymentType @default(FULL_TIME)
+  openings              Int                   @default(1)
+  salaryMin             Int?
+  salaryMax             Int?
+  currency              String?               @default("COP")
+  imageUrl              String?
   applicationFormSchema Json?
-  status         VacancyStatus         @default(OPEN)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch         Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  createdByUser  User?                 @relation("VacancyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  applications   VacancyApplication[]
+  status                VacancyStatus         @default(OPEN)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdByUser         User?                 @relation("VacancyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  applications          VacancyApplication[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
@@ -653,63 +1390,267 @@ model Vacancy {
 }
 
 model VacancyFormTemplate {
-  id         String   @id @default(uuid())
-  tenantId   String
-  name       String
-  roleTitle  String?
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  roleTitle   String?
   description String?
-  schema     Json
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  schema      Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId])
   @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model Candidate {
-  id            String               @id @default(uuid())
-  fullName      String
-  email         String               @unique
-  phone         String?
-  city          String?
-  linkedinUrl   String?
-  portfolioUrl  String?
-  resumeUrl     String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  applications  VacancyApplication[]
+  id                   String                @id @default(uuid())
+  tenantId             String
+  fullName             String
+  email                String
+  phone                String?
+  city                 String?
+  linkedinUrl          String?
+  portfolioUrl         String?
+  resumeUrl            String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  applications         VacancyApplication[]
+  masterWorkflows      MasterWorkflow[]
+  hiringFlows          HiringFlow[]
+  onboardingFlows      OnboardingFlow[]
+  automationExecutions AutomationExecution[]
+  automationAuditLogs  AutomationAuditLog[]
 
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+model AutomationRule {
+  id            String                 @id @default(uuid())
+  tenantId      String
+  branchId      String?
+  name          String
+  triggerEvent  AutomationTriggerEvent
+  scope         AutomationScope        @default(TENANT)
+  conditions    Json?
+  enabled       Boolean                @default(true)
+  version       Int                    @default(1)
+  consequences  Json
+  createdBy     String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdByUser User?                  @relation("AutomationRuleCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  executions    AutomationExecution[]
+  auditLogs     AutomationAuditLog[]
+
+  @@index([tenantId, enabled, triggerEvent])
+  @@index([tenantId, branchId, enabled])
+}
+
+model AutomationExecution {
+  id           String                    @id @default(uuid())
+  tenantId     String
+  branchId     String?
+  ruleId       String
+  workflowId   String?
+  employeeId   String?
+  candidateId  String?
+  actorUserId  String?
+  triggerEvent AutomationTriggerEvent
+  status       AutomationExecutionStatus @default(PENDING)
+  result       String?
+  detail       Json?
+  startedAt    DateTime                  @default(now())
+  completedAt  DateTime?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  tenant       Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch?                   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  rule         AutomationRule            @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  workflow     MasterWorkflow?           @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  employee     Employee?                 @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  candidate    Candidate?                @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  actorUser    User?                     @relation("AutomationExecutionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  steps        AutomationExecutionStep[]
+  auditLogs    AutomationAuditLog[]
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, branchId, createdAt])
+  @@index([tenantId, triggerEvent, status])
+  @@index([workflowId, createdAt])
+  @@index([employeeId, createdAt])
+}
+
+model AutomationExecutionStep {
+  id          String                    @id @default(uuid())
+  tenantId    String
+  branchId    String?
+  executionId String
+  consequence AutomationConsequenceType
+  status      AutomationStepStatus      @default(PENDING)
+  result      String?
+  detail      Json?
+  startedAt   DateTime                  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch?                   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  execution   AutomationExecution       @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, branchId, createdAt])
+  @@index([executionId, createdAt])
+}
+
+model AutomationAuditLog {
+  id          String                @id @default(uuid())
+  tenantId    String
+  branchId    String?
+  employeeId  String?
+  candidateId String?
+  workflowId  String?
+  ruleId      String?
+  executionId String?
+  actorUserId String?
+  eventName   String
+  action      String
+  status      AutomationAuditStatus
+  summary     String
+  payload     Json?
+  occurredAt  DateTime              @default(now())
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  employee    Employee?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  candidate   Candidate?            @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  workflow    MasterWorkflow?       @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  rule        AutomationRule?       @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  execution   AutomationExecution?  @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  actorUser   User?                 @relation("AutomationAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, branchId, occurredAt])
+  @@index([executionId, occurredAt])
+  @@index([workflowId, occurredAt])
+}
+
+model PolicyCheck {
+  id            String            @id @default(uuid())
+  tenantId      String
+  branchId      String?
+  workflowId    String?
+  employeeId    String?
+  name          String
+  policyCode    String
+  status        PolicyCheckStatus @default(PENDING)
+  result        String?
+  detail        Json?
+  dueDate       DateTime?
+  checkedAt     DateTime?
+  createdBy     String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  workflow      MasterWorkflow?   @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  employee      Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  createdByUser User?             @relation("PolicyCheckCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, createdAt])
+  @@index([workflowId, createdAt])
+  @@index([employeeId, createdAt])
+}
+
+model AssetAssignment {
+  id                    String                @id @default(uuid())
+  tenantId              String
+  branchId              String?
+  workflowId            String?
+  employeeId            String?
+  inventoryAssignmentId String?
+  itemId                String?
+  status                AssetAssignmentStatus @default(PENDING)
+  assignedByUserId      String?
+  assignedAt            DateTime?
+  detail                Json?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  workflow              MasterWorkflow?       @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  employee              Employee?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  inventoryAssignment   InventoryAssignment?  @relation(fields: [inventoryAssignmentId], references: [id], onDelete: SetNull)
+  item                  InventoryItem?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, createdAt])
+  @@index([workflowId, createdAt])
+  @@index([employeeId, createdAt])
+}
+
+model TrainingActivation {
+  id                           String                      @id @default(uuid())
+  tenantId                     String
+  branchId                     String?
+  workflowId                   String?
+  employeeId                   String?
+  workflowTrainingAssignmentId String?
+  courseId                     String?
+  curriculumId                 String?
+  status                       TrainingActivationStatus    @default(PENDING)
+  activatedAt                  DateTime?
+  completedAt                  DateTime?
+  detail                       Json?
+  createdAt                    DateTime                    @default(now())
+  updatedAt                    DateTime                    @updatedAt
+  tenant                       Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                       Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  workflow                     MasterWorkflow?             @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  employee                     Employee?                   @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  workflowTrainingAssignment   WorkflowTrainingAssignment? @relation(fields: [workflowTrainingAssignmentId], references: [id], onDelete: SetNull)
+  course                       TrainingCourse?             @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  curriculum                   TrainingCurriculum?         @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, createdAt])
+  @@index([workflowId, createdAt])
+  @@index([employeeId, createdAt])
 }
 
 model VacancyApplication {
-  id                     String                       @id @default(uuid())
-  tenantId               String
-  vacancyId              String
-  candidateId            String
-  status                 ApplicationStatus            @default(SUBMITTED)
-  coverLetter            String?
-  dynamicResponses       Json?
-  notes                  String?
-  interviewType          InterviewType?
-  interviewScheduledAt   DateTime?
-  interviewFollowUpAt    DateTime?
-  interviewObservations  String?
-  contactedAt            DateTime?
-  interviewCompletedAt   DateTime?
-  appliedAt              DateTime                     @default(now())
-  reviewedAt             DateTime?
-  createdAt              DateTime                     @default(now())
-  updatedAt              DateTime                     @updatedAt
-  tenant                 Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  vacancy                Vacancy                      @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-  candidate              Candidate                    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  timelineEvents         ApplicationTimelineEvent[]
+  id                    String                     @id @default(uuid())
+  tenantId              String
+  vacancyId             String
+  candidateId           String
+  status                ApplicationStatus          @default(SUBMITTED)
+  coverLetter           String?
+  dynamicResponses      Json?
+  notes                 String?
+  interviewType         InterviewType?
+  interviewScheduledAt  DateTime?
+  interviewFollowUpAt   DateTime?
+  interviewObservations String?
+  contactedAt           DateTime?
+  interviewCompletedAt  DateTime?
+  appliedAt             DateTime                   @default(now())
+  reviewedAt            DateTime?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy               Vacancy                    @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  candidate             Candidate                  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  timelineEvents        ApplicationTimelineEvent[]
+  hiringFlows           HiringFlow[]
 
+  @@unique([vacancyId, candidateId])
   @@index([tenantId, status])
   @@index([tenantId, vacancyId])
   @@index([candidateId])
-  @@unique([vacancyId, candidateId])
 }
 
 model ApplicationTimelineEvent {
@@ -728,114 +1669,118 @@ model ApplicationTimelineEvent {
 }
 
 model TenantTrainingModuleAccess {
-  id             String       @id @default(uuid())
+  id             String        @id @default(uuid())
   tenantId       String
   subscriptionId String?
   planId         String?
-  enabled        Boolean      @default(false)
+  enabled        Boolean       @default(false)
   enabledAt      DateTime?
   disabledAt     DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  plan           Plan?        @relation(fields: [planId], references: [id], onDelete: SetNull)
+  plan           Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId])
   @@index([tenantId, enabled])
   @@index([subscriptionId])
   @@index([planId])
-  @@unique([tenantId])
 }
 
 model TrainingCategory {
-  id               String             @id @default(uuid())
+  id               String                    @id @default(uuid())
   tenantId         String?
   name             String
   slug             String
   description      String?
   parentCategoryId String?
-  sortOrder        Int                @default(0)
-  isActive         Boolean            @default(true)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  tenant           Tenant?            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  parentCategory   TrainingCategory?  @relation("TrainingCategoryTree", fields: [parentCategoryId], references: [id], onDelete: SetNull)
-  childCategories  TrainingCategory[] @relation("TrainingCategoryTree")
+  sortOrder        Int                       @default(0)
+  isActive         Boolean                   @default(true)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  tenant           Tenant?                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parentCategory   TrainingCategory?         @relation("TrainingCategoryTree", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  childCategories  TrainingCategory[]        @relation("TrainingCategoryTree")
   curriculums      TrainingCurriculum[]
   courses          TrainingCourse[]
   libraryResources TrainingLibraryResource[]
 
+  @@unique([tenantId, slug])
   @@index([tenantId, isActive])
   @@index([parentCategoryId])
-  @@unique([tenantId, slug])
 }
 
 model TrainingCurriculum {
-  id               String                @id @default(uuid())
-  tenantId         String?
-  categoryId       String?
-  title            String
-  slug             String
-  description      String?
-  coverImageUrl    String?
-  objective        String?
-  targetAudience   String?
-  estimatedMinutes Int                  @default(0)
-  difficulty       TrainingDifficulty   @default(BEGINNER)
-  isPublished      Boolean              @default(false)
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  tenant           Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category         TrainingCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  courses          TrainingCourse[]
-  assignments      TrainingAssignment[]
-  progressRecords  TrainingProgress[]
-  events           TrainingEvent[]
-  certificates     TrainingCertificate[]
-  favorites        TrainingFavorite[]
+  id                          String                       @id @default(uuid())
+  tenantId                    String?
+  categoryId                  String?
+  title                       String
+  slug                        String
+  description                 String?
+  coverImageUrl               String?
+  objective                   String?
+  targetAudience              String?
+  estimatedMinutes            Int                          @default(0)
+  difficulty                  TrainingDifficulty           @default(BEGINNER)
+  isPublished                 Boolean                      @default(false)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  tenant                      Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category                    TrainingCategory?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  courses                     TrainingCourse[]
+  assignments                 TrainingAssignment[]
+  progressRecords             TrainingProgress[]
+  events                      TrainingEvent[]
+  certificates                TrainingCertificate[]
+  favorites                   TrainingFavorite[]
+  workflowTrainingAssignments WorkflowTrainingAssignment[]
+  TrainingActivation          TrainingActivation[]
 
+  @@unique([tenantId, slug])
   @@index([tenantId, isPublished])
   @@index([categoryId])
-  @@unique([tenantId, slug])
 }
 
 model TrainingCourse {
-  id               String               @id @default(uuid())
-  tenantId         String?
-  curriculumId     String?
-  categoryId       String?
-  title            String
-  slug             String
-  summary          String?
-  description      String?
-  coverImageUrl    String?
-  type             TrainingCourseType
-  resourceType     TrainingResourceType
-  resourceUrl      String?
-  estimatedMinutes Int                 @default(0)
-  difficulty       TrainingDifficulty  @default(BEGINNER)
-  points           Int?
-  isRequired       Boolean             @default(false)
-  isPublished      Boolean             @default(false)
-  tags             String[]
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  tenant           Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  curriculum       TrainingCurriculum? @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
-  category         TrainingCategory?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  steps            TrainingCourseStep[]
-  assignments      TrainingAssignment[]
-  progressRecords  TrainingProgress[]
-  events           TrainingEvent[]
-  quizzes          TrainingQuiz[]
-  certificates     TrainingCertificate[]
-  favorites        TrainingFavorite[]
+  id                          String                       @id @default(uuid())
+  tenantId                    String?
+  curriculumId                String?
+  categoryId                  String?
+  title                       String
+  slug                        String
+  summary                     String?
+  description                 String?
+  coverImageUrl               String?
+  type                        TrainingCourseType
+  resourceType                TrainingResourceType
+  resourceUrl                 String?
+  estimatedMinutes            Int                          @default(0)
+  difficulty                  TrainingDifficulty           @default(BEGINNER)
+  points                      Int?
+  isRequired                  Boolean                      @default(false)
+  isPublished                 Boolean                      @default(false)
+  tags                        String[]
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  tenant                      Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  curriculum                  TrainingCurriculum?          @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+  category                    TrainingCategory?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  steps                       TrainingCourseStep[]
+  assignments                 TrainingAssignment[]
+  progressRecords             TrainingProgress[]
+  events                      TrainingEvent[]
+  quizzes                     TrainingQuiz[]
+  certificates                TrainingCertificate[]
+  favorites                   TrainingFavorite[]
+  workflowTrainingAssignments WorkflowTrainingAssignment[]
+  TrainingActivation          TrainingActivation[]
 
+  @@unique([tenantId, slug])
   @@index([tenantId, isPublished])
   @@index([curriculumId])
   @@index([categoryId])
   @@index([type])
-  @@unique([tenantId, slug])
 }
 
 model TrainingCourseStep {
@@ -857,56 +1802,56 @@ model TrainingCourseStep {
 }
 
 model TrainingAssignment {
-  id             String                     @id @default(uuid())
-  tenantId       String
-  userId         String
-  curriculumId   String?
-  courseId       String?
-  assignedById   String?
-  assignmentType TrainingAssignmentType
-  sourceType     TrainingAssignmentSourceType
-  dueAt          DateTime?
-  startAt        DateTime?
-  completedAt    DateTime?
-  progressPercent Int                      @default(0)
-  status         TrainingProgressStatus    @default(NOT_STARTED)
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
-  tenant         Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user           User                      @relation("TrainingAssignmentsUser", fields: [userId], references: [id], onDelete: Cascade)
-  curriculum     TrainingCurriculum?       @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
-  course         TrainingCourse?           @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  assignedBy     User?                     @relation("TrainingAssignmentsAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
-
-  @@index([tenantId, userId, status])
-  @@index([tenantId, dueAt])
-  @@index([tenantId, startAt])
-  @@unique([tenantId, userId, curriculumId])
-  @@unique([tenantId, userId, courseId])
-}
-
-model TrainingProgress {
-  id              String                  @id @default(uuid())
+  id              String                       @id @default(uuid())
   tenantId        String
   userId          String
   curriculumId    String?
   courseId        String?
-  progressPercent Int                     @default(0)
+  assignedById    String?
+  assignmentType  TrainingAssignmentType
+  sourceType      TrainingAssignmentSourceType
+  dueAt           DateTime?
+  startAt         DateTime?
+  completedAt     DateTime?
+  progressPercent Int                          @default(0)
+  status          TrainingProgressStatus       @default(NOT_STARTED)
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  tenant          Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user            User                         @relation("TrainingAssignmentsUser", fields: [userId], references: [id], onDelete: Cascade)
+  curriculum      TrainingCurriculum?          @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  course          TrainingCourse?              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assignedBy      User?                        @relation("TrainingAssignmentsAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, userId, curriculumId])
+  @@unique([tenantId, userId, courseId])
+  @@index([tenantId, userId, status])
+  @@index([tenantId, dueAt])
+  @@index([tenantId, startAt])
+}
+
+model TrainingProgress {
+  id              String                 @id @default(uuid())
+  tenantId        String
+  userId          String
+  curriculumId    String?
+  courseId        String?
+  progressPercent Int                    @default(0)
   startedAt       DateTime?
   lastActivityAt  DateTime?
   completedAt     DateTime?
-  status          TrainingProgressStatus  @default(NOT_STARTED)
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
-  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  curriculum      TrainingCurriculum?     @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
-  course          TrainingCourse?         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  status          TrainingProgressStatus @default(NOT_STARTED)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  curriculum      TrainingCurriculum?    @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  course          TrainingCourse?        @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId, userId, status])
-  @@index([tenantId, lastActivityAt])
   @@unique([tenantId, userId, curriculumId])
   @@unique([tenantId, userId, courseId])
+  @@index([tenantId, userId, status])
+  @@index([tenantId, lastActivityAt])
 }
 
 model TrainingStepProgress {
@@ -924,28 +1869,28 @@ model TrainingStepProgress {
   user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   courseStep       TrainingCourseStep @relation(fields: [courseStepId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId, userId])
   @@unique([userId, courseStepId])
+  @@index([tenantId, userId])
 }
 
 model TrainingEvent {
-  id                 String                 @id @default(uuid())
-  tenantId           String
-  title              String
-  description        String?
-  startsAt           DateTime
-  endsAt             DateTime?
-  location           String?
-  modality           TrainingEventModality
-  relatedCourseId    String?
+  id                  String                    @id @default(uuid())
+  tenantId            String
+  title               String
+  description         String?
+  startsAt            DateTime
+  endsAt              DateTime?
+  location            String?
+  modality            TrainingEventModality
+  relatedCourseId     String?
   relatedCurriculumId String?
-  capacity           Int?
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
-  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  relatedCourse      TrainingCourse?        @relation(fields: [relatedCourseId], references: [id], onDelete: SetNull)
-  relatedCurriculum  TrainingCurriculum?    @relation(fields: [relatedCurriculumId], references: [id], onDelete: SetNull)
-  attendances        TrainingEventAttendance[]
+  capacity            Int?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relatedCourse       TrainingCourse?           @relation(fields: [relatedCourseId], references: [id], onDelete: SetNull)
+  relatedCurriculum   TrainingCurriculum?       @relation(fields: [relatedCurriculumId], references: [id], onDelete: SetNull)
+  attendances         TrainingEventAttendance[]
 
   @@index([tenantId, startsAt])
   @@index([relatedCourseId])
@@ -954,7 +1899,7 @@ model TrainingEvent {
 
 model TrainingEventAttendance {
   id           String                        @id @default(uuid())
-  eventId       String
+  eventId      String
   userId       String
   status       TrainingEventAttendanceStatus @default(INVITED)
   registeredAt DateTime?
@@ -965,52 +1910,52 @@ model TrainingEventAttendance {
   event        TrainingEvent                 @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user         User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([eventId, status])
   @@unique([eventId, userId])
+  @@index([eventId, status])
 }
 
 model TrainingLibraryResource {
-  id               String               @id @default(uuid())
-  tenantId         String?
-  categoryId       String?
-  title            String
-  slug             String
-  description      String?
-  resourceType     TrainingResourceType
-  fileUrl          String?
-  thumbnailUrl     String?
-  externalUrl      String?
-  mimeType         String?
-  sizeBytes        Int?
-  durationSeconds  Int?
-  language         String?
-  tags             String[]
-  isFeatured       Boolean              @default(false)
-  isPublished      Boolean              @default(false)
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  tenant           Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category         TrainingCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  favorites        TrainingFavorite[]
+  id              String               @id @default(uuid())
+  tenantId        String?
+  categoryId      String?
+  title           String
+  slug            String
+  description     String?
+  resourceType    TrainingResourceType
+  fileUrl         String?
+  thumbnailUrl    String?
+  externalUrl     String?
+  mimeType        String?
+  sizeBytes       Int?
+  durationSeconds Int?
+  language        String?
+  tags            String[]
+  isFeatured      Boolean              @default(false)
+  isPublished     Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  tenant          Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category        TrainingCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  favorites       TrainingFavorite[]
 
+  @@unique([tenantId, slug])
   @@index([tenantId, isPublished])
   @@index([tenantId, isFeatured])
   @@index([categoryId])
-  @@unique([tenantId, slug])
 }
 
 model TrainingQuiz {
-  id               String               @id @default(uuid())
+  id               String                 @id @default(uuid())
   courseId         String
   title            String
   description      String?
   passingScore     Int
   maxAttempts      Int?
   timeLimitMinutes Int?
-  shuffleQuestions Boolean              @default(false)
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  course           TrainingCourse       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  shuffleQuestions Boolean                @default(false)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  course           TrainingCourse         @relation(fields: [courseId], references: [id], onDelete: Cascade)
   questions        TrainingQuizQuestion[]
   attempts         TrainingQuizAttempt[]
 
@@ -1019,7 +1964,7 @@ model TrainingQuiz {
 
 model TrainingQuizQuestion {
   id           String                   @id @default(uuid())
-  quizId        String
+  quizId       String
   prompt       String
   questionType TrainingQuizQuestionType
   sortOrder    Int                      @default(0)
@@ -1034,21 +1979,21 @@ model TrainingQuizQuestion {
 }
 
 model TrainingQuizOption {
-  id         String                @id @default(uuid())
+  id         String               @id @default(uuid())
   questionId String
   label      String
-  isCorrect  Boolean               @default(false)
-  sortOrder  Int                   @default(0)
-  createdAt  DateTime              @default(now())
-  updatedAt  DateTime              @updatedAt
-  question   TrainingQuizQuestion  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  isCorrect  Boolean              @default(false)
+  sortOrder  Int                  @default(0)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  question   TrainingQuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
   answers    TrainingQuizAnswer[]
 
   @@index([questionId, sortOrder])
 }
 
 model TrainingQuizAttempt {
-  id          String                   @id @default(uuid())
+  id          String                    @id @default(uuid())
   tenantId    String
   userId      String
   quizId      String
@@ -1057,11 +2002,11 @@ model TrainingQuizAttempt {
   score       Int?
   passed      Boolean?
   status      TrainingQuizAttemptStatus @default(IN_PROGRESS)
-  createdAt   DateTime                 @default(now())
-  updatedAt   DateTime                 @updatedAt
-  tenant      Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user        User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  quiz        TrainingQuiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quiz        TrainingQuiz              @relation(fields: [quizId], references: [id], onDelete: Cascade)
   answers     TrainingQuizAnswer[]
 
   @@index([tenantId, userId, status])
@@ -1069,41 +2014,41 @@ model TrainingQuizAttempt {
 }
 
 model TrainingQuizAnswer {
-  id         String                @id @default(uuid())
-  attemptId   String
+  id         String               @id @default(uuid())
+  attemptId  String
   questionId String
-  optionId    String?
+  optionId   String?
   textAnswer String?
   isCorrect  Boolean?
-  createdAt  DateTime              @default(now())
-  updatedAt  DateTime              @updatedAt
-  attempt    TrainingQuizAttempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  question   TrainingQuizQuestion  @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  option     TrainingQuizOption?   @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  attempt    TrainingQuizAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   TrainingQuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  option     TrainingQuizOption?  @relation(fields: [optionId], references: [id], onDelete: SetNull)
 
-  @@index([attemptId])
   @@unique([attemptId, questionId])
+  @@index([attemptId])
 }
 
 model TrainingCertificate {
-  id            String              @id @default(uuid())
-  tenantId      String
-  userId        String
-  curriculumId  String?
-  courseId      String?
+  id             String              @id @default(uuid())
+  tenantId       String
+  userId         String
+  curriculumId   String?
+  courseId       String?
   certificateUrl String
-  issuedAt      DateTime
-  expiresAt     DateTime?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  curriculum    TrainingCurriculum? @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
-  course        TrainingCourse?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  issuedAt       DateTime
+  expiresAt      DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  curriculum     TrainingCurriculum? @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+  course         TrainingCourse?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
 
-  @@index([tenantId, userId, issuedAt])
   @@unique([tenantId, userId, curriculumId])
   @@unique([tenantId, userId, courseId])
+  @@index([tenantId, userId, issuedAt])
 }
 
 model TrainingFavorite {
@@ -1121,27 +2066,27 @@ model TrainingFavorite {
   curriculum        TrainingCurriculum?        @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
   libraryResource   TrainingLibraryResource?   @relation(fields: [libraryResourceId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId, userId, entityType])
   @@unique([tenantId, userId, courseId])
   @@unique([tenantId, userId, curriculumId])
   @@unique([tenantId, userId, libraryResourceId])
+  @@index([tenantId, userId, entityType])
 }
 
 model TrainingAnalyticsSnapshot {
-  id                String    @id @default(uuid())
-  tenantId          String
-  userId            String
-  totalMinutes      Int       @default(0)
-  totalCourses      Int       @default(0)
-  completedCourses  Int       @default(0)
-  completionRate    Decimal   @default(0) @db.Decimal(5, 2)
-  overdueCourses    Int       @default(0)
+  id                 String   @id @default(uuid())
+  tenantId           String
+  userId             String
+  totalMinutes       Int      @default(0)
+  totalCourses       Int      @default(0)
+  completedCourses   Int      @default(0)
+  completionRate     Decimal  @default(0) @db.Decimal(5, 2)
+  overdueCourses     Int      @default(0)
   certificatesEarned Int      @default(0)
-  generatedAt       DateTime  @default(now())
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generatedAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, userId, generatedAt])
 }

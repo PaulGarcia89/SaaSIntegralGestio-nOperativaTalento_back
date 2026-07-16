@@ -12,6 +12,8 @@
     "start:prod": "node dist/src/main.js",
     "build": "nest build",
     "test:applications:tracking": "node scripts/test-applications-tracking.mjs",
+    "test:automation:rules": "ts-node -r dotenv/config scripts/test-automation-rules.ts",
+    "test:automation:flow": "ts-node -r dotenv/config scripts/test-automation-flow.ts",
     "test:platform:capabilities": "node -r ts-node/register scripts/test-platform-capabilities.ts",
     "test:training": "node scripts/test-training-module.mjs",
     "prisma:migrate:deploy": "prisma migrate deploy",

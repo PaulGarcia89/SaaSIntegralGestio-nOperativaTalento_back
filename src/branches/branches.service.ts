@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { ListBranchesDto } from './dto/list-branches.dto';
+import { UpdateBranchDto } from './dto/update-branch.dto';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 
 @Injectable()
@@ -67,5 +68,19 @@ export class BranchesService {
     }
 
     return branch;
+  }
+
+  async update(id: string, tenantId: string, dto: UpdateBranchDto) {
+    await this.findOne(id, tenantId);
+
+    return this.prisma.branch.update({
+      where: { id },
+      data: dto,
+    });
+  }
+
+  async remove(id: string, tenantId: string) {
+    await this.findOne(id, tenantId);
+    return this.prisma.branch.delete({ where: { id } });
   }
 }

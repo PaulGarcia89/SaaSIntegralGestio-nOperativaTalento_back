@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { AccessControlService } from '../access-control/access-control.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -9,7 +10,10 @@ import { RoleScope } from '../common/enums/role-scope.enum';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accessControl: AccessControlService,
+  ) {}
 
   async create(dto: CreateUserDto, actor: JwtPayload, tenantId: string) {
     const {
@@ -20,7 +24,7 @@ export class UsersService {
       activeBranchId,
       ...rest
     } = dto;
-    const effectiveTenantId = actor.isSuperAdmin ? (dto.tenantId ?? tenantId) : actor.tenantId;
+    const effectiveTenantId = this.accessControl.resolveTenantId(actor, dto.tenantId ?? tenantId);
     const passwordHash = await bcrypt.hash(password, 10);
 
     const roles = await this.assertRoleOwnership(roleIds, effectiveTenantId);
@@ -49,7 +53,7 @@ export class UsersService {
   findAll(actor: JwtPayload, tenantId: string) {
     return this.prisma.user
       .findMany({
-        where: actor.isSuperAdmin ? { tenantId } : { tenantId: actor.tenantId },
+        where: this.accessControl.buildTenantWhere(actor, tenantId),
         include: {
           tenant: true,
           activeBranch: true,
@@ -64,7 +68,10 @@ export class UsersService {
 
   async findOne(id: string, actor: JwtPayload, tenantId: string) {
     const user = await this.prisma.user.findFirst({
-      where: { id },
+      where: {
+        id,
+        ...this.accessControl.buildTenantWhere(actor, tenantId),
+      },
       include: {
         tenant: true,
         activeBranch: true,
@@ -77,8 +84,6 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-
-    this.assertUserTenantAccess(user.tenantId, actor, tenantId);
     return this.sanitizeUser(user);
   }
 
@@ -94,13 +99,16 @@ export class UsersService {
       ...rest
     } = dto;
     const data: Record<string, unknown> = { ...rest };
-    const effectiveTenantId = actor.isSuperAdmin ? (nextTenantId ?? existingUser.tenantId) : existingUser.tenantId;
+    const effectiveTenantId = this.accessControl.resolveTenantId(
+      actor,
+      nextTenantId ?? existingUser.tenantId,
+    );
 
     if (password) {
       data.passwordHash = await bcrypt.hash(password, 10);
     }
 
-    if (actor.isSuperAdmin && nextTenantId) {
+    if (this.accessControl.isGlobalActor(actor) && nextTenantId) {
       data.tenantId = nextTenantId;
     }
 
@@ -212,13 +220,6 @@ export class UsersService {
       data: branchIds.map((branchId) => ({ userId, branchId })),
       skipDuplicates: true,
     });
-  }
-
-  private assertUserTenantAccess(resourceTenantId: string, actor: JwtPayload, tenantId: string) {
-    const scopedTenantId = actor.isSuperAdmin ? tenantId : actor.tenantId;
-    if (resourceTenantId !== scopedTenantId) {
-      throw new ForbiddenException('You do not have access to this user');
-    }
   }
 
   private async assertRoleOwnership(roleIds: string[], tenantId: string) {
