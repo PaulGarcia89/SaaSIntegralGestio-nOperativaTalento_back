@@ -33,6 +33,7 @@ import { AccessControlModule } from './access-control/access-control.module';
 import { AutomationModule } from './automation/automation.module';
 import { DomainEventsModule } from './domain-events/domain-events.module';
 import { WorkflowMasterModule } from './workflow-master/workflow-master.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { WorkflowMasterModule } from './workflow-master/workflow-master.module';
     ApplicationsModule,
     TrainingModule,
     WorkflowsModule,
+    HealthModule,
     AutomationModule,
     DomainEventsModule,
     WorkflowMasterModule,
