@@ -40,12 +40,16 @@ import { RecruitmentModule } from './recruitment/recruitment.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { SignaturesModule } from './signatures/signatures.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { ReportsModule } from './reports/reports.module';
+import { PlanLimitsModule } from './plan-limits/plan-limits.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     MessagingModule,
     PrismaModule,
+    PlanLimitsModule,
     AccessControlModule,
     PlatformModule,
     AuditModule,
@@ -71,6 +75,8 @@ import { InventoryModule } from './inventory/inventory.module';
     OnboardingModule,
     SignaturesModule,
     InventoryModule,
+    DashboardModule,
+    ReportsModule,
     TrainingModule,
     WorkflowsModule,
     HealthModule,

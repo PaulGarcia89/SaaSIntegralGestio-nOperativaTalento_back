@@ -7,12 +7,14 @@ import { UpdateBranchDto } from './dto/update-branch.dto';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AccessScope } from '../common/enums/access-scope.enum';
+import { PlanLimitsService } from '../plan-limits/plan-limits.service';
 
 @Injectable()
 export class BranchesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly planLimits?: PlanLimitsService) {}
 
-  create(tenantId: string, dto: CreateBranchDto) {
+  async create(tenantId: string, dto: CreateBranchDto) {
+    await this.planLimits?.assertCapacity(tenantId, 'maxBranches');
     return this.prisma.branch.create({
       data: {
         tenantId,

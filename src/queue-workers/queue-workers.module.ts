@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AutomationModule } from '../automation/automation.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { DomainEventExecutionService } from '../domain-events/domain-event-execution.service';
 import { DomainEventWorkersService } from '../domain-events/domain-event-workers.service';
 import { EventHandlerRegistryService } from '../domain-events/event-handler-registry.service';
@@ -8,7 +9,7 @@ import { MessagingModule } from '../messaging/messaging.module';
 import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
-  imports: [AutomationModule, MessagingModule, OutboxModule],
+  imports: [AutomationModule, NotificationsModule, MessagingModule, OutboxModule],
   providers: [
     OutboxDispatcherService,
     DomainEventExecutionService,

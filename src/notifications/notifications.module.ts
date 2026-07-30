@@ -4,9 +4,17 @@ import { NotificationsService } from './notifications.service';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
+import { NotificationDeliverySchedulerService } from './notification-delivery-scheduler.service';
 
 @Module({
   controllers: [NotificationsController],
-  providers: [NotificationsService, TenantGuard, SubscriptionGuard, PermissionGuard],
+  providers: [
+    NotificationsService,
+    NotificationDeliverySchedulerService,
+    TenantGuard,
+    SubscriptionGuard,
+    PermissionGuard,
+  ],
+  exports: [NotificationsService],
 })
 export class NotificationsModule {}

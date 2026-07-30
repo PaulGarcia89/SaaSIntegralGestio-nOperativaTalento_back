@@ -9,12 +9,14 @@ import { ListPublicVacanciesDto } from './dto/list-public-vacancies.dto';
 import { UpdateVacancyDto } from './dto/update-vacancy.dto';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AccessScope } from '../common/enums/access-scope.enum';
+import { PlanLimitsService } from '../plan-limits/plan-limits.service';
 
 @Injectable()
 export class VacanciesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly planLimits?: PlanLimitsService) {}
 
   async create(tenantId: string, actor: JwtPayload, dto: CreateVacancyDto) {
+    await this.planLimits?.assertCapacity(tenantId, 'maxActiveVacancies');
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
     this.assertActorCanAccessBranch(actor, dto.branchId);
 

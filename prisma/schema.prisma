@@ -143,6 +143,38 @@ enum NotificationType {
   ERROR
 }
 
+enum NotificationCategory {
+  GENERAL
+  ATS
+  ONBOARDING
+  TRAINING
+  INVENTORY
+  AUTOMATION
+  SECURITY
+  BILLING
+}
+
+enum NotificationChannel {
+  INTERNAL
+  EMAIL
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+  DEAD_LETTER
+  SKIPPED
+}
+
+enum NotificationDigestFrequency {
+  IMMEDIATE
+  DAILY
+  WEEKLY
+  DISABLED
+}
+
 enum BillingProvider {
   STRIPE
   MANUAL
@@ -628,6 +660,8 @@ model Tenant {
   trainingAnalyticsSnapshots    TrainingAnalyticsSnapshot[]
   featureFlags                  TenantFeatureFlag[]
   notifications                 Notification[]
+  notificationPreferences       NotificationPreference[]
+  notificationDeliveries        NotificationDelivery[]
   billingCustomer               BillingCustomer?
   billingInvoices               BillingInvoice[]
   userSessions                  UserSession[]
@@ -698,6 +732,8 @@ model User {
   trainingFavorites             TrainingFavorite[]
   trainingAnalyticsSnapshots    TrainingAnalyticsSnapshot[]
   notifications                 Notification[]
+  notificationPreferences       NotificationPreference[]
+  notificationDeliveries        NotificationDelivery[]
   sessions                      UserSession[]
   outboxEvents                  OutboxEvent[]
   triggeredWorkflows            MasterWorkflow[]            @relation("WorkflowTriggeredBy")
@@ -783,6 +819,7 @@ model Plan {
   description                  String?
   priceMonthly                 Decimal?                     @db.Decimal(10, 2)
   priceYearly                  Decimal?                     @db.Decimal(10, 2)
+  limits                       Json?
   createdAt                    DateTime                     @default(now())
   updatedAt                    DateTime                     @updatedAt
   subscriptions                Subscription[]
@@ -847,22 +884,80 @@ model TenantFeatureFlag {
 }
 
 model Notification {
-  id        String           @id @default(uuid())
-  tenantId  String
-  userId    String?
-  type      NotificationType @default(INFO)
-  title     String
-  message   String
-  payload   Json?
-  readAt    DateTime?
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id               String                 @id @default(uuid())
+  tenantId         String
+  userId           String?
+  type             NotificationType       @default(INFO)
+  category         NotificationCategory   @default(GENERAL)
+  title            String
+  message          String
+  sourceModule     String?
+  actionUrl        String?
+  correlationId    String?
+  deduplicationKey String?
+  payload          Json?
+  readAt           DateTime?
+  archivedAt       DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user             User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  deliveries       NotificationDelivery[]
 
+  @@unique([tenantId, userId, deduplicationKey])
   @@index([tenantId, createdAt])
   @@index([tenantId, userId, createdAt])
   @@index([tenantId, readAt, createdAt])
+  @@index([tenantId, userId, category, createdAt])
+  @@index([correlationId])
+}
+
+model NotificationPreference {
+  id              String                      @id @default(uuid())
+  tenantId        String
+  userId          String
+  category        NotificationCategory
+  internalEnabled Boolean                     @default(true)
+  emailEnabled    Boolean                     @default(true)
+  frequency       NotificationDigestFrequency @default(IMMEDIATE)
+  quietHoursStart String?
+  quietHoursEnd   String?
+  timeZone        String                      @default("UTC")
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user            User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, category])
+  @@index([tenantId, userId])
+}
+
+model NotificationDelivery {
+  id                String                     @id @default(uuid())
+  tenantId          String
+  userId            String?
+  notificationId    String
+  channel           NotificationChannel
+  status            NotificationDeliveryStatus @default(PENDING)
+  attempts          Int                        @default(0)
+  maxAttempts       Int                        @default(5)
+  nextAttemptAt     DateTime                   @default(now())
+  lastAttemptAt     DateTime?
+  deliveredAt       DateTime?
+  providerMessageId String?
+  lastError         String?
+  correlationId     String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  tenant            Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user              User?                      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  notification      Notification               @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@index([tenantId, status, nextAttemptAt])
+  @@index([tenantId, userId, createdAt])
+  @@index([correlationId])
 }
 
 model BillingCustomer {

@@ -842,9 +842,22 @@ export class AutomationService {
         tenantId: context.tenantId,
         userId: context.actorUserId,
         type: NotificationType.INFO,
+        category: 'AUTOMATION',
+        sourceModule: 'automation',
+        correlationId: context.workflowId,
         title: consequence.title ?? 'Automatización ejecutada',
         message: consequence.message ?? 'Se ejecutó una acción automática',
         payload: this.toJson(consequence.payload ?? {}),
+        deliveries: {
+          create: {
+            tenantId: context.tenantId,
+            userId: context.actorUserId,
+            channel: 'INTERNAL',
+            status: 'DELIVERED',
+            deliveredAt: new Date(),
+            correlationId: context.workflowId,
+          },
+        },
       },
     });
 

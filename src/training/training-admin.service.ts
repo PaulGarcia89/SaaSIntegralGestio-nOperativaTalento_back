@@ -30,6 +30,7 @@ import {
   UpdateTrainingCourseModuleDto,
   UpdateTrainingLessonDto,
 } from './dto/training-course-authoring.dto';
+import { PlanLimitsService } from '../plan-limits/plan-limits.service';
 
 const courseTreeInclude = {
   category: true,
@@ -87,7 +88,7 @@ export const allowedTrainingCourseTransitions: Record<
 
 @Injectable()
 export class TrainingAdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly planLimits: PlanLimitsService) {}
 
   async listCourses(tenantId: string, actor: JwtPayload, query: ListTrainingAdminCoursesDto) {
     const page = query.page ?? 1;
@@ -132,6 +133,7 @@ export class TrainingAdminService {
 
   async createCourse(tenantId: string, actor: JwtPayload, dto: CreateTrainingCourseDto) {
     const targetTenantId = this.resolveWriteTenant(tenantId, actor, dto.scope);
+    if (targetTenantId) await this.planLimits.assertCapacity(targetTenantId, 'maxCourses');
     await this.assertCategory(targetTenantId, dto.categoryId);
     const slug = await this.uniqueCourseSlug(targetTenantId, dto.slug ?? dto.title);
     const { modules = [], scope: _scope, ...courseData } = dto;
@@ -206,6 +208,7 @@ export class TrainingAdminService {
   ) {
     const source = await this.getCourse(tenantId, actor, courseId);
     const targetTenantId = source.tenantId;
+    if (targetTenantId) await this.planLimits.assertCapacity(targetTenantId, 'maxCourses');
     if (targetTenantId === null && !this.canManageGlobal(actor)) {
       throw new ForbiddenException('Only a global super administrator can duplicate global content');
     }

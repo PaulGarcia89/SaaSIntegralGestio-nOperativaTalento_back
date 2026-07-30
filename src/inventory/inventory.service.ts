@@ -4,6 +4,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
 import { AssignInventoryAssetDto, CreateInventoryAssetDto, CreateInventoryItemDto, InventoryOperationDto, ListInventoryAssetsDto, TransferInventoryAssetDto, ValidateInventoryReturnDto } from './dto/inventory.dto';
 import { InventoryEvidenceStorageService } from './inventory-evidence-storage.service';
+import { PlanLimitsService } from '../plan-limits/plan-limits.service';
 
 const assetInclude = {
   item: true, branch: true, employee: true,
@@ -12,7 +13,7 @@ const assetInclude = {
 
 @Injectable()
 export class InventoryService {
-  constructor(private readonly prisma: PrismaService, private readonly storage: InventoryEvidenceStorageService, private readonly antivirus: TrainingAntivirusService) {}
+  constructor(private readonly prisma: PrismaService, private readonly storage: InventoryEvidenceStorageService, private readonly antivirus: TrainingAntivirusService, private readonly planLimits: PlanLimitsService) {}
 
   listItems(tenantId: string) {
     return this.prisma.inventoryItem.findMany({ where: { tenantId }, include: { _count: { select: { assets: true } } }, orderBy: { name: 'asc' } });
@@ -46,6 +47,7 @@ export class InventoryService {
   }
 
   async createAsset(tenantId: string, actorUserId: string, dto: CreateInventoryAssetDto, requestId?: string) {
+    await this.planLimits.assertCapacity(tenantId, 'maxAssets');
     await this.assertCatalogAndBranch(tenantId, dto.itemId, dto.branchId);
     return this.prisma.$transaction(async tx => {
       const asset = await tx.inventoryAsset.create({ data: { tenantId, itemId: dto.itemId, branchId: dto.branchId, assetTag: dto.assetTag.trim().toUpperCase(), serialNumber: dto.serialNumber?.trim() || null, condition: dto.condition, notes: dto.notes } });

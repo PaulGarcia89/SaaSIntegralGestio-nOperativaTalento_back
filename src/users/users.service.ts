@@ -9,6 +9,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { deriveRoleScope } from '../common/auth/role-scope.util';
 import { RoleScope } from '../common/enums/role-scope.enum';
+import { PlanLimitsService } from '../plan-limits/plan-limits.service';
 
 const PROTECTED_ROLE_CODES = new Set(['SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN']);
 const PLATFORM_PERMISSION_CODES = new Set([
@@ -21,6 +22,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
+    private readonly planLimits: PlanLimitsService,
   ) {}
 
   async create(dto: CreateUserDto, actor: JwtPayload, tenantId: string) {
@@ -35,6 +37,7 @@ export class UsersService {
     const effectiveTenantId = this.requireTenantContext(
       this.accessControl.resolveTenantId(actor, dto.tenantId ?? tenantId),
     );
+    await this.planLimits.assertCapacity(effectiveTenantId, 'maxUsers');
     const passwordHash = await bcrypt.hash(password, 10);
 
     const roles = await this.assertRoleOwnership(roleIds, effectiveTenantId);
