@@ -39,6 +39,10 @@ export class ApplicationInterviewDto {
   @IsString()
   @MaxLength(4000)
   observations?: string | null;
+
+  @IsOptional()
+  @IsString()
+  interviewerUserId?: string | null;
 }
 
 export class ApplicationTimelineEventDto {

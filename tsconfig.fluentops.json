@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "outDir": "./compiled-server",
+    "incremental": false
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "compiled-server",
+    "test",
+    "**/*spec.ts"
+  ]
+}

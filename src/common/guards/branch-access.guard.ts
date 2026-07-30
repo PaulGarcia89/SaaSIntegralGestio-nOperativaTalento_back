@@ -12,7 +12,7 @@ export class BranchAccessGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
-    const tenantId = request.tenant?.id ?? request.user?.tenantId;
+    const tenantId = request.tenant?.id ?? request.user?.activeTenantId ?? request.user?.tenantId;
     const user = request.user;
 
     if (!tenantId || !user) {
@@ -23,9 +23,24 @@ export class BranchAccessGuard implements CanActivate {
       );
     }
 
+    if (user.isGlobalContext) {
+      throw new AppException(
+        'Branch context is not available in global context',
+        ErrorCode.BRANCH_CONTEXT_REQUIRED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const branchHeader = request.headers[BRANCH_HEADER];
     const branchIdFromHeader = Array.isArray(branchHeader) ? branchHeader[0] : branchHeader;
-    const candidateBranchId = branchIdFromHeader ?? user.activeBranchId;
+    if (branchIdFromHeader && user.activeBranchId && branchIdFromHeader !== user.activeBranchId) {
+      throw new AppException(
+        'Requested branch header does not match the active branch context',
+        ErrorCode.BRANCH_ACCESS_DENIED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const candidateBranchId = user.activeBranchId ?? branchIdFromHeader;
 
     if (!candidateBranchId) {
       throw new AppException(
@@ -39,7 +54,7 @@ export class BranchAccessGuard implements CanActivate {
       if (!user.allowedBranchIds.includes(candidateBranchId)) {
         throw new AppException(
           'Requested branch is outside the allowed branch scope',
-          ErrorCode.FORBIDDEN_BRANCH_SCOPE,
+          ErrorCode.BRANCH_ACCESS_DENIED,
           HttpStatus.FORBIDDEN,
         );
       }

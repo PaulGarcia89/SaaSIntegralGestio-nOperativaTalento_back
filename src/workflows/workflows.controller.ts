@@ -14,13 +14,18 @@ import { UpdateWorkflowStageDto } from './dto/update-workflow-stage.dto';
 import { WorkflowActionDto } from './dto/workflow-action.dto';
 import { WorkflowsService } from './workflows.service';
 import { WorkflowStageKey } from '@prisma/client';
+import { ModuleCode } from '@prisma/client';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
+import { RequireModule } from '../common/decorators/module-access.decorator';
 
 @Controller('workflows')
-@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, PermissionGuard)
+@RequireModule(ModuleCode.ONBOARDING)
 export class WorkflowsController {
   constructor(private readonly workflowsService: WorkflowsService) {}
 
   @Post('hiring')
+  @RequireModule(ModuleCode.ATS)
   @RequirePermissions('applications.update')
   createHiring(@Req() request: RequestWithUser, @Body() dto: CreateHiringWorkflowDto) {
     return this.workflowsService.createHiringWorkflow(request.tenant!.id, request.user, dto);
@@ -121,12 +126,14 @@ export class WorkflowsController {
   }
 
   @Post(':id/assign-asset')
+  @RequireModule(ModuleCode.INVENTORY)
   @RequirePermissions('employees.update')
   assignAsset(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: WorkflowActionDto) {
     return this.workflowsService.assignAsset(id, request.tenant!.id, request.user, dto);
   }
 
   @Post(':id/activate-training')
+  @RequireModule(ModuleCode.TRAINING)
   @RequirePermissions('training.update')
   activateTraining(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: WorkflowActionDto) {
     return this.workflowsService.activateTraining(id, request.tenant!.id, request.user, dto);
@@ -139,6 +146,7 @@ export class WorkflowsController {
   }
 
   @Post(':id/recover-asset')
+  @RequireModule(ModuleCode.INVENTORY)
   @RequirePermissions('employees.update')
   recoverAsset(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: WorkflowActionDto) {
     return this.workflowsService.recoverAsset(id, request.tenant!.id, request.user, dto);

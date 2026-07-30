@@ -25,6 +25,7 @@ import {
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { AccessScope } from '../common/enums/access-scope.enum';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 import { CreateBranchTransferWorkflowDto } from './dto/create-branch-transfer-workflow.dto';
 import { CreateHiringWorkflowDto } from './dto/create-hiring-workflow.dto';
@@ -179,9 +180,27 @@ export class WorkflowsService {
       const application = dto.applicationId
         ? await tx.vacancyApplication.findFirst({
             where: { id: dto.applicationId, tenantId },
-            include: { candidate: true },
+            include: { candidate: true, vacancy: true },
           })
         : null;
+
+      if (dto.applicationId && !application) {
+        throw new NotFoundException('Application not found for hiring workflow');
+      }
+
+      if (application && application.status !== 'APPROVED') {
+        throw new BadRequestException('Only an approved application can be hired');
+      }
+
+      if (application) {
+        const existingHiring = await tx.hiringFlow.findFirst({
+          where: { tenantId, applicationId: application.id },
+          select: { workflowId: true },
+        });
+        if (existingHiring) {
+          return this.loadWorkflowOrThrow(tx, existingHiring.workflowId, tenantId);
+        }
+      }
 
       const candidate =
         application?.candidate ??
@@ -198,6 +217,16 @@ export class WorkflowsService {
       const employeeName = dto.employeeName ?? candidate.fullName;
       const employeeEmail = dto.employeeEmail ?? candidate.email;
 
+      if (dto.supervisorUserId) {
+        const supervisor = await tx.user.findFirst({
+          where: { id: dto.supervisorUserId, tenantId, status: 'ACTIVE' },
+          select: { id: true },
+        });
+        if (!supervisor) {
+          throw new BadRequestException('Supervisor must be an active user in the tenant');
+        }
+      }
+
       let employee = await tx.employee.findFirst({
         where: {
           tenantId,
@@ -211,6 +240,9 @@ export class WorkflowsService {
             tenantId,
             name: employeeName,
             email: employeeEmail,
+            jobTitle: dto.jobTitle,
+            supervisorUserId: dto.supervisorUserId,
+            sourceCandidateId: candidate.id,
             status: EmployeeStatus.ACTIVE,
           },
         });
@@ -220,10 +252,40 @@ export class WorkflowsService {
             tenantId,
             employeeId: employee.id,
             branchId: branch.id,
-            role: 'New hire',
+            role: dto.jobTitle,
             isPrimary: true,
           },
         });
+      } else {
+        if (employee.sourceCandidateId && employee.sourceCandidateId !== candidate.id) {
+          throw new BadRequestException('An employee with this email belongs to another candidate');
+        }
+        employee = await tx.employee.update({
+          where: { id: employee.id },
+          data: {
+            name: employeeName,
+            jobTitle: dto.jobTitle,
+            supervisorUserId: dto.supervisorUserId,
+            sourceCandidateId: candidate.id,
+            status: EmployeeStatus.ACTIVE,
+          },
+        });
+        const activePrimary = await tx.employeeBranch.findFirst({
+          where: { tenantId, employeeId: employee.id, isPrimary: true, releasedAt: null },
+        });
+        if (!activePrimary) {
+          await tx.employeeBranch.create({
+            data: {
+              tenantId,
+              employeeId: employee.id,
+              branchId: branch.id,
+              role: dto.jobTitle,
+              isPrimary: true,
+            },
+          });
+        } else if (activePrimary.branchId !== branch.id) {
+          throw new BadRequestException('Existing employee already has another primary branch');
+        }
       }
 
       const workflow = await tx.masterWorkflow.create({
@@ -238,6 +300,22 @@ export class WorkflowsService {
           metadata: this.toJson({
             ...(dto.metadata ?? {}),
             applicationId: application?.id ?? null,
+            employment: {
+              jobTitle: dto.jobTitle,
+              supervisorUserId: dto.supervisorUserId ?? null,
+              branchId: branch.id,
+              hiredAt: new Date().toISOString(),
+            },
+            candidateFile: application
+              ? {
+                  candidateId: candidate.id,
+                  applicationId: application.id,
+                  resumeUrl: candidate.resumeUrl,
+                  coverLetter: application.coverLetter,
+                  dynamicResponses: application.dynamicResponses,
+                  sourceVacancyId: application.vacancyId,
+                }
+              : null,
           }),
         },
       });
@@ -245,6 +323,11 @@ export class WorkflowsService {
       await this.createDefaultSteps(tx, workflow.id, tenantId, branch.id, WorkflowType.HIRING);
       await this.markInitialHiringStagesComplete(tx, workflow.id);
 
+      const onboardingTemplate = await tx.onboardingTemplate.findFirst({
+        where: { tenantId, isActive: true },
+        include: { tasks: { orderBy: { sortOrder: 'asc' } } },
+        orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
+      });
       const onboardingFlow = await tx.onboardingFlow.create({
         data: {
           tenantId,
@@ -252,12 +335,29 @@ export class WorkflowsService {
           workflowId: workflow.id,
           employeeId: employee.id,
           candidateId: candidate.id,
+          templateId: onboardingTemplate?.id,
           metadata: this.toJson({ source: 'hiring' }),
         },
       });
 
       await tx.onboardingTask.createMany({
-        data: [
+        data: onboardingTemplate?.tasks.length
+          ? onboardingTemplate.tasks.map((task) => ({
+              tenantId,
+              branchId: branch.id,
+              workflowId: workflow.id,
+              onboardingFlowId: onboardingFlow.id,
+              employeeId: employee.id,
+              taskType: task.taskType,
+              taskKey: task.taskKey,
+              title: task.title,
+              description: task.description,
+              ownerType: task.ownerType,
+              ownerId: task.ownerId,
+              dueDate: task.dueOffsetDays == null ? null : new Date(Date.now() + task.dueOffsetDays * 86_400_000),
+              dependsOnKeys: task.dependsOnKeys ?? [],
+            }))
+          : [
           {
             tenantId,
             branchId: branch.id,
@@ -265,6 +365,7 @@ export class WorkflowsService {
             onboardingFlowId: onboardingFlow.id,
             employeeId: employee.id,
             taskType: OnboardingTaskType.DOCUMENT_COLLECTION,
+            taskKey: 'documents',
             title: 'Recopilar documentos de ingreso',
           },
           {
@@ -274,7 +375,9 @@ export class WorkflowsService {
             onboardingFlowId: onboardingFlow.id,
             employeeId: employee.id,
             taskType: OnboardingTaskType.HR_CHECKLIST,
+            taskKey: 'hr-checklist',
             title: 'Completar checklist de RRHH',
+            dependsOnKeys: ['documents'],
           },
           {
             tenantId,
@@ -283,9 +386,11 @@ export class WorkflowsService {
             onboardingFlowId: onboardingFlow.id,
             employeeId: employee.id,
             taskType: OnboardingTaskType.MANAGER_CHECKLIST,
+            taskKey: 'manager-checklist',
             title: 'Completar checklist del manager',
+            dependsOnKeys: ['hr-checklist'],
           },
-        ],
+            ],
       });
 
       await tx.hiringFlow.create({
@@ -296,30 +401,62 @@ export class WorkflowsService {
           candidateId: candidate.id,
           employeeId: employee.id,
           applicationId: application?.id,
-          metadata: this.toJson(dto.metadata),
+          metadata: this.toJson({
+            ...(dto.metadata ?? {}),
+            jobTitle: dto.jobTitle,
+            supervisorUserId: dto.supervisorUserId ?? null,
+            sourceDocumentsPreserved: Boolean(candidate.resumeUrl || application?.dynamicResponses),
+          }),
         },
       });
 
-      await tx.signaturePackage.create({
-        data: {
-          tenantId,
-          branchId: branch.id,
-          workflowId: workflow.id,
-          employeeId: employee.id,
-          title: `Firma de ingreso - ${employee.name}`,
-          status: SignaturePackageStatus.PENDING,
-          participants: {
-            create: [
-              {
-                tenantId,
-                email: employee.email,
-                fullName: employee.name,
-                roleLabel: 'Empleado',
+      if (application) {
+        await tx.vacancyApplication.update({
+          where: { id: application.id },
+          data: {
+            status: 'HIRED',
+            reviewedAt: new Date(),
+            timelineEvents: {
+              create: {
+                type: 'HIRED',
+                occurredAt: new Date(),
+                note: `Contratación formalizada para ${dto.jobTitle}`,
               },
-            ],
+            },
           },
-        },
+        });
+      }
+
+      const signatureTemplate = await tx.signatureTemplate.findFirst({
+        where: { tenantId, isActive: true },
+        orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
       });
+      if (signatureTemplate) {
+        await tx.signaturePackage.create({
+          data: {
+            tenantId,
+            branchId: branch.id,
+            workflowId: workflow.id,
+            employeeId: employee.id,
+            onboardingFlowId: onboardingFlow.id,
+            templateId: signatureTemplate.id,
+            externalProvider: signatureTemplate.provider,
+            title: `Firma de ingreso - ${employee.name}`,
+            status: SignaturePackageStatus.DRAFT,
+            participants: {
+              create: [
+                {
+                  tenantId,
+                  email: employee.email,
+                  fullName: employee.name,
+                  roleLabel: 'Empleado',
+                  consentVersion: `${signatureTemplate.id}:v${signatureTemplate.version}`,
+                },
+              ],
+            },
+          },
+        });
+      }
 
       await tx.inventoryAssignment.create({
         data: {
@@ -1890,27 +2027,25 @@ export class WorkflowsService {
       return;
     }
 
-    if (workflow.tenantId !== actor.tenantId) {
+    if (workflow.tenantId !== (actor.activeTenantId ?? actor.tenantId)) {
       throw new ForbiddenException('Workflow does not belong to the current tenant');
     }
 
     if (
-      actor.allowedBranchIds?.length &&
+      actor.scope === AccessScope.BRANCH &&
       !actor.allowedBranchIds.includes(workflow.branchId) &&
-      actor.roleScope !== 'tenant_admin'
+      !actor.isSuperAdmin
     ) {
       throw new ForbiddenException('Workflow does not belong to an allowed branch');
     }
   }
 
   private buildBranchScopeWhere(actor: JwtPayload): Prisma.MasterWorkflowWhereInput {
-    if (actor.isSuperAdmin || actor.roleScope === 'tenant_admin') {
+    if (actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH) {
       return {};
     }
 
-    return actor.allowedBranchIds?.length
-      ? { branchId: { in: actor.allowedBranchIds } }
-      : { branchId: actor.activeBranchId ?? undefined };
+    return { branchId: { in: actor.allowedBranchIds } };
   }
 
   private async createOperationalEvent(

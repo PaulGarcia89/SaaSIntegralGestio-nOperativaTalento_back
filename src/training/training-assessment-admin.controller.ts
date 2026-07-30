@@ -1,0 +1,182 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { ModuleCode } from '@prisma/client';
+import { RequireModule } from '../common/decorators/module-access.decorator';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
+import { PermissionGuard } from '../common/guards/permission.guard';
+import { SubscriptionGuard } from '../common/guards/subscription.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
+import { RequestWithUser } from '../common/types/request-with-user.type';
+import {
+  CreateTrainingQuizDto,
+  CreateTrainingQuizQuestionDto,
+  GradeTrainingAttemptDto,
+  IssueTrainingCertificateDto,
+  ListTrainingAssessmentResultsDto,
+  RevokeTrainingCertificateDto,
+  UpdateTrainingQuizDto,
+} from './dto/training-assessment-admin.dto';
+import { TrainingAccessGuard } from './training-access.guard';
+import { TrainingAssessmentAdminService } from './training-assessment-admin.service';
+
+@Controller('training/admin')
+@UseGuards(
+  JwtAuthGuard,
+  TenantGuard,
+  SubscriptionGuard,
+  ModuleAccessGuard,
+  TrainingAccessGuard,
+  PermissionGuard,
+)
+@RequireModule(ModuleCode.TRAINING)
+export class TrainingAssessmentAdminController {
+  constructor(private readonly service: TrainingAssessmentAdminService) {}
+
+  @Get('assessments')
+  @RequirePermissions('training.assessment.manage')
+  list(@Req() request: RequestWithUser) {
+    return this.service.listQuizzes(this.tenantId(request));
+  }
+
+  @Get('assessments/:quizId')
+  @RequirePermissions('training.assessment.manage')
+  get(@Req() request: RequestWithUser, @Param('quizId') quizId: string) {
+    return this.service.getQuiz(this.tenantId(request), quizId);
+  }
+
+  @Post('courses/:courseId/assessments')
+  @RequirePermissions('training.assessment.manage')
+  create(
+    @Req() request: RequestWithUser,
+    @Param('courseId') courseId: string,
+    @Body() dto: CreateTrainingQuizDto,
+  ) {
+    request.auditAction = 'TRAINING_ASSESSMENT_CREATED';
+    return this.service.createQuiz(this.tenantId(request), courseId, dto);
+  }
+
+  @Patch('assessments/:quizId')
+  @RequirePermissions('training.assessment.manage')
+  update(
+    @Req() request: RequestWithUser,
+    @Param('quizId') quizId: string,
+    @Body() dto: UpdateTrainingQuizDto,
+  ) {
+    request.auditAction = 'TRAINING_ASSESSMENT_UPDATED';
+    return this.service.updateQuiz(this.tenantId(request), quizId, dto);
+  }
+
+  @Delete('assessments/:quizId')
+  @RequirePermissions('training.assessment.manage')
+  remove(@Req() request: RequestWithUser, @Param('quizId') quizId: string) {
+    request.auditAction = 'TRAINING_ASSESSMENT_DELETED';
+    return this.service.deleteQuiz(this.tenantId(request), quizId);
+  }
+
+  @Post('assessments/:quizId/questions')
+  @RequirePermissions('training.assessment.manage')
+  createQuestion(
+    @Req() request: RequestWithUser,
+    @Param('quizId') quizId: string,
+    @Body() dto: CreateTrainingQuizQuestionDto,
+  ) {
+    return this.service.createQuestion(this.tenantId(request), quizId, dto);
+  }
+
+  @Patch('assessment-questions/:questionId')
+  @RequirePermissions('training.assessment.manage')
+  updateQuestion(
+    @Req() request: RequestWithUser,
+    @Param('questionId') questionId: string,
+    @Body() dto: CreateTrainingQuizQuestionDto,
+  ) {
+    return this.service.updateQuestion(this.tenantId(request), questionId, dto);
+  }
+
+  @Delete('assessment-questions/:questionId')
+  @RequirePermissions('training.assessment.manage')
+  deleteQuestion(
+    @Req() request: RequestWithUser,
+    @Param('questionId') questionId: string,
+  ) {
+    return this.service.deleteQuestion(this.tenantId(request), questionId);
+  }
+
+  @Get('assessment-results')
+  @RequirePermissions('training.progress.read')
+  results(
+    @Req() request: RequestWithUser,
+    @Query() query: ListTrainingAssessmentResultsDto,
+  ) {
+    return this.service.listResults(this.tenantId(request), query);
+  }
+
+  @Patch('assessment-attempts/:attemptId/grade')
+  @RequirePermissions('training.assessment.grade')
+  grade(
+    @Req() request: RequestWithUser,
+    @Param('attemptId') attemptId: string,
+    @Body() dto: GradeTrainingAttemptDto,
+  ) {
+    request.auditAction = 'TRAINING_ASSESSMENT_GRADED';
+    return this.service.gradeAttempt(this.tenantId(request), request.user.sub, attemptId, dto);
+  }
+
+  @Get('certificates')
+  @RequirePermissions('training.progress.read')
+  certificates(@Req() request: RequestWithUser) {
+    return this.service.listCertificates(this.tenantId(request));
+  }
+
+  @Post('certificates')
+  @RequirePermissions('training.certificate.issue')
+  issueCertificate(
+    @Req() request: RequestWithUser,
+    @Body() dto: IssueTrainingCertificateDto,
+  ) {
+    request.auditAction = 'TRAINING_CERTIFICATE_ISSUED';
+    return this.service.issueCertificate(this.tenantId(request), request.user.sub, dto);
+  }
+
+  @Post('certificates/:certificateId/revoke')
+  @RequirePermissions('training.certificate.revoke')
+  revokeCertificate(
+    @Req() request: RequestWithUser,
+    @Param('certificateId') certificateId: string,
+    @Body() dto: RevokeTrainingCertificateDto,
+  ) {
+    request.auditAction = 'TRAINING_CERTIFICATE_REVOKED';
+    return this.service.revokeCertificate(
+      this.tenantId(request),
+      request.user.sub,
+      certificateId,
+      dto,
+    );
+  }
+
+  private tenantId(request: RequestWithUser) {
+    return request.tenant?.id ?? request.user.activeTenantId ?? request.user.tenantId;
+  }
+}
+
+@Controller('public/training-certificates')
+export class PublicTrainingCertificateController {
+  constructor(private readonly service: TrainingAssessmentAdminService) {}
+
+  @Get(':code')
+  verify(@Param('code') code: string) {
+    return this.service.verifyCertificate(code);
+  }
+}

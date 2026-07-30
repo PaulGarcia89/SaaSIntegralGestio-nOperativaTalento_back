@@ -16,19 +16,19 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  @RequirePermissions('users.read')
+  @RequirePermissions('notifications.read_own')
   findAll(@CurrentUser() user: JwtPayload, @Query() query: ListNotificationsDto) {
     return this.notificationsService.findAll(user, query);
   }
 
   @Post()
-  @RequirePermissions('users.update')
+  @RequirePermissions('notifications.send')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateNotificationDto) {
     return this.notificationsService.create(user, dto);
   }
 
   @Patch(':id/read')
-  @RequirePermissions('users.read')
+  @RequirePermissions('notifications.update_own')
   markAsRead(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.notificationsService.markAsRead(user, id);
   }

@@ -49,6 +49,7 @@ export class AuditService {
       actorScope,
       actorTenantId,
       branchId: request.branch?.id ?? request.user?.activeBranchId ?? null,
+      correlationId: request.requestId ?? null,
       email,
       domain,
       ip: this.resolveIp(request),

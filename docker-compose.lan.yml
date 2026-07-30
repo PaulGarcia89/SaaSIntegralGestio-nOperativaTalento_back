@@ -3,6 +3,8 @@ services:
     image: postgres:18
     container_name: saas_integral_postgres
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: saas_integral_gestion_operativa
       POSTGRES_USER: postgres
@@ -15,6 +17,21 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7.4-alpine
+    container_name: saas_integral_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: .
@@ -23,6 +40,8 @@ services:
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       NODE_ENV: production
@@ -33,12 +52,36 @@ services:
       JWT_REFRESH_SECRET: 9904ecbcfc25418d73b3f7e8065b47edaccb6a066547d009029da14746c7bf62
       JWT_ACCESS_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 7d
+      AUTH_COOKIE_SECURE: "false"
+      MESSAGE_BUS_DRIVER: bullmq
+      MESSAGING_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_CONCURRENCY_AUTOMATION_EVENTS: "3"
+      QUEUE_CONCURRENCY_WORKFLOW_EVENTS: "3"
+      QUEUE_CONCURRENCY_NOTIFICATIONS: "2"
+      QUEUE_CONCURRENCY_DOCUMENTS: "2"
+      QUEUE_CONCURRENCY_TRAINING: "2"
+      SCORM_STORAGE_ROOT: /app/storage/scorm
+      SCORM_STORAGE_DRIVER: filesystem
+      SCORM_ANTIVIRUS_MODE: disabled
+      SCORM_ALLOW_UNSCANNED_UPLOADS: "true"
+      SCORM_MAX_UPLOAD_BYTES: "104857600"
+      SCORM_TENANT_QUOTA_BYTES: "2147483648"
+      SCORM_TENANT_PACKAGE_LIMIT: "250"
+      SCORM_SIGNING_KEY: 30dfa883dce5ab1a7916f209283197106604de740066fc642a9f868ffde111b
+      DOCUMENT_STORAGE_ROOT: /app/storage/documents
+      DOCUMENT_STORAGE_DRIVER: local
+      WEBHOOK_ENCRYPTION_KEY: 7a32ec6c7821bd77f52c6a2cff92f503c52a08cb8c6864ab82663882c800985f
       SUPERADMIN_EMAIL: superadmin@saasintegral.com
       SUPERADMIN_PASSWORD: 3mNJlb7KLQincjn2SDsqBYn9K+aPVL1B
       SUPERADMIN_TENANT_SLUG: platform
-      CORS_ALLOWED_ORIGINS: http://localhost,http://127.0.0.1
-    expose:
-      - "3000"
+      CORS_ALLOWED_ORIGINS: http://localhost,http://127.0.0.1,http://localhost:3000,http://10.0.0.120,http://10.0.0.120:3000
+      PUBLIC_FRONTEND_URL: http://10.0.0.120
+    ports:
+      - "0.0.0.0:3002:3000"
+    volumes:
+      - scorm_storage:/app/storage/scorm
+      - document_storage:/app/storage/documents
 
   frontend:
     build:
@@ -53,6 +96,8 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: /api
+      INTERNAL_API_URL: http://backend:3000/api
+      SESSION_COOKIE_SECURE: "false"
     expose:
       - "3001"
 
@@ -70,3 +115,6 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
+  scorm_storage:
+  document_storage:

@@ -64,12 +64,35 @@ enum InterviewType {
   PHONE
 }
 
+enum VacancyResponsibleRole {
+  OWNER
+  RECRUITER
+  HIRING_MANAGER
+  INTERVIEWER
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
+enum InterviewRecommendation {
+  STRONG_YES
+  YES
+  MIXED
+  NO
+}
+
 enum ApplicationTimelineEventType {
   VACANCY_PUBLISHED
   APPLIED
   CONTACTED
   INTERVIEW_SCHEDULED
   INTERVIEW_COMPLETED
+  HIRED
 }
 
 enum RoleScope {
@@ -167,6 +190,26 @@ enum TrainingCourseStepType {
   TASK
 }
 
+enum TrainingCourseStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  PAUSED
+  ARCHIVED
+  RETIRED
+}
+
+enum TrainingContentBlockType {
+  RICH_TEXT
+  VIDEO
+  FILE
+  LINK
+  QUIZ
+  TASK
+}
+
 enum TrainingAssignmentType {
   CURRICULUM
   COURSE
@@ -210,6 +253,7 @@ enum TrainingQuizQuestionType {
 enum TrainingQuizAttemptStatus {
   IN_PROGRESS
   SUBMITTED
+  PENDING_REVIEW
   GRADED
 }
 
@@ -363,6 +407,31 @@ enum AutomationAuditStatus {
   SKIPPED
 }
 
+enum OutboxEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+}
+
+enum OutboxDispatchStatus {
+  PENDING
+  QUEUED
+  ACKNOWLEDGED
+  FAILED
+}
+
+enum IntegrationEventStatus {
+  PUBLISHED
+  DISPATCH_PENDING
+  DISPATCHED
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+}
+
 enum PolicyCheckStatus {
   PENDING
   IN_PROGRESS
@@ -389,6 +458,7 @@ enum OnboardingTaskType {
   MANAGER_CHECKLIST
   HR_CHECKLIST
   DAY_ONE_READINESS
+  ASSET_DELIVERY
 }
 
 enum SignaturePackageStatus {
@@ -416,6 +486,44 @@ enum InventoryRecoveryStatus {
   IN_PROGRESS
   RECOVERED
   CANCELLED
+}
+
+enum InventoryAssetStatus {
+  AVAILABLE
+  RESERVED
+  ASSIGNED
+  IN_TRANSIT
+  RETURN_PENDING
+  MAINTENANCE
+  LOST
+  RETIRED
+}
+
+enum InventoryAssetCondition {
+  NEW
+  GOOD
+  FAIR
+  DAMAGED
+}
+
+enum InventoryMovementType {
+  REGISTERED
+  ASSIGNED
+  DELIVERED
+  TRANSFERRED
+  RETURN_REQUESTED
+  RETURNED
+  RETURN_VALIDATED
+  SENT_TO_MAINTENANCE
+  MARKED_LOST
+  RETIRED
+}
+
+enum InventoryEvidenceType {
+  DELIVERY
+  TRANSFER
+  RETURN
+  VALIDATION
 }
 
 enum AccessTaskType {
@@ -474,106 +582,137 @@ enum OperationalEventType {
 }
 
 model Tenant {
-  id                          String                       @id @default(uuid())
-  name                        String
-  slug                        String                       @unique
-  status                      TenantStatus                 @default(ACTIVE)
-  createdAt                   DateTime                     @default(now())
-  updatedAt                   DateTime                     @updatedAt
-  users                       User[]
-  roles                       Role[]
-  subscription                Subscription?
-  auditLogs                   AuditLog[]
-  candidates                  Candidate[]
-  branches                    Branch[]
-  employees                   Employee[]
-  employeeBranches            EmployeeBranch[]
-  vacancies                   Vacancy[]
-  vacancyFormTemplates        VacancyFormTemplate[]
-  applications                VacancyApplication[]
-  inventoryItems              InventoryItem[]
-  inventoryStocks             InventoryStock[]
-  trainingModuleAccesses      TenantTrainingModuleAccess[]
-  trainingCategories          TrainingCategory[]
-  trainingCurriculums         TrainingCurriculum[]
-  trainingCourses             TrainingCourse[]
-  trainingAssignments         TrainingAssignment[]
-  trainingProgressRecords     TrainingProgress[]
-  trainingStepProgressRecords TrainingStepProgress[]
-  trainingEvents              TrainingEvent[]
-  trainingLibraryResources    TrainingLibraryResource[]
-  trainingQuizAttempts        TrainingQuizAttempt[]
-  trainingCertificates        TrainingCertificate[]
-  trainingFavorites           TrainingFavorite[]
-  trainingAnalyticsSnapshots  TrainingAnalyticsSnapshot[]
-  featureFlags                TenantFeatureFlag[]
-  notifications               Notification[]
-  billingCustomer             BillingCustomer?
-  billingInvoices             BillingInvoice[]
-  userSessions                UserSession[]
-  masterWorkflows             MasterWorkflow[]
-  workflowSteps               WorkflowStep[]
-  hiringFlows                 HiringFlow[]
-  onboardingFlows             OnboardingFlow[]
-  onboardingTasks             OnboardingTask[]
-  signaturePackages           SignaturePackage[]
-  signatureParticipants       SignatureParticipant[]
-  inventoryAssignments        InventoryAssignment[]
-  inventoryRecoveries         InventoryRecovery[]
-  workflowTrainingAssignments WorkflowTrainingAssignment[]
-  accessTasks                 AccessTask[]
-  productivityReviews         ProductivityReview[]
-  operationalEvents           OperationalEvent[]
-  workflowBlockers            WorkflowBlocker[]
-  automationRules             AutomationRule[]
-  automationExecutions        AutomationExecution[]
-  automationExecutionSteps    AutomationExecutionStep[]
-  automationAuditLogs         AutomationAuditLog[]
-  policyChecks                PolicyCheck[]
-  assetAssignments            AssetAssignment[]
-  trainingActivations         TrainingActivation[]
+  id                            String                       @id @default(uuid())
+  name                          String
+  slug                          String                       @unique
+  status                        TenantStatus                 @default(ACTIVE)
+  createdAt                     DateTime                     @default(now())
+  updatedAt                     DateTime                     @updatedAt
+  users                         User[]
+  roles                         Role[]
+  subscription                  Subscription?
+  auditLogs                     AuditLog[]
+  candidates                    Candidate[]
+  branches                      Branch[]
+  employees                     Employee[]
+  employeeBranches              EmployeeBranch[]
+  vacancies                     Vacancy[]
+  vacancyFormTemplates          VacancyFormTemplate[]
+  vacancyStages                 VacancyStage[]
+  vacancyResponsibles           VacancyResponsible[]
+  applications                  VacancyApplication[]
+  applicationInterviews         ApplicationInterview[]
+  interviewScorecards           InterviewScorecard[]
+  inventoryItems                InventoryItem[]
+  inventoryStocks               InventoryStock[]
+  inventoryAssets               InventoryAsset[]
+  inventoryMovements            InventoryMovement[]
+  inventoryEvidences            InventoryEvidence[]
+  trainingModuleAccesses        TenantTrainingModuleAccess[]
+  trainingCategories            TrainingCategory[]
+  trainingCurriculums           TrainingCurriculum[]
+  trainingPathCourses           TrainingPathCourse[]
+  trainingOnboardingRules       TrainingOnboardingRule[]
+  trainingCourses               TrainingCourse[]
+  trainingAssignments           TrainingAssignment[]
+  trainingProgressRecords       TrainingProgress[]
+  trainingStepProgressRecords   TrainingStepProgress[]
+  trainingLessonProgressRecords TrainingLessonProgress[]
+  trainingEvents                TrainingEvent[]
+  trainingLibraryResources      TrainingLibraryResource[]
+  trainingQuizAttempts          TrainingQuizAttempt[]
+  trainingCertificates          TrainingCertificate[]
+  trainingCompliancePolicies    TrainingCompliancePolicy[]
+  trainingScormPackages         TrainingScormPackage[]
+  trainingFavorites             TrainingFavorite[]
+  trainingAnalyticsSnapshots    TrainingAnalyticsSnapshot[]
+  featureFlags                  TenantFeatureFlag[]
+  notifications                 Notification[]
+  billingCustomer               BillingCustomer?
+  billingInvoices               BillingInvoice[]
+  userSessions                  UserSession[]
+  masterWorkflows               MasterWorkflow[]
+  workflowSteps                 WorkflowStep[]
+  hiringFlows                   HiringFlow[]
+  onboardingFlows               OnboardingFlow[]
+  onboardingTasks               OnboardingTask[]
+  onboardingTemplates           OnboardingTemplate[]
+  onboardingTemplateTasks       OnboardingTemplateTask[]
+  employeeDocuments             EmployeeDocument[]
+  signaturePackages             SignaturePackage[]
+  signatureParticipants         SignatureParticipant[]
+  signatureTemplates            SignatureTemplate[]
+  signatureAuditEvents          SignatureAuditEvent[]
+  inventoryAssignments          InventoryAssignment[]
+  inventoryRecoveries           InventoryRecovery[]
+  workflowTrainingAssignments   WorkflowTrainingAssignment[]
+  accessTasks                   AccessTask[]
+  productivityReviews           ProductivityReview[]
+  operationalEvents             OperationalEvent[]
+  workflowBlockers              WorkflowBlocker[]
+  automationRules               AutomationRule[]
+  automationExecutions          AutomationExecution[]
+  automationExecutionSteps      AutomationExecutionStep[]
+  automationAuditLogs           AutomationAuditLog[]
+  outboxEvents                  OutboxEvent[]
+  outboxEventDispatches         OutboxEventDispatch[]
+  integrationEventLogs          IntegrationEventLog[]
+  deadLetterEvents              DeadLetterEvent[]
+  policyChecks                  PolicyCheck[]
+  assetAssignments              AssetAssignment[]
+  trainingActivations           TrainingActivation[]
+  platformTenantAccesses        PlatformTenantAccess[]
 }
 
 model User {
-  id                          String                      @id @default(uuid())
-  tenantId                    String
-  activeBranchId              String?
-  email                       String
-  passwordHash                String
-  firstName                   String
-  lastName                    String
-  status                      UserStatus                  @default(ACTIVE)
-  isSuperAdmin                Boolean                     @default(false)
-  refreshTokenHash            String?
-  lastLoginAt                 DateTime?
-  lastSeenAt                  DateTime?
-  createdAt                   DateTime                    @default(now())
-  updatedAt                   DateTime                    @updatedAt
-  tenant                      Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  activeBranch                Branch?                     @relation("UserActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
-  userRoles                   UserRole[]
-  userPermissions             UserPermission[]
-  auditLogs                   AuditLog[]
-  branchAccesses              UserBranchAccess[]
-  createdVacancies            Vacancy[]                   @relation("VacancyCreatedBy")
-  assignedTrainingAssignments TrainingAssignment[]        @relation("TrainingAssignmentsUser")
-  createdTrainingAssignments  TrainingAssignment[]        @relation("TrainingAssignmentsAssignedBy")
-  trainingProgressRecords     TrainingProgress[]
-  trainingStepProgressRecords TrainingStepProgress[]
-  trainingEventAttendances    TrainingEventAttendance[]
-  trainingQuizAttempts        TrainingQuizAttempt[]
-  trainingCertificates        TrainingCertificate[]
-  trainingFavorites           TrainingFavorite[]
-  trainingAnalyticsSnapshots  TrainingAnalyticsSnapshot[]
-  notifications               Notification[]
-  sessions                    UserSession[]
-  triggeredWorkflows          MasterWorkflow[]            @relation("WorkflowTriggeredBy")
-  operationalEvents           OperationalEvent[]          @relation("OperationalEventActor")
-  productivityReviews         ProductivityReview[]        @relation("ProductivityReviewActor")
-  createdAutomationRules      AutomationRule[]            @relation("AutomationRuleCreatedBy")
-  automationExecutions        AutomationExecution[]       @relation("AutomationExecutionActor")
-  automationAuditLogs         AutomationAuditLog[]        @relation("AutomationAuditActor")
-  policyChecks                PolicyCheck[]               @relation("PolicyCheckCreatedBy")
+  id                            String                      @id @default(uuid())
+  tenantId                      String
+  activeBranchId                String?
+  email                         String
+  passwordHash                  String
+  firstName                     String
+  lastName                      String
+  status                        UserStatus                  @default(ACTIVE)
+  isSuperAdmin                  Boolean                     @default(false)
+  refreshTokenHash              String?
+  lastLoginAt                   DateTime?
+  lastSeenAt                    DateTime?
+  createdAt                     DateTime                    @default(now())
+  updatedAt                     DateTime                    @updatedAt
+  tenant                        Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  activeBranch                  Branch?                     @relation("UserActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
+  userRoles                     UserRole[]
+  userPermissions               UserPermission[]
+  auditLogs                     AuditLog[]
+  branchAccesses                UserBranchAccess[]
+  platformTenantAccesses        PlatformTenantAccess[]
+  createdVacancies              Vacancy[]                   @relation("VacancyCreatedBy")
+  assignedTrainingAssignments   TrainingAssignment[]        @relation("TrainingAssignmentsUser")
+  createdTrainingAssignments    TrainingAssignment[]        @relation("TrainingAssignmentsAssignedBy")
+  trainingProgressRecords       TrainingProgress[]
+  trainingStepProgressRecords   TrainingStepProgress[]
+  trainingLessonProgressRecords TrainingLessonProgress[]
+  trainingEventAttendances      TrainingEventAttendance[]
+  trainingQuizAttempts          TrainingQuizAttempt[]
+  trainingCertificates          TrainingCertificate[]
+  trainingFavorites             TrainingFavorite[]
+  trainingAnalyticsSnapshots    TrainingAnalyticsSnapshot[]
+  notifications                 Notification[]
+  sessions                      UserSession[]
+  outboxEvents                  OutboxEvent[]
+  triggeredWorkflows            MasterWorkflow[]            @relation("WorkflowTriggeredBy")
+  operationalEvents             OperationalEvent[]          @relation("OperationalEventActor")
+  productivityReviews           ProductivityReview[]        @relation("ProductivityReviewActor")
+  createdAutomationRules        AutomationRule[]            @relation("AutomationRuleCreatedBy")
+  automationExecutions          AutomationExecution[]       @relation("AutomationExecutionActor")
+  automationAuditLogs           AutomationAuditLog[]        @relation("AutomationAuditActor")
+  policyChecks                  PolicyCheck[]               @relation("PolicyCheckCreatedBy")
+  assignedInterviews            VacancyApplication[]        @relation("ApplicationInterviewer")
+  supervisedEmployees           Employee[]                  @relation("EmployeeSupervisor")
+  vacancyResponsibilities       VacancyResponsible[]
+  scheduledInterviews           ApplicationInterview[]      @relation("ScheduledInterviewer")
+  createdInterviews             ApplicationInterview[]      @relation("InterviewCreatedBy")
+  interviewScorecards           InterviewScorecard[]
 
   @@unique([tenantId, email])
   @@index([activeBranchId])
@@ -767,19 +906,23 @@ model BillingInvoice {
 }
 
 model UserSession {
-  id               String    @id @default(uuid())
-  tenantId         String
-  userId           String
-  refreshTokenHash String
-  userAgent        String?
-  ipAddress        String?
-  expiresAt        DateTime
-  lastUsedAt       DateTime  @default(now())
-  revokedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                     String    @id @default(uuid())
+  tenantId               String
+  userId                 String
+  refreshTokenHash       String
+  activeTenantId         String?
+  impersonationTenantId  String?
+  impersonationStartedAt DateTime?
+  impersonationReason    String?
+  userAgent              String?
+  ipAddress              String?
+  expiresAt              DateTime
+  lastUsedAt             DateTime  @default(now())
+  revokedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, userId, createdAt])
   @@index([userId, revokedAt, expiresAt])
@@ -828,6 +971,156 @@ model AuditLog {
   @@index([correlationId, createdAt])
   @@index([route, method, createdAt])
   @@map("audit_logs")
+}
+
+model PlatformTenantAccess {
+  userId     String
+  tenantId   String
+  assignedAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([userId, tenantId])
+  @@index([tenantId])
+}
+
+model OutboxEvent {
+  id               String                @id @default(uuid())
+  tenantId         String
+  branchId         String?
+  userId           String?
+  aggregateType    String
+  aggregateId      String?
+  eventName        String
+  eventVersion     Int                   @default(1)
+  payload          Json
+  status           OutboxEventStatus     @default(PENDING)
+  retryCount       Int                   @default(0)
+  maxAttempts      Int                   @default(10)
+  nextRetryAt      DateTime              @default(now())
+  occurredAt       DateTime
+  processedAt      DateTime?
+  lockedAt         DateTime?
+  processingNode   String?
+  lastError        String?
+  deadLetterReason String?
+  correlationId    String?
+  causationId      String?
+  idempotencyKey   String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  user             User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  dispatches       OutboxEventDispatch[]
+  integrationLogs  IntegrationEventLog[]
+  deadLetterEvent  DeadLetterEvent?
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([status, nextRetryAt, createdAt])
+  @@index([tenantId, eventName, eventVersion, createdAt])
+  @@index([aggregateType, aggregateId, createdAt])
+  @@index([correlationId, createdAt])
+  @@index([causationId, createdAt])
+}
+
+model OutboxEventDispatch {
+  id               String                @id @default(uuid())
+  outboxEventId    String
+  tenantId         String
+  branchId         String?
+  queueName        String
+  jobName          String
+  jobId            String?
+  dispatchAttempt  Int
+  status           OutboxDispatchStatus  @default(PENDING)
+  dispatchedAt     DateTime?
+  acknowledgedAt   DateTime?
+  lastError        String?
+  correlationId    String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  outboxEvent      OutboxEvent           @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  integrationLogs  IntegrationEventLog[]
+  deadLetterEvents DeadLetterEvent[]
+
+  @@unique([outboxEventId, dispatchAttempt])
+  @@index([status, createdAt])
+  @@index([queueName, status, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+model IntegrationEventLog {
+  id            String                 @id @default(uuid())
+  outboxEventId String
+  dispatchId    String?
+  tenantId      String
+  branchId      String?
+  eventName     String
+  eventVersion  Int
+  status        IntegrationEventStatus
+  summary       String
+  payload       Json?
+  correlationId String?
+  occurredAt    DateTime               @default(now())
+  createdAt     DateTime               @default(now())
+  outboxEvent   OutboxEvent            @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+  dispatch      OutboxEventDispatch?   @relation(fields: [dispatchId], references: [id], onDelete: SetNull)
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([outboxEventId, createdAt])
+  @@index([dispatchId, createdAt])
+  @@index([tenantId, eventName, createdAt])
+  @@index([status, createdAt])
+}
+
+model DeadLetterEvent {
+  id             String               @id @default(uuid())
+  outboxEventId  String               @unique
+  dispatchId     String?
+  tenantId       String
+  branchId       String?
+  queueName      String?
+  eventName      String
+  eventVersion   Int
+  reason         String
+  payload        Json
+  retryCount     Int
+  firstFailedAt  DateTime
+  lastFailedAt   DateTime
+  resolvedAt     DateTime?
+  resolutionNote String?
+  correlationId  String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  outboxEvent    OutboxEvent          @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+  dispatch       OutboxEventDispatch? @relation(fields: [dispatchId], references: [id], onDelete: SetNull)
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([queueName, createdAt])
+  @@index([resolvedAt, createdAt])
+}
+
+model ConsumerCheckpoint {
+  id                String    @id @default(uuid())
+  consumerName      String
+  queueName         String
+  lastOutboxEventId String?
+  lastDispatchId    String?
+  lastJobId         String?
+  lastCorrelationId String?
+  lastProcessedAt   DateTime?
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([consumerName, queueName])
+  @@index([lastProcessedAt])
 }
 
 model MasterWorkflow {
@@ -946,25 +1239,29 @@ model HiringFlow {
 }
 
 model OnboardingFlow {
-  id              String             @id @default(uuid())
-  tenantId        String
-  branchId        String
-  workflowId      String             @unique
-  employeeId      String
-  candidateId     String?
-  status          WorkflowTaskStatus @default(PENDING)
-  readinessStatus String?
-  startedAt       DateTime           @default(now())
-  completedAt     DateTime?
-  metadata        Json?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch          Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  workflow        MasterWorkflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  employee        Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  candidate       Candidate?         @relation(fields: [candidateId], references: [id], onDelete: SetNull)
-  tasks           OnboardingTask[]
+  id                String              @id @default(uuid())
+  tenantId          String
+  branchId          String
+  workflowId        String              @unique
+  employeeId        String
+  candidateId       String?
+  status            WorkflowTaskStatus  @default(PENDING)
+  readinessStatus   String?
+  startedAt         DateTime            @default(now())
+  completedAt       DateTime?
+  metadata          Json?
+  templateId        String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow          MasterWorkflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee          Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  candidate         Candidate?          @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  tasks             OnboardingTask[]
+  template          OnboardingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  documents         EmployeeDocument[]
+  signaturePackages SignaturePackage[]
 
   @@index([tenantId, branchId, status])
   @@index([employeeId])
@@ -979,6 +1276,8 @@ model OnboardingTask {
   employeeId       String
   taskType         OnboardingTaskType
   title            String
+  taskKey          String
+  description      String?
   status           WorkflowTaskStatus @default(PENDING)
   progressPercent  Int                @default(0)
   dueDate          DateTime?
@@ -987,6 +1286,7 @@ model OnboardingTask {
   ownerId          String?
   blockingReason   String?
   metadata         Json?
+  dependsOnKeys    Json?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -994,9 +1294,88 @@ model OnboardingTask {
   workflow         MasterWorkflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   onboardingFlow   OnboardingFlow     @relation(fields: [onboardingFlowId], references: [id], onDelete: Cascade)
   employee         Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  documents        EmployeeDocument[]
 
+  @@unique([onboardingFlowId, taskKey])
   @@index([tenantId, branchId, status])
   @@index([workflowId, taskType])
+}
+
+model OnboardingTemplate {
+  id            String                   @id @default(uuid())
+  tenantId      String
+  name          String
+  description   String?
+  version       Int                      @default(1)
+  isActive      Boolean                  @default(true)
+  isDefault     Boolean                  @default(false)
+  createdById   String
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  tenant        Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tasks         OnboardingTemplateTask[]
+  flows         OnboardingFlow[]
+  trainingRules TrainingOnboardingRule[]
+
+  @@unique([tenantId, name, version])
+  @@index([tenantId, isActive, isDefault])
+}
+
+model OnboardingTemplateTask {
+  id            String             @id @default(uuid())
+  tenantId      String
+  templateId    String
+  taskKey       String
+  taskType      OnboardingTaskType
+  title         String
+  description   String?
+  ownerType     WorkflowOwnerType  @default(SYSTEM)
+  ownerId       String?
+  dueOffsetDays Int?
+  dependsOnKeys Json?
+  required      Boolean            @default(true)
+  sortOrder     Int                @default(0)
+  metadata      Json?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template      OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, taskKey])
+  @@index([tenantId, templateId, sortOrder])
+}
+
+model EmployeeDocument {
+  id               String          @id @default(uuid())
+  tenantId         String
+  branchId         String
+  employeeId       String
+  onboardingFlowId String?
+  taskId           String?
+  category         String
+  originalName     String
+  storageKey       String
+  mimeType         String
+  sizeBytes        Int
+  checksum         String
+  scanStatus       String
+  status           String          @default("PENDING_REVIEW")
+  uploadedById     String
+  expiresAt        DateTime?
+  reviewedAt       DateTime?
+  reviewedById     String?
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  employee         Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  onboardingFlow   OnboardingFlow? @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
+  task             OnboardingTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, storageKey])
+  @@index([tenantId, employeeId, status])
+  @@index([onboardingFlowId, createdAt])
 }
 
 model SignaturePackage {
@@ -1005,10 +1384,15 @@ model SignaturePackage {
   branchId          String
   workflowId        String
   employeeId        String?
+  onboardingFlowId  String?
+  templateId        String?
   status            SignaturePackageStatus @default(PENDING)
   title             String
   externalProvider  String?
   externalPackageId String?
+  dueDate           DateTime?
+  sentAt            DateTime?
+  lastReminderAt    DateTime?
   signedAt          DateTime?
   metadata          Json?
   createdAt         DateTime               @default(now())
@@ -1017,7 +1401,10 @@ model SignaturePackage {
   branch            Branch                 @relation(fields: [branchId], references: [id], onDelete: Cascade)
   workflow          MasterWorkflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   employee          Employee?              @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  onboardingFlow    OnboardingFlow?        @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
+  template          SignatureTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
   participants      SignatureParticipant[]
+  auditEvents       SignatureAuditEvent[]
 
   @@index([tenantId, branchId, status])
   @@index([workflowId])
@@ -1032,14 +1419,65 @@ model SignatureParticipant {
   roleLabel        String?
   status           SignatureParticipantStatus @default(PENDING)
   signedAt         DateTime?
+  consentedAt      DateTime?
+  signingTokenHash String?
+  tokenExpiresAt   DateTime?
+  consentVersion   String?
+  ipHash           String?
+  userAgentHash    String?
+  evidence         Json?
+  lastReminderAt   DateTime?
   metadata         Json?
   createdAt        DateTime                   @default(now())
   updatedAt        DateTime                   @updatedAt
   tenant           Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   signaturePackage SignaturePackage           @relation(fields: [packageId], references: [id], onDelete: Cascade)
 
+  @@unique([signingTokenHash])
   @@index([tenantId, status])
   @@index([packageId])
+}
+
+model SignatureTemplate {
+  id          String             @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  version     Int                @default(1)
+  provider    String             @default("INTERNAL")
+  title       String
+  content     String
+  consentText String
+  isActive    Boolean            @default(true)
+  isDefault   Boolean            @default(false)
+  createdById String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  packages    SignaturePackage[]
+
+  @@unique([tenantId, name, version])
+  @@index([tenantId, isActive, isDefault])
+}
+
+model SignatureAuditEvent {
+  id            String           @id @default(uuid())
+  tenantId      String
+  packageId     String
+  participantId String?
+  actorId       String?
+  action        String
+  outcome       String
+  requestId     String?
+  ipHash        String?
+  userAgentHash String?
+  evidence      Json?
+  occurredAt    DateTime         @default(now())
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  package       SignaturePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, packageId, occurredAt])
+  @@index([participantId, occurredAt])
 }
 
 model InventoryAssignment {
@@ -1062,6 +1500,7 @@ model InventoryAssignment {
   employee         Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   item             InventoryItem?            @relation(fields: [itemId], references: [id], onDelete: SetNull)
   assetAssignments AssetAssignment[]
+  assets           InventoryAsset[]
 
   @@index([tenantId, branchId, status])
   @@index([workflowId])
@@ -1228,6 +1667,9 @@ model Branch {
   employeeBranches            EmployeeBranch[]
   vacancies                   Vacancy[]
   inventoryStocks             InventoryStock[]
+  inventoryAssets             InventoryAsset[]             @relation("InventoryAssetCurrentBranch")
+  inventoryMovementsFrom      InventoryMovement[]          @relation("InventoryMovementFromBranch")
+  inventoryMovementsTo        InventoryMovement[]          @relation("InventoryMovementToBranch")
   userBranchAccesses          UserBranchAccess[]
   activeUsers                 User[]                       @relation("UserActiveBranch")
   auditLogs                   AuditLog[]
@@ -1236,6 +1678,7 @@ model Branch {
   hiringFlows                 HiringFlow[]
   onboardingFlows             OnboardingFlow[]
   onboardingTasks             OnboardingTask[]
+  employeeDocuments           EmployeeDocument[]
   signaturePackages           SignaturePackage[]
   inventoryAssignments        InventoryAssignment[]
   inventoryRecoveries         InventoryRecovery[]
@@ -1248,9 +1691,14 @@ model Branch {
   automationExecutions        AutomationExecution[]
   automationExecutionSteps    AutomationExecutionStep[]
   automationAuditLogs         AutomationAuditLog[]
+  outboxEvents                OutboxEvent[]
+  outboxEventDispatches       OutboxEventDispatch[]
+  integrationEventLogs        IntegrationEventLog[]
+  deadLetterEvents            DeadLetterEvent[]
   policyChecks                PolicyCheck[]
   assetAssignments            AssetAssignment[]
   trainingActivations         TrainingActivation[]
+  trainingOnboardingRules     TrainingOnboardingRule[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -1261,15 +1709,21 @@ model Employee {
   tenantId                    String
   name                        String
   email                       String
+  jobTitle                    String?
+  supervisorUserId            String?
+  sourceCandidateId           String?
   status                      EmployeeStatus               @default(ACTIVE)
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
   tenant                      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supervisor                  User?                        @relation("EmployeeSupervisor", fields: [supervisorUserId], references: [id], onDelete: SetNull)
+  sourceCandidate             Candidate?                   @relation(fields: [sourceCandidateId], references: [id], onDelete: SetNull)
   branchAssignments           EmployeeBranch[]
   masterWorkflows             MasterWorkflow[]
   hiringFlows                 HiringFlow[]
   onboardingFlows             OnboardingFlow[]
   onboardingTasks             OnboardingTask[]
+  employeeDocuments           EmployeeDocument[]
   signaturePackages           SignaturePackage[]
   inventoryAssignments        InventoryAssignment[]
   inventoryRecoveries         InventoryRecovery[]
@@ -1280,11 +1734,15 @@ model Employee {
   automationAuditLogs         AutomationAuditLog[]
   policyChecks                PolicyCheck[]
   assetAssignments            AssetAssignment[]
+  inventoryAssets             InventoryAsset[]
+  inventoryMovements          InventoryMovement[]
   trainingActivations         TrainingActivation[]
 
   @@unique([tenantId, email])
+  @@unique([tenantId, sourceCandidateId])
   @@index([tenantId])
   @@index([tenantId, status])
+  @@index([tenantId, supervisorUserId])
 }
 
 model EmployeeBranch {
@@ -1319,6 +1777,7 @@ model InventoryItem {
   inventoryAssignments InventoryAssignment[]
   inventoryRecoveries  InventoryRecovery[]
   assetAssignments     AssetAssignment[]
+  assets               InventoryAsset[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
@@ -1339,6 +1798,86 @@ model InventoryStock {
   @@unique([itemId, branchId])
   @@index([tenantId, branchId])
   @@index([tenantId, itemId])
+}
+
+model InventoryAsset {
+  id                   String                  @id @default(uuid())
+  tenantId             String
+  itemId               String
+  branchId             String
+  employeeId           String?
+  workflowAssignmentId String?                 @unique
+  assetTag             String
+  serialNumber         String?
+  status               InventoryAssetStatus    @default(AVAILABLE)
+  condition            InventoryAssetCondition @default(GOOD)
+  notes                String?
+  assignedAt           DateTime?
+  deliveredAt          DateTime?
+  returnRequestedAt    DateTime?
+  returnedAt           DateTime?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  tenant               Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item                 InventoryItem           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  branch               Branch                  @relation("InventoryAssetCurrentBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  employee             Employee?               @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  workflowAssignment   InventoryAssignment?    @relation(fields: [workflowAssignmentId], references: [id], onDelete: SetNull)
+  movements            InventoryMovement[]
+  evidences            InventoryEvidence[]
+
+  @@unique([tenantId, assetTag])
+  @@unique([tenantId, serialNumber])
+  @@index([tenantId, branchId, status])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, itemId])
+}
+
+model InventoryMovement {
+  id           String                   @id @default(uuid())
+  tenantId     String
+  assetId      String
+  type         InventoryMovementType
+  fromBranchId String?
+  toBranchId   String?
+  employeeId   String?
+  actorUserId  String
+  condition    InventoryAssetCondition?
+  notes        String?
+  requestId    String?
+  metadata     Json?
+  occurredAt   DateTime                 @default(now())
+  tenant       Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  asset        InventoryAsset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  fromBranch   Branch?                  @relation("InventoryMovementFromBranch", fields: [fromBranchId], references: [id], onDelete: SetNull)
+  toBranch     Branch?                  @relation("InventoryMovementToBranch", fields: [toBranchId], references: [id], onDelete: SetNull)
+  employee     Employee?                @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  evidences    InventoryEvidence[]
+
+  @@index([tenantId, assetId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+  @@index([tenantId, employeeId, occurredAt])
+}
+
+model InventoryEvidence {
+  id           String                @id @default(uuid())
+  tenantId     String
+  assetId      String
+  movementId   String
+  type         InventoryEvidenceType
+  storageKey   String
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  uploadedBy   String
+  createdAt    DateTime              @default(now())
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  asset        InventoryAsset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  movement     InventoryMovement     @relation(fields: [movementId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, assetId, createdAt])
+  @@index([movementId])
 }
 
 model UserBranchAccess {
@@ -1382,11 +1921,49 @@ model Vacancy {
   branch                Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
   createdByUser         User?                 @relation("VacancyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   applications          VacancyApplication[]
+  stages                VacancyStage[]
+  responsibles          VacancyResponsible[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
   @@index([tenantId, branchId, status])
   @@index([tenantId, createdByUserId])
+}
+
+model VacancyStage {
+  id         String                 @id @default(uuid())
+  tenantId   String
+  vacancyId  String
+  code       String
+  name       String
+  position   Int
+  color      String?
+  isTerminal Boolean                @default(false)
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy    Vacancy                @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  interviews ApplicationInterview[]
+
+  @@unique([vacancyId, code])
+  @@unique([vacancyId, position])
+  @@index([tenantId, vacancyId])
+}
+
+model VacancyResponsible {
+  id        String                 @id @default(uuid())
+  tenantId  String
+  vacancyId String
+  userId    String
+  role      VacancyResponsibleRole
+  createdAt DateTime               @default(now())
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy   Vacancy                @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([vacancyId, userId, role])
+  @@index([tenantId, vacancyId])
+  @@index([tenantId, userId])
 }
 
 model VacancyFormTemplate {
@@ -1407,6 +1984,7 @@ model VacancyFormTemplate {
 model Candidate {
   id                   String                @id @default(uuid())
   tenantId             String
+  accountId            String?
   fullName             String
   email                String
   phone                String?
@@ -1417,15 +1995,28 @@ model Candidate {
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account              CandidateAccount?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
   applications         VacancyApplication[]
   masterWorkflows      MasterWorkflow[]
   hiringFlows          HiringFlow[]
   onboardingFlows      OnboardingFlow[]
   automationExecutions AutomationExecution[]
   automationAuditLogs  AutomationAuditLog[]
+  employees            Employee[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
+  @@index([accountId])
+}
+
+model CandidateAccount {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  candidates   Candidate[]
 }
 
 model AutomationRule {
@@ -1635,6 +2226,7 @@ model VacancyApplication {
   interviewScheduledAt  DateTime?
   interviewFollowUpAt   DateTime?
   interviewObservations String?
+  interviewerUserId     String?
   contactedAt           DateTime?
   interviewCompletedAt  DateTime?
   appliedAt             DateTime                   @default(now())
@@ -1644,13 +2236,68 @@ model VacancyApplication {
   tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   vacancy               Vacancy                    @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
   candidate             Candidate                  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interviewer           User?                      @relation("ApplicationInterviewer", fields: [interviewerUserId], references: [id], onDelete: SetNull)
   timelineEvents        ApplicationTimelineEvent[]
   hiringFlows           HiringFlow[]
+  interviews            ApplicationInterview[]
 
   @@unique([vacancyId, candidateId])
   @@index([tenantId, status])
   @@index([tenantId, vacancyId])
   @@index([candidateId])
+  @@index([tenantId, interviewerUserId, interviewScheduledAt])
+}
+
+model ApplicationInterview {
+  id                String               @id @default(uuid())
+  tenantId          String
+  applicationId     String
+  stageId           String?
+  interviewerUserId String
+  createdByUserId   String
+  title             String
+  type              InterviewType
+  timezone          String
+  startsAt          DateTime
+  endsAt            DateTime
+  location          String?
+  meetingUrl        String?
+  notes             String?
+  status            InterviewStatus      @default(SCHEDULED)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  tenant            Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application       VacancyApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  stage             VacancyStage?        @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  interviewer       User                 @relation("ScheduledInterviewer", fields: [interviewerUserId], references: [id], onDelete: Restrict)
+  createdBy         User                 @relation("InterviewCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  scorecards        InterviewScorecard[]
+
+  @@index([tenantId, startsAt])
+  @@index([applicationId, startsAt])
+  @@index([interviewerUserId, startsAt])
+}
+
+model InterviewScorecard {
+  id             String                  @id @default(uuid())
+  tenantId       String
+  interviewId    String
+  reviewerUserId String
+  criteria       Json
+  overallRating  Int
+  recommendation InterviewRecommendation
+  strengths      String?
+  concerns       String?
+  comments       String?
+  submittedAt    DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  interview      ApplicationInterview    @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  reviewer       User                    @relation(fields: [reviewerUserId], references: [id], onDelete: Restrict)
+
+  @@unique([interviewId, reviewerUserId])
+  @@index([tenantId, interviewId])
+  @@index([reviewerUserId, submittedAt])
 }
 
 model ApplicationTimelineEvent {
@@ -1733,6 +2380,8 @@ model TrainingCurriculum {
   progressRecords             TrainingProgress[]
   events                      TrainingEvent[]
   certificates                TrainingCertificate[]
+  pathCourses                 TrainingPathCourse[]
+  onboardingRules             TrainingOnboardingRule[]
   favorites                   TrainingFavorite[]
   workflowTrainingAssignments WorkflowTrainingAssignment[]
   TrainingActivation          TrainingActivation[]
@@ -1760,6 +2409,17 @@ model TrainingCourse {
   points                      Int?
   isRequired                  Boolean                      @default(false)
   isPublished                 Boolean                      @default(false)
+  status                      TrainingCourseStatus         @default(DRAFT)
+  language                    String                       @default("es")
+  introVideoUrl               String?
+  scheduledPublishAt          DateTime?
+  scheduledRetireAt           DateTime?
+  publishedAt                 DateTime?
+  retiredAt                   DateTime?
+  version                     Int                          @default(1)
+  sourceCourseId              String?
+  createdById                 String?
+  updatedById                 String?
   tags                        String[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
@@ -1767,20 +2427,196 @@ model TrainingCourse {
   curriculum                  TrainingCurriculum?          @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
   category                    TrainingCategory?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   steps                       TrainingCourseStep[]
+  modules                     TrainingCourseModule[]
+  versions                    TrainingCourseVersion[]
+  transitions                 TrainingCourseTransition[]
   assignments                 TrainingAssignment[]
   progressRecords             TrainingProgress[]
   events                      TrainingEvent[]
   quizzes                     TrainingQuiz[]
   certificates                TrainingCertificate[]
+  compliancePolicies          TrainingCompliancePolicy[]
+  scormPackages               TrainingScormPackage[]
   favorites                   TrainingFavorite[]
   workflowTrainingAssignments WorkflowTrainingAssignment[]
   TrainingActivation          TrainingActivation[]
+  pathEntries                 TrainingPathCourse[]         @relation("TrainingPathCourse")
+  prerequisiteEntries         TrainingPathCourse[]         @relation("TrainingPathPrerequisite")
+  onboardingRules             TrainingOnboardingRule[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, isPublished])
+  @@index([tenantId, status])
+  @@index([scheduledPublishAt])
+  @@index([scheduledRetireAt])
+  @@index([sourceCourseId])
   @@index([curriculumId])
   @@index([categoryId])
   @@index([type])
+}
+
+model TrainingCompliancePolicy {
+  id           String         @id @default(uuid())
+  tenantId     String
+  courseId     String
+  isActive     Boolean        @default(true)
+  dueDays      Int            @default(30)
+  renewalDays  Int?
+  reminderDays Int[]          @default([7, 2])
+  createdById  String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course       TrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, courseId])
+  @@index([tenantId, isActive])
+}
+
+model TrainingPathCourse {
+  id                   String             @id @default(uuid())
+  tenantId             String
+  curriculumId         String
+  courseId             String
+  prerequisiteCourseId String?
+  sortOrder            Int                @default(0)
+  isRequired           Boolean            @default(true)
+  unlockAfterDays      Int?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  tenant               Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  curriculum           TrainingCurriculum @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  course               TrainingCourse     @relation("TrainingPathCourse", fields: [courseId], references: [id], onDelete: Cascade)
+  prerequisiteCourse   TrainingCourse?    @relation("TrainingPathPrerequisite", fields: [prerequisiteCourseId], references: [id], onDelete: SetNull)
+
+  @@unique([curriculumId, courseId])
+  @@index([tenantId, curriculumId, sortOrder])
+  @@index([prerequisiteCourseId])
+}
+
+model TrainingOnboardingRule {
+  id                   String              @id @default(uuid())
+  tenantId             String
+  onboardingTemplateId String?
+  branchId             String?
+  curriculumId         String?
+  courseId             String?
+  name                 String
+  jobTitlePattern      String?
+  roleCode             String?
+  dueDays              Int                 @default(30)
+  isRequired           Boolean             @default(true)
+  isActive             Boolean             @default(true)
+  createdById          String
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  tenant               Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  onboardingTemplate   OnboardingTemplate? @relation(fields: [onboardingTemplateId], references: [id], onDelete: SetNull)
+  branch               Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  curriculum           TrainingCurriculum? @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  course               TrainingCourse?     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isActive])
+  @@index([onboardingTemplateId])
+  @@index([branchId])
+}
+
+model TrainingCourseModule {
+  id          String           @id @default(uuid())
+  courseId    String
+  title       String
+  description String?
+  sortOrder   Int              @default(0)
+  isRequired  Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  course      TrainingCourse   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons     TrainingLesson[]
+
+  @@index([courseId, sortOrder])
+}
+
+model TrainingLesson {
+  id               String                   @id @default(uuid())
+  moduleId         String
+  title            String
+  description      String?
+  sortOrder        Int                      @default(0)
+  estimatedMinutes Int?
+  isRequired       Boolean                  @default(true)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  module           TrainingCourseModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  blocks           TrainingContentBlock[]
+  progressRecords  TrainingLessonProgress[]
+
+  @@index([moduleId, sortOrder])
+}
+
+model TrainingLessonProgress {
+  id           String         @id @default(uuid())
+  tenantId     String
+  userId       String
+  lessonId     String
+  isCompleted  Boolean        @default(false)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  lastOpenedAt DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson       TrainingLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, lessonId])
+  @@index([tenantId, userId, isCompleted])
+  @@index([lessonId])
+}
+
+model TrainingContentBlock {
+  id          String                   @id @default(uuid())
+  lessonId    String
+  type        TrainingContentBlockType
+  title       String?
+  content     Json?
+  resourceUrl String?
+  sortOrder   Int                      @default(0)
+  isRequired  Boolean                  @default(true)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  lesson      TrainingLesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId, sortOrder])
+  @@index([type])
+}
+
+model TrainingCourseVersion {
+  id          String               @id @default(uuid())
+  courseId    String
+  version     Int
+  status      TrainingCourseStatus
+  snapshot    Json
+  createdById String?
+  createdAt   DateTime             @default(now())
+  course      TrainingCourse       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, version])
+  @@index([courseId, createdAt])
+}
+
+model TrainingCourseTransition {
+  id         String                @id @default(uuid())
+  courseId   String
+  fromStatus TrainingCourseStatus?
+  toStatus   TrainingCourseStatus
+  action     String
+  actorId    String?
+  reason     String?
+  createdAt  DateTime              @default(now())
+  course     TrainingCourse        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model TrainingCourseStep {
@@ -1810,6 +2646,7 @@ model TrainingAssignment {
   assignedById    String?
   assignmentType  TrainingAssignmentType
   sourceType      TrainingAssignmentSourceType
+  isRequired      Boolean                      @default(true)
   dueAt           DateTime?
   startAt         DateTime?
   completedAt     DateTime?
@@ -1885,6 +2722,9 @@ model TrainingEvent {
   relatedCourseId     String?
   relatedCurriculumId String?
   capacity            Int?
+  meetingUrl          String?
+  timeZone            String                    @default("UTC")
+  provider            String?
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
   tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1895,6 +2735,116 @@ model TrainingEvent {
   @@index([tenantId, startsAt])
   @@index([relatedCourseId])
   @@index([relatedCurriculumId])
+}
+
+model TrainingScormPackage {
+  id          String                 @id @default(uuid())
+  tenantId    String
+  courseId    String
+  title       String
+  version     String
+  launchUrl   String
+  manifest    Json
+  checksum    String
+  storagePath String?
+  fileSize    Int?
+  status      String                 @default("READY")
+  createdById String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course      TrainingCourse         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  sessions    TrainingScormSession[]
+
+  @@index([tenantId, courseId])
+}
+
+model TrainingScormSession {
+  id              String               @id @default(uuid())
+  tenantId        String
+  packageId       String
+  userId          String
+  status          String               @default("IN_PROGRESS")
+  score           Int?
+  progressPercent Int                  @default(0)
+  suspendData     Json?
+  startedAt       DateTime             @default(now())
+  lastActivityAt  DateTime             @default(now())
+  completedAt     DateTime?
+  package         TrainingScormPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, status])
+}
+
+model TrainingXapiStatement {
+  id          String   @id @default(uuid())
+  tenantId    String
+  userId      String
+  statementId String   @unique
+  verb        String
+  objectId    String
+  result      Json?
+  context     Json?
+  occurredAt  DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, userId, occurredAt])
+}
+
+model TrainingWebhook {
+  id              String                    @id @default(uuid())
+  tenantId        String
+  name            String
+  endpointUrl     String
+  eventTypes      String[]
+  secretHash      String
+  secretEncrypted String?
+  isActive        Boolean                   @default(true)
+  lastStatus      String?
+  lastError       String?
+  lastDeliveryAt  DateTime?
+  createdById     String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  deliveries      TrainingWebhookDelivery[]
+
+  @@index([tenantId, isActive])
+}
+
+model TrainingWebhookDelivery {
+  id             String          @id @default(uuid())
+  tenantId       String
+  webhookId      String
+  eventType      String
+  eventId        String
+  payload        Json
+  status         String          @default("PENDING")
+  attemptCount   Int             @default(0)
+  responseStatus Int?
+  lastError      String?
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  webhook        TrainingWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@unique([webhookId, eventId])
+  @@index([tenantId, status, nextAttemptAt])
+}
+
+model TrainingRecommendation {
+  id          String    @id @default(uuid())
+  tenantId    String
+  userId      String
+  courseId    String
+  reason      String
+  evidence    Json
+  status      String    @default("SUGGESTED")
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId, userId, status])
 }
 
 model TrainingEventAttendance {
@@ -1963,17 +2913,19 @@ model TrainingQuiz {
 }
 
 model TrainingQuizQuestion {
-  id           String                   @id @default(uuid())
-  quizId       String
-  prompt       String
-  questionType TrainingQuizQuestionType
-  sortOrder    Int                      @default(0)
-  explanation  String?
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
-  quiz         TrainingQuiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  options      TrainingQuizOption[]
-  answers      TrainingQuizAnswer[]
+  id                    String                   @id @default(uuid())
+  quizId                String
+  prompt                String
+  questionType          TrainingQuizQuestionType
+  sortOrder             Int                      @default(0)
+  explanation           String?
+  points                Int                      @default(1)
+  requiresManualGrading Boolean                  @default(false)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  quiz                  TrainingQuiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  options               TrainingQuizOption[]
+  answers               TrainingQuizAnswer[]
 
   @@index([quizId, sortOrder])
 }
@@ -1999,8 +2951,12 @@ model TrainingQuizAttempt {
   quizId      String
   startedAt   DateTime
   submittedAt DateTime?
+  expiresAt   DateTime?
   score       Int?
   passed      Boolean?
+  gradedAt    DateTime?
+  gradedById  String?
+  feedback    String?
   status      TrainingQuizAttemptStatus @default(IN_PROGRESS)
   createdAt   DateTime                  @default(now())
   updatedAt   DateTime                  @updatedAt
@@ -2014,37 +2970,44 @@ model TrainingQuizAttempt {
 }
 
 model TrainingQuizAnswer {
-  id         String               @id @default(uuid())
-  attemptId  String
-  questionId String
-  optionId   String?
-  textAnswer String?
-  isCorrect  Boolean?
-  createdAt  DateTime             @default(now())
-  updatedAt  DateTime             @updatedAt
-  attempt    TrainingQuizAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  question   TrainingQuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  option     TrainingQuizOption?  @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  id                String               @id @default(uuid())
+  attemptId         String
+  questionId        String
+  optionId          String?
+  selectedOptionIds String[]
+  textAnswer        String?
+  isCorrect         Boolean?
+  awardedPoints     Int?
+  graderFeedback    String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  attempt           TrainingQuizAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question          TrainingQuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  option            TrainingQuizOption?  @relation(fields: [optionId], references: [id], onDelete: SetNull)
 
   @@unique([attemptId, questionId])
   @@index([attemptId])
 }
 
 model TrainingCertificate {
-  id             String              @id @default(uuid())
-  tenantId       String
-  userId         String
-  curriculumId   String?
-  courseId       String?
-  certificateUrl String
-  issuedAt       DateTime
-  expiresAt      DateTime?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  curriculum     TrainingCurriculum? @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
-  course         TrainingCourse?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  id               String              @id @default(uuid())
+  tenantId         String
+  userId           String
+  curriculumId     String?
+  courseId         String?
+  certificateUrl   String
+  verificationCode String              @unique
+  issuedAt         DateTime
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+  revokedById      String?
+  revocationReason String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  tenant           Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  curriculum       TrainingCurriculum? @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+  course           TrainingCourse?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, userId, curriculumId])
   @@unique([tenantId, userId, courseId])

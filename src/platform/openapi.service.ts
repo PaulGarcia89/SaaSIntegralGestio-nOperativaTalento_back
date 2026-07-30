@@ -27,6 +27,7 @@ export class OpenApiService {
         { name: 'Billing' },
         { name: 'Notifications' },
         { name: 'Audit Logs' },
+        { name: 'Metrics' },
         { name: 'Jobs' },
         { name: 'Applications' },
         { name: 'Training' },
@@ -46,6 +47,11 @@ export class OpenApiService {
         '/auth/refresh': { post: { tags: ['Auth'], summary: 'Rotate refresh and access tokens' } },
         '/auth/logout': { post: { tags: ['Auth'], summary: 'Revoke the current session' } },
         '/auth/me': { get: { tags: ['Auth'], summary: 'Get frontend-ready auth context' } },
+        '/me/context': { get: { tags: ['Auth'], summary: 'Get canonical frontend navigation and access context' } },
+        '/auth/context/tenant': { put: { tags: ['Auth'], summary: 'Switch active tenant context' } },
+        '/auth/context/branch': { put: { tags: ['Auth'], summary: 'Switch active branch context' } },
+        '/auth/impersonation/start': { post: { tags: ['Auth'], summary: 'Start superadmin tenant impersonation' } },
+        '/auth/impersonation/stop': { post: { tags: ['Auth'], summary: 'Stop superadmin tenant impersonation' } },
         '/auth/sessions': { get: { tags: ['Auth'], summary: 'List active sessions' } },
         '/companies/current': { get: { tags: ['Companies'], summary: 'Get current tenant profile' } },
         '/companies/current/capabilities': {
@@ -62,6 +68,18 @@ export class OpenApiService {
           patch: { tags: ['Notifications'], summary: 'Mark a notification as read' },
         },
         '/audit/logs': { get: { tags: ['Audit Logs'], summary: 'List audit events' } },
+        '/metrics/queue-overview': {
+          get: { tags: ['Metrics'], summary: 'Get operational queue overview and latency metrics' },
+        },
+        '/metrics/dead-letter': {
+          get: { tags: ['Metrics'], summary: 'List dead-letter events pending operational review' },
+        },
+        '/metrics/throughput-by-domain': {
+          get: { tags: ['Metrics'], summary: 'Get domain event throughput grouped by domain and status' },
+        },
+        '/metrics/queue-errors-by-tenant': {
+          get: { tags: ['Metrics'], summary: 'Get queue processing errors grouped by tenant' },
+        },
       },
     };
   }

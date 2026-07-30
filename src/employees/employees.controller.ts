@@ -13,11 +13,12 @@ import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
 import { EmployeesService } from './employees.service';
+import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
 import { BranchLocal } from '../common/decorators/branch-local.decorator';
 
 @Controller('employees')
-@UseGuards(JwtAuthGuard, TenantGuard, ScopeGuard, BranchAccessGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ScopeGuard, BranchAccessGuard, PermissionGuard)
 @BranchLocal()
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
@@ -41,7 +42,7 @@ export class EmployeesController {
   @Get(':id')
   @RequirePermissions('employees.read')
   findOne(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.employeesService.findOne(id, request.tenant!.id);
+    return this.employeesService.findOne(id, request.user, request.tenant!.id);
   }
 
   @Patch(':id')
@@ -51,7 +52,7 @@ export class EmployeesController {
     @Param('id') id: string,
     @Body() dto: UpdateEmployeeDto,
   ) {
-    return this.employeesService.update(id, request.tenant!.id, dto);
+    return this.employeesService.update(id, request.user, request.tenant!.id, dto);
   }
 
   @Patch(':id/status')
@@ -61,13 +62,13 @@ export class EmployeesController {
     @Param('id') id: string,
     @Body() dto: UpdateEmployeeStatusDto,
   ) {
-    return this.employeesService.updateStatus(id, request.tenant!.id, dto);
+    return this.employeesService.updateStatus(id, request.user, request.tenant!.id, dto);
   }
 
   @Get(':id/history')
   @RequirePermissions('employees.read')
   history(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.employeesService.history(id, request.tenant!.id);
+    return this.employeesService.history(id, request.user, request.tenant!.id);
   }
 
   @Post(':id/transfer')
@@ -77,7 +78,7 @@ export class EmployeesController {
     @Param('id') id: string,
     @Body() dto: TransferEmployeeDto,
   ) {
-    return this.employeesService.transfer(id, request.tenant!.id, dto);
+    return this.employeesService.transfer(id, request.user, request.tenant!.id, dto);
   }
 
   @Post(':id/assignments')
@@ -87,6 +88,6 @@ export class EmployeesController {
     @Param('id') id: string,
     @Body() dto: AssignEmployeeBranchDto,
   ) {
-    return this.employeesService.assignSecondaryBranch(id, request.tenant!.id, dto);
+    return this.employeesService.assignSecondaryBranch(id, request.user, request.tenant!.id, dto);
   }
 }

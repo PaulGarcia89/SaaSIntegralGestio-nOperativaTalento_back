@@ -14,6 +14,7 @@ export class RequestLoggingMiddleware implements NestMiddleware {
       this.logger.log(
         JSON.stringify({
           type: 'request',
+          requestId: request.requestId ?? null,
           tenantId: request.tenant?.id ?? request.user?.tenantId ?? null,
           branchId: request.branch?.id ?? request.user?.activeBranchId ?? null,
           userId: request.user?.sub ?? null,

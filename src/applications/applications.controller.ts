@@ -8,21 +8,63 @@ import { TenantWide } from '../common/decorators/tenant-wide.decorator';
 import { BranchLocal } from '../common/decorators/branch-local.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { CurrentBranch } from '../common/decorators/current-branch.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestWithUser } from '../common/types/request-with-user.type';
 import { ApplicationsService } from './applications.service';
 import { ListApplicationsDto } from './dto/list-applications.dto';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto';
+import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { SubscriptionGuard } from '../common/guards/subscription.guard';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
+import { RequireModule } from '../common/decorators/module-access.decorator';
+import { ModuleCode } from '@prisma/client';
+import { BulkUpdateApplicationsDto } from './dto/bulk-update-applications.dto';
 
 @Controller('applications')
-@UseGuards(JwtAuthGuard, TenantGuard, ScopeGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
 @TenantWide()
+@RequireModule(ModuleCode.ATS)
 export class ApplicationsController {
   constructor(private readonly applicationsService: ApplicationsService) {}
 
   @Get()
   @RequirePermissions('applications.read')
-  findAll(@Req() request: RequestWithUser, @Query() query: ListApplicationsDto) {
-    return this.applicationsService.listForTenant(request.tenant!.id, query);
+  findAll(
+    @Req() request: RequestWithUser,
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ListApplicationsDto,
+  ) {
+    return this.applicationsService.listForTenant(user, request.tenant!.id, query);
+  }
+
+  @Get('export')
+  @RequirePermissions('applications.export')
+  export(
+    @Req() request: RequestWithUser,
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ListApplicationsDto,
+  ) {
+    return this.applicationsService.exportForTenant(user, request.tenant!.id, query);
+  }
+
+  @Patch('bulk/status')
+  @RequirePermissions('applications.bulk_update')
+  bulkUpdateStatus(
+    @Req() request: RequestWithUser,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: BulkUpdateApplicationsDto,
+  ) {
+    return this.applicationsService.bulkUpdateStatus(user, request.tenant!.id, dto);
+  }
+
+  @Get(':id/files/resume')
+  @RequirePermissions('applications.files.read')
+  resumeFile(
+    @Req() request: RequestWithUser,
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this.applicationsService.getResumeFile(id, user, request.tenant!.id);
   }
 
   @Get('branch')
@@ -39,8 +81,8 @@ export class ApplicationsController {
 
   @Get(':id')
   @RequirePermissions('applications.read')
-  findOne(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.applicationsService.findOneForTenant(id, request.tenant!.id);
+  findOne(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.applicationsService.findOneForTenant(id, user, request.tenant!.id);
   }
 
   @Get('branch/:id')
@@ -59,10 +101,11 @@ export class ApplicationsController {
   @RequirePermissions('applications.update')
   updateStatus(
     @Req() request: RequestWithUser,
+    @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Body() dto: UpdateApplicationStatusDto,
   ) {
-    return this.applicationsService.updateStatus(id, request.tenant!.id, dto);
+    return this.applicationsService.updateStatus(id, user, request.tenant!.id, dto);
   }
 
   @Patch('branch/:id/status')

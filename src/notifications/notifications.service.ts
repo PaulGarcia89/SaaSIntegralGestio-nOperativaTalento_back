@@ -11,9 +11,24 @@ export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(actor: JwtPayload, dto: CreateNotificationDto) {
+    const tenantId = this.activeTenantId(actor);
+    if (dto.userId) {
+      const user = await this.prisma.user.findFirst({
+        where: {
+          id: dto.userId,
+          tenantId,
+        },
+        select: { id: true },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+    }
+
     return this.prisma.notification.create({
       data: {
-        tenantId: actor.tenantId,
+        tenantId,
         userId: dto.userId,
         type: dto.type,
         title: dto.title,
@@ -24,9 +39,10 @@ export class NotificationsService {
   }
 
   async findAll(actor: JwtPayload, query: ListNotificationsDto) {
+    const tenantId = this.activeTenantId(actor);
     const pagination = normalizeOffsetPagination(query);
     const where = {
-      tenantId: actor.tenantId,
+      tenantId,
       OR: [{ userId: null }, { userId: actor.sub }],
       ...(query.unreadOnly ? { readAt: null } : {}),
     };
@@ -50,11 +66,12 @@ export class NotificationsService {
   }
 
   async markAsRead(actor: JwtPayload, id: string) {
+    const tenantId = this.activeTenantId(actor);
     const notification = await this.prisma.notification.findUnique({
       where: { id },
     });
 
-    if (!notification || notification.tenantId !== actor.tenantId) {
+    if (!notification || notification.tenantId !== tenantId) {
       throw new NotFoundException('Notification not found');
     }
 
@@ -66,5 +83,9 @@ export class NotificationsService {
       where: { id },
       data: { readAt: new Date() },
     });
+  }
+
+  private activeTenantId(actor: JwtPayload) {
+    return actor.activeTenantId ?? actor.tenantId;
   }
 }

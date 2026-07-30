@@ -1,7 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { IntegrationEventStatus, OutboxEventStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { MESSAGE_QUEUE_LIST } from '../messaging/messaging.constants';
+import { MessageBusPort } from '../messaging/message-bus.port';
+import { MESSAGE_BUS } from '../messaging/message-bus.tokens';
 
 type TenantAccessSummary = {
   tenantId: string;
@@ -25,7 +28,10 @@ type TenantAccessSummary = {
 
 @Injectable()
 export class MetricsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(MESSAGE_BUS) private readonly messageBus: MessageBusPort,
+  ) {}
 
   async getTenantActivity(actor: JwtPayload, requestedMinutes?: number) {
     this.ensureSuperAdmin(actor);
@@ -1027,10 +1033,455 @@ export class MetricsService {
     };
   }
 
+  async getQueueOverview(
+    actor: JwtPayload,
+    fromInput?: string,
+    toInput?: string,
+    tenantId?: string,
+  ) {
+    const { from, to } = this.resolveDateRange(fromInput, toInput);
+    const scopedTenantId = this.resolveOperationalTenantScope(actor, tenantId);
+    const now = new Date();
+    const tenantWhere = scopedTenantId ? { tenantId: scopedTenantId } : {};
+
+    const [
+      totalEvents,
+      pendingEvents,
+      retryingJobs,
+      failedJobs,
+      processedEvents,
+      deadLetterOpen,
+      statusGroups,
+      queueDispatchGroups,
+      latencyAggregate,
+      processingDurations,
+    ] = await Promise.all([
+      this.prisma.outboxEvent.count({
+        where: {
+          createdAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+      }),
+      this.prisma.outboxEvent.count({
+        where: {
+          status: { in: [OutboxEventStatus.PENDING, OutboxEventStatus.FAILED] },
+          nextRetryAt: { lte: now },
+          createdAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+      }),
+      this.prisma.outboxEvent.count({
+        where: {
+          retryCount: { gt: 0 },
+          status: {
+            in: [
+              OutboxEventStatus.PENDING,
+              OutboxEventStatus.FAILED,
+              OutboxEventStatus.PROCESSING,
+            ],
+          },
+          createdAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+      }),
+      this.prisma.outboxEvent.count({
+        where: {
+          status: OutboxEventStatus.FAILED,
+          createdAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+      }),
+      this.prisma.outboxEvent.count({
+        where: {
+          status: OutboxEventStatus.PROCESSED,
+          processedAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+      }),
+      this.prisma.deadLetterEvent.count({
+        where: {
+          resolvedAt: null,
+          createdAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+      }),
+      this.prisma.outboxEvent.groupBy({
+        by: ['status'],
+        where: {
+          createdAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.outboxEventDispatch.groupBy({
+        by: ['queueName', 'status'],
+        where: {
+          createdAt: { gte: from, lte: to },
+          ...tenantWhere,
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.outboxEvent.aggregate({
+        where: {
+          status: OutboxEventStatus.PROCESSED,
+          processedAt: { not: null, gte: from, lte: to },
+          ...tenantWhere,
+        },
+        _avg: { retryCount: true },
+      }),
+      this.getProcessingDurationMetrics(from, to, scopedTenantId),
+    ]);
+
+    const queueSummary = new Map<
+      string,
+      {
+        queueName: string;
+        pending: number;
+        queued: number;
+        acknowledged: number;
+        failed: number;
+        total: number;
+      }
+    >();
+
+    for (const group of queueDispatchGroups) {
+      const bucket =
+        queueSummary.get(group.queueName) ??
+        {
+          queueName: group.queueName,
+          pending: 0,
+          queued: 0,
+          acknowledged: 0,
+          failed: 0,
+          total: 0,
+        };
+
+      bucket.total += group._count._all;
+      if (group.status === 'PENDING') {
+        bucket.pending = group._count._all;
+      }
+      if (group.status === 'QUEUED') {
+        bucket.queued = group._count._all;
+      }
+      if (group.status === 'ACKNOWLEDGED') {
+        bucket.acknowledged = group._count._all;
+      }
+      if (group.status === 'FAILED') {
+        bucket.failed = group._count._all;
+      }
+
+      queueSummary.set(group.queueName, bucket);
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      from: from.toISOString(),
+      to: to.toISOString(),
+      tenantScope: scopedTenantId ?? 'ALL',
+      bus: {
+        enabled: this.messageBus.isEnabled(),
+        driver: this.messageBus.getDriverName(),
+        workerCount: this.messageBus.isEnabled() ? MESSAGE_QUEUE_LIST.length : 0,
+        queues: MESSAGE_QUEUE_LIST,
+      },
+      summary: {
+        totalEvents,
+        pendingEvents,
+        retryingJobs,
+        failedJobs,
+        processedEvents,
+        deadLetterOpen,
+        averageRetryCount: Number(latencyAggregate._avg.retryCount ?? 0),
+      },
+      statusBreakdown: statusGroups.map((group) => ({
+        status: group.status,
+        count: group._count._all,
+      })),
+      queueStatus: [...queueSummary.values()].sort((left, right) =>
+        left.queueName.localeCompare(right.queueName),
+      ),
+      performance: {
+        averageProcessingMs: processingDurations.averageProcessingMs,
+        p95ProcessingMs: processingDurations.p95ProcessingMs,
+        averageEndToEndLatencyMs: processingDurations.averageLatencyMs,
+        maxEndToEndLatencyMs: processingDurations.maxLatencyMs,
+      },
+    };
+  }
+
+  async getDeadLetterEvents(
+    actor: JwtPayload,
+    tenantId?: string,
+    requestedLimit?: number,
+  ) {
+    const scopedTenantId = this.resolveOperationalTenantScope(actor, tenantId);
+    const limit = this.normalizeLimit(requestedLimit);
+
+    const events = await this.prisma.deadLetterEvent.findMany({
+      where: {
+        ...(scopedTenantId ? { tenantId: scopedTenantId } : {}),
+      },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        branch: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: [{ resolvedAt: 'asc' }, { lastFailedAt: 'desc' }],
+      take: limit,
+    });
+
+    return {
+      generatedAt: new Date().toISOString(),
+      tenantScope: scopedTenantId ?? 'ALL',
+      limit,
+      openCount: events.filter((event) => !event.resolvedAt).length,
+      events: events.map((event) => ({
+        id: event.id,
+        outboxEventId: event.outboxEventId,
+        dispatchId: event.dispatchId,
+        queueName: event.queueName,
+        eventName: event.eventName,
+        eventVersion: event.eventVersion,
+        tenant: event.tenant,
+        branch: event.branch,
+        retryCount: event.retryCount,
+        reason: event.reason,
+        correlationId: event.correlationId,
+        firstFailedAt: event.firstFailedAt.toISOString(),
+        lastFailedAt: event.lastFailedAt.toISOString(),
+        resolvedAt: event.resolvedAt?.toISOString() ?? null,
+        resolutionNote: event.resolutionNote ?? null,
+      })),
+    };
+  }
+
+  async getThroughputByDomain(
+    actor: JwtPayload,
+    fromInput?: string,
+    toInput?: string,
+    tenantId?: string,
+  ) {
+    const { from, to } = this.resolveDateRange(fromInput, toInput);
+    const scopedTenantId = this.resolveOperationalTenantScope(actor, tenantId);
+
+    const logs = await this.prisma.integrationEventLog.findMany({
+      where: {
+        occurredAt: { gte: from, lte: to },
+        ...(scopedTenantId ? { tenantId: scopedTenantId } : {}),
+      },
+      select: {
+        eventName: true,
+        status: true,
+        tenantId: true,
+        occurredAt: true,
+      },
+      orderBy: { occurredAt: 'asc' },
+    });
+
+    const byDomain = new Map<
+      string,
+      {
+        domain: string;
+        total: number;
+        published: number;
+        dispatched: number;
+        processing: number;
+        processed: number;
+        failed: number;
+        deadLetter: number;
+        lastSeenAt: string | null;
+      }
+    >();
+
+    for (const log of logs) {
+      const domain = this.resolveDomainFromEventName(log.eventName);
+      const bucket =
+        byDomain.get(domain) ??
+        {
+          domain,
+          total: 0,
+          published: 0,
+          dispatched: 0,
+          processing: 0,
+          processed: 0,
+          failed: 0,
+          deadLetter: 0,
+          lastSeenAt: null,
+        };
+
+      bucket.total += 1;
+      if (log.status === IntegrationEventStatus.PUBLISHED) {
+        bucket.published += 1;
+      }
+      if (
+        log.status === IntegrationEventStatus.DISPATCH_PENDING ||
+        log.status === IntegrationEventStatus.DISPATCHED
+      ) {
+        bucket.dispatched += 1;
+      }
+      if (log.status === IntegrationEventStatus.PROCESSING) {
+        bucket.processing += 1;
+      }
+      if (log.status === IntegrationEventStatus.PROCESSED) {
+        bucket.processed += 1;
+      }
+      if (log.status === IntegrationEventStatus.FAILED) {
+        bucket.failed += 1;
+      }
+      if (log.status === IntegrationEventStatus.DEAD_LETTER) {
+        bucket.deadLetter += 1;
+      }
+
+      bucket.lastSeenAt = log.occurredAt.toISOString();
+      byDomain.set(domain, bucket);
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      from: from.toISOString(),
+      to: to.toISOString(),
+      tenantScope: scopedTenantId ?? 'ALL',
+      domains: [...byDomain.values()].sort((left, right) =>
+        left.domain.localeCompare(right.domain),
+      ),
+    };
+  }
+
+  async getQueueErrorsByTenant(
+    actor: JwtPayload,
+    fromInput?: string,
+    toInput?: string,
+    tenantId?: string,
+  ) {
+    const { from, to } = this.resolveDateRange(fromInput, toInput);
+    const scopedTenantId = this.resolveOperationalTenantScope(actor, tenantId);
+
+    const logs = await this.prisma.integrationEventLog.findMany({
+      where: {
+        occurredAt: { gte: from, lte: to },
+        status: {
+          in: [IntegrationEventStatus.FAILED, IntegrationEventStatus.DEAD_LETTER],
+        },
+        ...(scopedTenantId ? { tenantId: scopedTenantId } : {}),
+      },
+      select: {
+        tenantId: true,
+        eventName: true,
+        status: true,
+        occurredAt: true,
+      },
+      orderBy: { occurredAt: 'desc' },
+    });
+
+    const tenantIds = [...new Set(logs.map((log) => log.tenantId))];
+    const tenants = tenantIds.length
+      ? await this.prisma.tenant.findMany({
+          where: { id: { in: tenantIds } },
+          select: { id: true, name: true, slug: true, status: true },
+        })
+      : [];
+    const tenantMap = new Map(tenants.map((tenant) => [tenant.id, tenant]));
+
+    const grouped = new Map<
+      string,
+      {
+        tenantId: string;
+        tenantName: string;
+        tenantSlug: string;
+        tenantStatus: string;
+        failed: number;
+        deadLetter: number;
+        lastErrorAt: string | null;
+        domains: Map<string, number>;
+      }
+    >();
+
+    for (const log of logs) {
+      const tenant = tenantMap.get(log.tenantId);
+      if (!tenant) {
+        continue;
+      }
+
+      const bucket =
+        grouped.get(log.tenantId) ??
+        {
+          tenantId: tenant.id,
+          tenantName: tenant.name,
+          tenantSlug: tenant.slug,
+          tenantStatus: tenant.status,
+          failed: 0,
+          deadLetter: 0,
+          lastErrorAt: null,
+          domains: new Map<string, number>(),
+        };
+
+      if (log.status === IntegrationEventStatus.FAILED) {
+        bucket.failed += 1;
+      }
+      if (log.status === IntegrationEventStatus.DEAD_LETTER) {
+        bucket.deadLetter += 1;
+      }
+
+      bucket.lastErrorAt = bucket.lastErrorAt ?? log.occurredAt.toISOString();
+      const domain = this.resolveDomainFromEventName(log.eventName);
+      bucket.domains.set(domain, (bucket.domains.get(domain) ?? 0) + 1);
+      grouped.set(log.tenantId, bucket);
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      from: from.toISOString(),
+      to: to.toISOString(),
+      tenantScope: scopedTenantId ?? 'ALL',
+      tenants: [...grouped.values()]
+        .map((entry) => ({
+          tenantId: entry.tenantId,
+          tenantName: entry.tenantName,
+          tenantSlug: entry.tenantSlug,
+          tenantStatus: entry.tenantStatus,
+          failed: entry.failed,
+          deadLetter: entry.deadLetter,
+          totalErrors: entry.failed + entry.deadLetter,
+          lastErrorAt: entry.lastErrorAt,
+          domains: [...entry.domains.entries()]
+            .map(([domain, count]) => ({ domain, count }))
+            .sort((left, right) => right.count - left.count),
+        }))
+        .sort((left, right) => right.totalErrors - left.totalErrors),
+    };
+  }
+
   private ensureSuperAdmin(actor: JwtPayload) {
     if (!actor.isSuperAdmin) {
       throw new ForbiddenException('Only superadmins can view cross-tenant activity');
     }
+  }
+
+  private resolveOperationalTenantScope(actor: JwtPayload, tenantId?: string) {
+    if (actor.isSuperAdmin) {
+      return tenantId ?? null;
+    }
+
+    const activeTenantId = actor.activeTenantId ?? actor.tenantId;
+    if (!tenantId) {
+      return activeTenantId;
+    }
+
+    if (!actor.allowedTenantIds.includes(tenantId) && tenantId !== activeTenantId) {
+      throw new ForbiddenException('Tenant scope is outside the authenticated context');
+    }
+
+    return tenantId;
   }
 
   private normalizeWindowMinutes(requestedMinutes?: number) {
@@ -1076,5 +1527,71 @@ export class MetricsService {
     }
 
     return new Date(Math.max(...dates.map((value) => value.getTime())));
+  }
+
+  private resolveDomainFromEventName(eventName: string) {
+    const [domain] = eventName.split('.');
+    return domain || 'unknown';
+  }
+
+  private async getProcessingDurationMetrics(
+    from: Date,
+    to: Date,
+    tenantId?: string | null,
+  ) {
+    const processingFilter = tenantId
+      ? Prisma.sql`AND oe."tenantId" = ${tenantId}`
+      : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        averageProcessingMs: number | null;
+        p95ProcessingMs: number | null;
+        averageLatencyMs: number | null;
+        maxLatencyMs: number | null;
+      }>
+    >(Prisma.sql`
+      WITH processing_windows AS (
+        SELECT
+          oe.id,
+          EXTRACT(EPOCH FROM (processed_log."occurredAt" - processing_log."occurredAt")) * 1000 AS "processingMs",
+          EXTRACT(EPOCH FROM (oe."processedAt" - oe."occurredAt")) * 1000 AS "latencyMs"
+        FROM "OutboxEvent" oe
+        JOIN LATERAL (
+          SELECT il."occurredAt"
+          FROM "IntegrationEventLog" il
+          WHERE il."outboxEventId" = oe.id
+            AND il.status = 'PROCESSING'
+          ORDER BY il."occurredAt" ASC
+          LIMIT 1
+        ) processing_log ON TRUE
+        JOIN LATERAL (
+          SELECT il."occurredAt"
+          FROM "IntegrationEventLog" il
+          WHERE il."outboxEventId" = oe.id
+            AND il.status = 'PROCESSED'
+          ORDER BY il."occurredAt" ASC
+          LIMIT 1
+        ) processed_log ON TRUE
+        WHERE oe.status = 'PROCESSED'
+          AND oe."processedAt" IS NOT NULL
+          AND oe."processedAt" BETWEEN ${from} AND ${to}
+          ${processingFilter}
+      )
+      SELECT
+        AVG("processingMs") AS "averageProcessingMs",
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "processingMs") AS "p95ProcessingMs",
+        AVG("latencyMs") AS "averageLatencyMs",
+        MAX("latencyMs") AS "maxLatencyMs"
+      FROM processing_windows
+    `);
+
+    const metrics = rows[0];
+    return {
+      averageProcessingMs: Number(metrics?.averageProcessingMs ?? 0),
+      p95ProcessingMs: Number(metrics?.p95ProcessingMs ?? 0),
+      averageLatencyMs: Number(metrics?.averageLatencyMs ?? 0),
+      maxLatencyMs: Number(metrics?.maxLatencyMs ?? 0),
+    };
   }
 }

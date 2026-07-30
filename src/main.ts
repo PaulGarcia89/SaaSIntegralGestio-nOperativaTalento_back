@@ -1,4 +1,4 @@
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
@@ -38,6 +38,10 @@ function isAllowedOrigin(origin: string) {
     return true;
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
+
   return isAllowedLocalOrigin(origin);
 }
 
@@ -55,15 +59,15 @@ async function bootstrap() {
 
       callback(new Error(`Origin ${origin} is not allowed by CORS`));
     },
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-branch-id'],
+    exposedHeaders: ['x-request-id'],
   });
 
-  app.setGlobalPrefix('api', {
-    exclude: [
-      { path: 'health', method: RequestMethod.GET },
-    ],
-  });
+  if (process.env.DISABLE_GLOBAL_PREFIX !== 'true') {
+    app.setGlobalPrefix('api');
+  }
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
   app.useGlobalPipes(

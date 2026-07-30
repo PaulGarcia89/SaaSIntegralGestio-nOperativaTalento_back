@@ -1,0 +1,53 @@
+name: Production certification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: certification
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d certification"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/certification?schema=public
+      REDIS_URL: redis://127.0.0.1:6379/0
+      JWT_ACCESS_SECRET: certification-access-secret-at-least-32-characters
+      JWT_REFRESH_SECRET: certification-refresh-secret-at-least-32-characters
+      SCORM_SIGNING_KEY: certification-scorm-secret-at-least-32-characters
+      WEBHOOK_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      SCORM_ALLOW_UNSCANNED_UPLOADS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma migrate deploy
+      - run: npm run certify
+      - name: Verify backup format
+        run: |
+          BACKUP_ROOT="$RUNNER_TEMP/backups" SCORM_STORAGE_ROOT="$RUNNER_TEMP/scorm" npm run backup
+          npm run restore:verify -- "$(find "$RUNNER_TEMP/backups" -mindepth 1 -maxdepth 1 -type d | head -1)"

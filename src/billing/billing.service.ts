@@ -13,13 +13,14 @@ export class BillingService {
   ) {}
 
   async getOverview(actor: JwtPayload) {
+    const tenantId = this.activeTenantId(actor);
     const [capabilities, billingCustomer, invoices] = await Promise.all([
-      this.platformAccessService.getTenantCapabilities(actor.tenantId),
+      this.platformAccessService.getTenantCapabilities(tenantId),
       this.prisma.billingCustomer.findUnique({
-        where: { tenantId: actor.tenantId },
+        where: { tenantId },
       }),
       this.prisma.billingInvoice.findMany({
-        where: { tenantId: actor.tenantId },
+        where: { tenantId },
         orderBy: { issuedAt: 'desc' },
         take: 5,
       }),
@@ -35,15 +36,17 @@ export class BillingService {
   }
 
   findInvoices(actor: JwtPayload) {
+    const tenantId = this.activeTenantId(actor);
     return this.prisma.billingInvoice.findMany({
-      where: { tenantId: actor.tenantId },
+      where: { tenantId },
       orderBy: { issuedAt: 'desc' },
     });
   }
 
   async upsertCustomer(actor: JwtPayload, dto: UpsertBillingCustomerDto) {
+    const tenantId = this.activeTenantId(actor);
     const billingCustomer = await this.prisma.billingCustomer.upsert({
-      where: { tenantId: actor.tenantId },
+      where: { tenantId },
       update: {
         provider: dto.provider,
         externalCustomerId: dto.externalCustomerId,
@@ -52,7 +55,7 @@ export class BillingService {
         metadata: dto.metadata as Prisma.InputJsonValue | undefined,
       },
       create: {
-        tenantId: actor.tenantId,
+        tenantId,
         provider: dto.provider,
         externalCustomerId: dto.externalCustomerId,
         email: dto.email,
@@ -62,7 +65,7 @@ export class BillingService {
     });
 
     await this.prisma.subscription.updateMany({
-      where: { tenantId: actor.tenantId },
+      where: { tenantId },
       data: {
         billingProvider: dto.provider,
         billingCustomerId: dto.externalCustomerId,
@@ -70,5 +73,9 @@ export class BillingService {
     });
 
     return billingCustomer;
+  }
+
+  private activeTenantId(actor: JwtPayload) {
+    return actor.activeTenantId ?? actor.tenantId;
   }
 }

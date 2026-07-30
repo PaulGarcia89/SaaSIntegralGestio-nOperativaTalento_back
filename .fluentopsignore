@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+coverage
+.fluentops
+docker-compose*.yml
+nginx*.conf
+docs
+test
+scripts
+*.log
+.DS_Store

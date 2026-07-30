@@ -1,12 +1,20 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AccessControlService } from '../access-control/access-control.service';
+import { AppException } from '../common/errors/app-exception';
+import { ErrorCode } from '../common/errors/error-code.enum';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { deriveRoleScope } from '../common/auth/role-scope.util';
 import { RoleScope } from '../common/enums/role-scope.enum';
+
+const PROTECTED_ROLE_CODES = new Set(['SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN']);
+const PLATFORM_PERMISSION_CODES = new Set([
+  'platform.tenant.switch',
+  'platform.tenant.impersonate',
+]);
 
 @Injectable()
 export class UsersService {
@@ -24,11 +32,14 @@ export class UsersService {
       activeBranchId,
       ...rest
     } = dto;
-    const effectiveTenantId = this.accessControl.resolveTenantId(actor, dto.tenantId ?? tenantId);
+    const effectiveTenantId = this.requireTenantContext(
+      this.accessControl.resolveTenantId(actor, dto.tenantId ?? tenantId),
+    );
     const passwordHash = await bcrypt.hash(password, 10);
 
     const roles = await this.assertRoleOwnership(roleIds, effectiveTenantId);
     await this.assertPermissionsExist(permissionIds);
+    await this.assertAssignmentAllowed(actor, effectiveTenantId, roles, permissionIds);
     await this.validateBranchScope({
       tenantId: effectiveTenantId,
       roleCodes: roles.map((role) => role.code),
@@ -66,6 +77,32 @@ export class UsersService {
       .then((users) => users.map((user) => this.sanitizeUser(user)));
   }
 
+  findAllGlobal(actor: JwtPayload) {
+    if (!this.accessControl.isGlobalActor(actor)) {
+      throw new AppException(
+        'Global user governance access is required',
+        ErrorCode.FORBIDDEN,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    return this.prisma.user
+      .findMany({
+        where: actor.isSuperAdmin
+          ? undefined
+          : { tenantId: { in: actor.allowedTenantIds } },
+        include: {
+          tenant: true,
+          activeBranch: true,
+          branchAccesses: { include: { branch: true } },
+          userRoles: { include: { role: true } },
+          userPermissions: { include: { permission: true } },
+        },
+        orderBy: [{ tenant: { name: 'asc' } }, { createdAt: 'desc' }],
+      })
+      .then((users) => users.map((user) => this.sanitizeUser(user)));
+  }
+
   async findOne(id: string, actor: JwtPayload, tenantId: string) {
     const user = await this.prisma.user.findFirst({
       where: {
@@ -99,9 +136,11 @@ export class UsersService {
       ...rest
     } = dto;
     const data: Record<string, unknown> = { ...rest };
-    const effectiveTenantId = this.accessControl.resolveTenantId(
-      actor,
-      nextTenantId ?? existingUser.tenantId,
+    const effectiveTenantId = this.requireTenantContext(
+      this.accessControl.resolveTenantId(
+        actor,
+        nextTenantId ?? existingUser.tenantId,
+      ),
     );
 
     if (password) {
@@ -124,6 +163,8 @@ export class UsersService {
       allowedBranchIds ?? (existingUser.branchAccesses ?? []).map((branchAccess) => branchAccess.branchId);
     const nextActiveBranchId =
       activeBranchId !== undefined ? activeBranchId : existingUser.activeBranchId;
+
+    await this.assertAssignmentAllowed(actor, effectiveTenantId, nextRoles, permissionIds ?? []);
 
     await this.validateBranchScope({
       tenantId: effectiveTenantId,
@@ -256,6 +297,74 @@ export class UsersService {
 
     if (count !== permissionIds.length) {
       throw new NotFoundException('One or more permissions do not exist');
+    }
+  }
+
+  private requireTenantContext(tenantId: string | null) {
+    if (!tenantId) {
+      throw new AppException(
+        'Tenant context is required for user management',
+        ErrorCode.TENANT_CONTEXT_REQUIRED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    return tenantId;
+  }
+
+  private async assertAssignmentAllowed(
+    actor: JwtPayload,
+    tenantId: string,
+    roles: Array<{ id: string; code: string }>,
+    permissionIds: string[],
+  ) {
+    const normalizedRoleCodes = roles.map((role) => role.code.trim().toUpperCase());
+    const protectedRoleRequested = normalizedRoleCodes.some((roleCode) =>
+      PROTECTED_ROLE_CODES.has(roleCode),
+    );
+
+    if (protectedRoleRequested && !actor.isSuperAdmin) {
+      throw new AppException(
+        'This actor cannot assign protected roles',
+        ErrorCode.ROLE_NOT_ALLOWED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (normalizedRoleCodes.includes('PLATFORM_ADMIN') && tenantId !== actor.tenantId) {
+      throw new AppException(
+        'Platform administrators must belong to the platform tenant',
+        ErrorCode.ROLE_NOT_ALLOWED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (permissionIds.length === 0) {
+      return;
+    }
+
+    const permissions = await this.prisma.permission.findMany({
+      where: { id: { in: permissionIds } },
+      select: { code: true },
+    });
+    const includesPlatformPermission = permissions.some((permission) =>
+      PLATFORM_PERMISSION_CODES.has(permission.code),
+    );
+
+    if (includesPlatformPermission && !actor.isSuperAdmin) {
+      throw new AppException(
+        'This actor cannot grant platform permissions',
+        ErrorCode.PERMISSION_DENIED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (normalizedRoleCodes.includes('TENANT_ADMIN') && includesPlatformPermission) {
+      throw new AppException(
+        'Tenant admins cannot receive platform permissions',
+        ErrorCode.PERMISSION_DENIED,
+        HttpStatus.FORBIDDEN,
+      );
     }
   }
 

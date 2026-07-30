@@ -1,9 +1,11 @@
 import { ModuleCode, SubscriptionStatus } from '@prisma/client';
 import { Request } from 'express';
+import { SubscriptionAccessState } from '../auth/subscription-access-state.enum';
 import { AccessScope } from '../enums/access-scope.enum';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
 
 export type RequestWithUser = Request & {
+  requestId?: string;
   auditAction?: string;
   auditDomain?: 'governance_global' | 'tenant_operations';
   user: JwtPayload;
@@ -33,5 +35,7 @@ export type RequestWithUser = Request & {
     planId: string;
     status: SubscriptionStatus;
     modules: ModuleCode[];
+    accessStatus?: SubscriptionAccessState;
+    graceEndsAt?: string | null;
   };
 };

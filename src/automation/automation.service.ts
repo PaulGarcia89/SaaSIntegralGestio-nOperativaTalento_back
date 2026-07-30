@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  AccessScope,
+  AccessScope as PrismaAccessScope,
   AutomationAuditStatus,
   AutomationConsequenceType,
   AutomationExecutionStatus,
@@ -22,6 +22,9 @@ import {
   WorkflowStatus,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { SubscriptionAccessState } from '../common/auth/subscription-access-state.enum';
+import { AccessScope } from '../common/enums/access-scope.enum';
+import { RoleScope } from '../common/enums/role-scope.enum';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
@@ -268,6 +271,7 @@ export class AutomationService {
       branchId: dto.branchId,
       employeeName: dto.employeeName,
       employeeEmail: dto.employeeEmail,
+      jobTitle: dto.jobTitle ?? 'New hire',
       metadata: dto.payload,
     } satisfies CreateHiringWorkflowDto);
 
@@ -1051,28 +1055,39 @@ export class AutomationService {
       sub: user.id,
       userId: user.id,
       tenantId: user.tenantId,
+      allowedTenantIds: [user.tenantId],
+      activeTenantId: user.tenantId,
       tenantSlug: '',
       tenantName: '',
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
       role: primaryRole?.name ?? null,
-      scope: primaryRole?.scope === AccessScope.GLOBAL
-        ? 'global'
-        : primaryRole?.scope === AccessScope.TENANT
-          ? 'tenant'
-          : 'branch',
+      scope:
+        primaryRole?.scope === PrismaAccessScope.GLOBAL
+          ? AccessScope.GLOBAL
+          : primaryRole?.scope === PrismaAccessScope.TENANT
+            ? AccessScope.TENANT
+            : AccessScope.BRANCH,
       isSuperAdmin: user.isSuperAdmin,
-      roleScope: primaryRole?.scope === AccessScope.GLOBAL
-        ? 'super_admin'
-        : primaryRole?.scope === AccessScope.TENANT
-          ? 'tenant_admin'
-          : 'branch_user',
+      roleScope:
+        primaryRole?.scope === PrismaAccessScope.TENANT
+          ? RoleScope.TENANT_ADMIN
+          : RoleScope.BRANCH_USER,
       allowedBranchIds: user.branchAccesses.map((access) => access.branchId),
       activeBranchId: user.activeBranchId,
       roles: user.userRoles.map((item) => item.role.name),
       permissions: [...permissions],
       enabledModules: [],
+      isGlobalContext: false,
+      impersonation: {
+        active: false,
+        tenantId: null,
+        startedAt: null,
+        reason: null,
+      },
+      subscriptionStatus: SubscriptionAccessState.ACTIVE,
+      subscriptionGraceEndsAt: null,
     } as JwtPayload;
   }
 

@@ -3,17 +3,23 @@ import { ErrorCode } from './error-code.enum';
 
 export class AppException extends HttpException {
   constructor(
-    error: string,
+    message: string,
     code: ErrorCode,
     status: HttpStatus,
-    details?: unknown,
+    options?: {
+      details?: unknown;
+      fieldErrors?: Record<string, string[]>;
+      retryAfter?: number;
+    },
   ) {
     super(
       {
-        error,
+        message,
         code,
         status,
-        ...(details !== undefined ? { details } : {}),
+        ...(options?.details !== undefined ? { details: options.details } : {}),
+        ...(options?.fieldErrors ? { fieldErrors: options.fieldErrors } : {}),
+        ...(options?.retryAfter !== undefined ? { retryAfter: options.retryAfter } : {}),
       },
       status,
     );

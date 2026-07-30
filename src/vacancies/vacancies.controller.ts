@@ -10,24 +10,27 @@ import { ListVacanciesDto } from './dto/list-vacancies.dto';
 import { UpdateVacancyDto } from './dto/update-vacancy.dto';
 import { CreateVacancyFormTemplateDto } from './dto/create-vacancy-form-template.dto';
 import { VacanciesService } from './vacancies.service';
-import { TenantWide } from '../common/decorators/tenant-wide.decorator';
+import { SubscriptionGuard } from '../common/guards/subscription.guard';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
+import { RequireModule } from '../common/decorators/module-access.decorator';
+import { ModuleCode } from '@prisma/client';
 
 @Controller('vacancies')
-@UseGuards(JwtAuthGuard, TenantGuard, ScopeGuard, PermissionGuard)
-@TenantWide()
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
+@RequireModule(ModuleCode.ATS)
 export class VacanciesController {
   constructor(private readonly vacanciesService: VacanciesService) {}
 
   @Post()
   @RequirePermissions('vacancies.create')
   create(@Req() request: RequestWithUser, @Body() dto: CreateVacancyDto) {
-    return this.vacanciesService.create(request.tenant!.id, request.user.sub, dto);
+    return this.vacanciesService.create(request.tenant!.id, request.user, dto);
   }
 
   @Get()
   @RequirePermissions('vacancies.read')
   findAll(@Req() request: RequestWithUser, @Query() query: ListVacanciesDto) {
-    return this.vacanciesService.findAll(request.tenant!.id, query);
+    return this.vacanciesService.findAll(request.tenant!.id, request.user, query);
   }
 
   @Get('form-templates')
@@ -51,7 +54,7 @@ export class VacanciesController {
   @Get(':id')
   @RequirePermissions('vacancies.read')
   findOne(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.vacanciesService.findOne(id, request.tenant!.id);
+    return this.vacanciesService.findOne(id, request.tenant!.id, request.user);
   }
 
   @Patch(':id')
@@ -61,6 +64,6 @@ export class VacanciesController {
     @Param('id') id: string,
     @Body() dto: UpdateVacancyDto,
   ) {
-    return this.vacanciesService.update(id, request.tenant!.id, dto);
+    return this.vacanciesService.update(id, request.tenant!.id, request.user, dto);
   }
 }

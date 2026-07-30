@@ -1,6 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { EmployeeStatus, Prisma } from '@prisma/client';
+import { SubscriptionAccessState } from '../common/auth/subscription-access-state.enum';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RoleScope } from '../common/enums/role-scope.enum';
+import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { AccessScope } from '../common/enums/access-scope.enum';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { ListEmployeesDto } from './dto/list-employees.dto';
@@ -39,7 +43,7 @@ export class EmployeesService {
       return created;
     });
 
-    return this.findOne(employee.id, tenantId);
+    return this.findOne(employee.id, this.buildSystemActor(tenantId), tenantId);
   }
 
   async findAll(tenantId: string, activeBranchId: string, query: ListEmployeesDto) {
@@ -100,11 +104,12 @@ export class EmployeesService {
     };
   }
 
-  async findOne(id: string, tenantId: string) {
+  async findOne(id: string, actor: JwtPayload, tenantId: string) {
     const employee = await this.prisma.employee.findFirst({
       where: {
         id,
         tenantId,
+        ...this.buildBranchScopedWhere(actor, tenantId),
       },
       include: {
         branchAssignments: {
@@ -127,8 +132,8 @@ export class EmployeesService {
     return this.mapEmployee(employee);
   }
 
-  async update(id: string, tenantId: string, dto: UpdateEmployeeDto) {
-    await this.ensureEmployeeExists(id, tenantId);
+  async update(id: string, actor: JwtPayload, tenantId: string, dto: UpdateEmployeeDto) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
 
     await this.prisma.employee.update({
       where: { id },
@@ -143,11 +148,11 @@ export class EmployeesService {
       await this.releaseActiveAssignments(id, tenantId);
     }
 
-    return this.findOne(id, tenantId);
+    return this.findOne(id, actor, tenantId);
   }
 
-  async updateStatus(id: string, tenantId: string, dto: UpdateEmployeeStatusDto) {
-    await this.ensureEmployeeExists(id, tenantId);
+  async updateStatus(id: string, actor: JwtPayload, tenantId: string, dto: UpdateEmployeeStatusDto) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
 
     await this.prisma.employee.update({
       where: { id },
@@ -160,14 +165,15 @@ export class EmployeesService {
       await this.releaseActiveAssignments(id, tenantId);
     }
 
-    return this.findOne(id, tenantId);
+    return this.findOne(id, actor, tenantId);
   }
 
-  async history(id: string, tenantId: string) {
+  async history(id: string, actor: JwtPayload, tenantId: string) {
     const employee = await this.prisma.employee.findFirst({
       where: {
         id,
         tenantId,
+        ...this.buildBranchScopedWhere(actor, tenantId),
       },
       include: {
         branchAssignments: {
@@ -206,10 +212,11 @@ export class EmployeesService {
     };
   }
 
-  async transfer(id: string, tenantId: string, dto: TransferEmployeeDto) {
+  async transfer(id: string, actor: JwtPayload, tenantId: string, dto: TransferEmployeeDto) {
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
+    this.assertBranchInActorScope(actor, dto.branchId);
 
-    const employee = await this.ensureEmployeeExists(id, tenantId);
+    const employee = await this.ensureEmployeeExists(id, actor, tenantId);
     const currentPrimary = await this.prisma.employeeBranch.findFirst({
       where: {
         tenantId,
@@ -246,12 +253,13 @@ export class EmployeesService {
       });
     });
 
-    return this.findOne(id, tenantId);
+    return this.findOne(id, actor, tenantId);
   }
 
-  async assignSecondaryBranch(id: string, tenantId: string, dto: AssignEmployeeBranchDto) {
+  async assignSecondaryBranch(id: string, actor: JwtPayload, tenantId: string, dto: AssignEmployeeBranchDto) {
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
-    await this.ensureEmployeeExists(id, tenantId);
+    this.assertBranchInActorScope(actor, dto.branchId);
+    await this.ensureEmployeeExists(id, actor, tenantId);
 
     const activeAssignment = await this.prisma.employeeBranch.findFirst({
       where: {
@@ -276,14 +284,15 @@ export class EmployeesService {
       },
     });
 
-    return this.findOne(id, tenantId);
+    return this.findOne(id, actor, tenantId);
   }
 
-  private async ensureEmployeeExists(id: string, tenantId: string) {
+  private async ensureEmployeeExists(id: string, actor: JwtPayload, tenantId: string) {
     const employee = await this.prisma.employee.findFirst({
       where: {
         id,
         tenantId,
+        ...this.buildBranchScopedWhere(actor, tenantId),
       },
     });
 
@@ -319,6 +328,79 @@ export class EmployeesService {
         releasedAt: new Date(),
       },
     });
+  }
+
+  private buildBranchScopedWhere(actor: JwtPayload, tenantId: string): Prisma.EmployeeWhereInput {
+    if (actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH) {
+      return {};
+    }
+
+    // A plain branch user is an owner-scoped actor. Branch membership must not
+    // allow reading or mutating coworkers that happen to share the same branch.
+    if (actor.role === 'BRANCH_USER' || actor.roles.includes('BRANCH_USER')) {
+      return {
+        email: actor.email,
+      };
+    }
+
+    if (actor.allowedBranchIds.length === 0) {
+      return {
+        id: '__no_employee_access__',
+      };
+    }
+
+    return {
+      branchAssignments: {
+        some: {
+          tenantId,
+          branchId: { in: actor.allowedBranchIds },
+          releasedAt: null,
+        },
+      },
+    };
+  }
+
+  private assertBranchInActorScope(actor: JwtPayload, branchId: string) {
+    if (actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH) {
+      return;
+    }
+
+    if (!actor.allowedBranchIds.includes(branchId)) {
+      throw new NotFoundException('Branch not found');
+    }
+  }
+
+  private buildSystemActor(tenantId: string): JwtPayload {
+    return {
+      sub: 'system',
+      userId: 'system',
+      tenantId,
+      allowedTenantIds: [tenantId],
+      activeTenantId: tenantId,
+      tenantSlug: 'system',
+      tenantName: 'system',
+      email: 'system@local',
+      firstName: 'System',
+      lastName: 'Actor',
+      role: 'SYSTEM',
+      scope: AccessScope.TENANT,
+      isSuperAdmin: true,
+      roleScope: RoleScope.TENANT_ADMIN,
+      allowedBranchIds: [],
+      activeBranchId: null,
+      roles: ['SYSTEM'],
+      permissions: [],
+      enabledModules: [],
+      isGlobalContext: false,
+      impersonation: {
+        active: false,
+        tenantId: null,
+        startedAt: null,
+        reason: null,
+      },
+      subscriptionStatus: SubscriptionAccessState.ACTIVE,
+      subscriptionGraceEndsAt: null,
+    };
   }
 
   private mapEmployee(

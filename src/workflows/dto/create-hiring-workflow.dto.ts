@@ -1,5 +1,5 @@
 import { WorkflowSourceModule } from '@prisma/client';
-import { IsEmail, IsEnum, IsObject, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class CreateHiringWorkflowDto {
   @IsOptional()
@@ -21,6 +21,15 @@ export class CreateHiringWorkflowDto {
   @IsOptional()
   @IsEmail()
   employeeEmail?: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(160)
+  jobTitle!: string;
+
+  @IsOptional()
+  @IsUUID()
+  supervisorUserId?: string;
 
   @IsOptional()
   @IsEnum(WorkflowSourceModule)

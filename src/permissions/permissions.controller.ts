@@ -7,6 +7,8 @@ import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { TenantScoped } from '../common/decorators/tenant-scoped.decorator';
 import { PermissionsService } from './permissions.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 
 @Controller(['permissions', 'company/permissions'])
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ScopeGuard, PermissionGuard)
@@ -16,7 +18,7 @@ export class PermissionsController {
 
   @Get()
   @RequirePermissions('permissions.read')
-  findAll() {
-    return this.permissionsService.findAll();
+  findAll(@CurrentUser() user: JwtPayload) {
+    return this.permissionsService.findAll(user);
   }
 }

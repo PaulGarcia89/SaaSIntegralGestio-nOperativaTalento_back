@@ -12,6 +12,20 @@ import { TenantScoped } from '../common/decorators/tenant-scoped.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { RequestWithUser } from '../common/types/request-with-user.type';
+import { GlobalOnly } from '../common/decorators/global-only.decorator';
+
+@Controller('users/global')
+@UseGuards(JwtAuthGuard, ScopeGuard, PermissionGuard)
+@GlobalOnly()
+export class GlobalUsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get()
+  @RequirePermissions('users.read')
+  findAll(@CurrentUser() user: JwtPayload) {
+    return this.usersService.findAllGlobal(user);
+  }
+}
 
 @Controller(['users', 'company/users'])
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ScopeGuard, PermissionGuard)

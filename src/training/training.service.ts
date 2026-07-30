@@ -21,10 +21,13 @@ import { SubmitTrainingQuizAttemptDto } from './dto/submit-training-quiz-attempt
 import { TrainingFavoriteDto } from './dto/training-favorite.dto';
 import { UpdateTrainingCourseProgressDto } from './dto/update-training-course-progress.dto';
 import { UpdateTrainingStepProgressDto } from './dto/update-training-step-progress.dto';
+import { UpdateTrainingLessonProgressDto } from './dto/training-assignment-admin.dto';
+import { randomBytes } from 'node:crypto';
+import { TrainingWebhookDeliveryService } from './training-webhook-delivery.service';
 
 @Injectable()
 export class TrainingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly webhooks: TrainingWebhookDeliveryService) {}
 
   async assertModuleEnabled(tenantId: string, user: JwtPayload) {
     const access = await this.getModuleAccess(tenantId, user);
@@ -305,6 +308,7 @@ export class TrainingService {
   }
 
   async getCourseDetail(tenantId: string, userId: string, courseId: string) {
+    await this.assertLearningPathCourseUnlocked(tenantId, userId, courseId);
     const course = await this.prisma.trainingCourse.findFirst({
       where: {
         id: courseId,
@@ -319,6 +323,18 @@ export class TrainingService {
             progressRecords: { where: { tenantId, userId } },
           },
           orderBy: { sortOrder: 'asc' },
+        },
+        modules: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            lessons: {
+              orderBy: { sortOrder: 'asc' },
+              include: {
+                blocks: { orderBy: { sortOrder: 'asc' } },
+                progressRecords: { where: { tenantId, userId } },
+              },
+            },
+          },
         },
         assignments: { where: { tenantId, userId } },
         progressRecords: { where: { tenantId, userId } },
@@ -384,6 +400,24 @@ export class TrainingService {
             }
           : null,
       })),
+      modules: course.modules.map((module) => ({
+        id: module.id,
+        title: module.title,
+        description: module.description,
+        sortOrder: module.sortOrder,
+        isRequired: module.isRequired,
+        lessons: module.lessons.map((lesson) => ({
+          id: lesson.id,
+          title: lesson.title,
+          description: lesson.description,
+          sortOrder: lesson.sortOrder,
+          estimatedMinutes: lesson.estimatedMinutes,
+          isRequired: lesson.isRequired,
+          completed: lesson.progressRecords[0]?.isCompleted ?? false,
+          completedAt: lesson.progressRecords[0]?.completedAt ?? null,
+          blocks: lesson.blocks,
+        })),
+      })),
       progress: course.progressRecords[0] ?? null,
       quizSummary: course.quizzes.map((quiz) => ({
         id: quiz.id,
@@ -433,6 +467,23 @@ export class TrainingService {
           },
           orderBy: { createdAt: 'asc' },
         },
+        pathCourses: {
+          include: {
+            course: {
+              include: {
+                category: true,
+                assignments: { where: { tenantId, userId } },
+                progressRecords: { where: { tenantId, userId } },
+                favorites: { where: { tenantId, userId } },
+                certificates: { where: { tenantId, userId } },
+              },
+            },
+            prerequisiteCourse: {
+              select: { id: true, title: true },
+            },
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
         progressRecords: { where: { tenantId, userId } },
         certificates: { where: { tenantId, userId } },
         assignments: { where: { tenantId, userId } },
@@ -444,8 +495,28 @@ export class TrainingService {
       throw new NotFoundException('Training curriculum not found');
     }
 
-    const completedCourses = curriculum.courses.filter(
-      (course) => course.progressRecords[0]?.status === TrainingProgressStatus.COMPLETED,
+    const pathEntries = curriculum.pathCourses.length
+      ? curriculum.pathCourses
+      : curriculum.courses.map((course, sortOrder) => ({
+          id: course.id,
+          courseId: course.id,
+          course,
+          prerequisiteCourseId: null,
+          prerequisiteCourse: null,
+          sortOrder,
+          isRequired: course.isRequired,
+          unlockAfterDays: null,
+        }));
+    const completedCourseIds = new Set(
+      pathEntries
+        .filter((entry) => entry.course.progressRecords[0]?.status === TrainingProgressStatus.COMPLETED)
+        .map((entry) => entry.courseId),
+    );
+    const curriculumAssignedAt = curriculum.assignments[0]?.startAt
+      ?? curriculum.assignments[0]?.createdAt
+      ?? null;
+    const completedCourses = pathEntries.filter(
+      (entry) => entry.course.progressRecords[0]?.status === TrainingProgressStatus.COMPLETED,
     ).length;
 
     return {
@@ -462,11 +533,33 @@ export class TrainingService {
       progress: curriculum.progressRecords[0] ?? null,
       certificate: curriculum.certificates[0] ?? null,
       completionSummary: {
-        totalCourses: curriculum.courses.length,
+        totalCourses: pathEntries.length,
         completedCourses,
-        requiredCourses: curriculum.courses.filter((course) => course.isRequired).length,
+        requiredCourses: pathEntries.filter((entry) => entry.isRequired).length,
       },
-      courses: curriculum.courses.map((course) => this.mapCourseCard(course)),
+      courses: pathEntries.map((entry) => {
+        const prerequisiteComplete = !entry.prerequisiteCourseId
+          || completedCourseIds.has(entry.prerequisiteCourseId);
+        const availableAt = entry.unlockAfterDays && curriculumAssignedAt
+          ? new Date(curriculumAssignedAt.getTime() + entry.unlockAfterDays * 86_400_000)
+          : null;
+        const timeUnlocked = !availableAt || availableAt <= new Date();
+        return {
+          ...this.mapCourseCard(entry.course),
+          learningPath: {
+            sortOrder: entry.sortOrder,
+            isRequired: entry.isRequired,
+            prerequisiteCourse: entry.prerequisiteCourse,
+            availableAt,
+            locked: !prerequisiteComplete || !timeUnlocked,
+            lockedReason: !prerequisiteComplete
+              ? 'PREREQUISITE_REQUIRED'
+              : !timeUnlocked
+                ? 'AVAILABLE_LATER'
+                : null,
+          },
+        };
+      }),
     };
   }
 
@@ -506,6 +599,7 @@ export class TrainingService {
     dto: UpdateTrainingCourseProgressDto,
   ) {
     await this.assertCourseVisible(tenantId, courseId);
+    await this.assertLearningPathCourseUnlocked(tenantId, userId, courseId);
 
     const progressPercent = dto.progressPercent ?? 0;
     const status =
@@ -547,9 +641,73 @@ export class TrainingService {
     await this.syncCurriculumFromCourse(tenantId, userId, courseId);
     if (status === TrainingProgressStatus.COMPLETED) {
       await this.ensureCertificate(tenantId, userId, { courseId });
+      await this.webhooks.publish(tenantId, 'course.completed', {
+        courseId,
+        userId,
+        progressPercent: progress.progressPercent,
+        completedAt: progress.completedAt?.toISOString() ?? new Date().toISOString(),
+      }, `course-completed-${tenantId}-${userId}-${courseId}`);
     }
     await this.syncAnalyticsSnapshot(tenantId, userId);
     return progress;
+  }
+
+  private async assertLearningPathCourseUnlocked(
+    tenantId: string,
+    userId: string,
+    courseId: string,
+  ) {
+    const entries = await this.prisma.trainingPathCourse.findMany({
+      where: {
+        tenantId,
+        courseId,
+        curriculum: {
+          assignments: { some: { tenantId, userId } },
+        },
+      },
+      include: {
+        curriculum: {
+          include: {
+            assignments: {
+              where: { tenantId, userId },
+              select: { startAt: true, createdAt: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    if (!entries.length) return;
+    const prerequisiteIds = entries
+      .map((entry) => entry.prerequisiteCourseId)
+      .filter((id): id is string => Boolean(id));
+    const completed = prerequisiteIds.length
+      ? await this.prisma.trainingProgress.findMany({
+          where: {
+            tenantId,
+            userId,
+            courseId: { in: prerequisiteIds },
+            status: TrainingProgressStatus.COMPLETED,
+          },
+          select: { courseId: true },
+        })
+      : [];
+    const completedIds = new Set(completed.map((item) => item.courseId));
+    const now = new Date();
+    const unlocked = entries.some((entry) => {
+      if (entry.prerequisiteCourseId && !completedIds.has(entry.prerequisiteCourseId)) {
+        return false;
+      }
+      const assignment = entry.curriculum.assignments[0];
+      if (!entry.unlockAfterDays || !assignment) return true;
+      const assignedAt = assignment.startAt ?? assignment.createdAt;
+      return assignedAt.getTime() + entry.unlockAfterDays * 86_400_000 <= now.getTime();
+    });
+    if (!unlocked) {
+      throw new ForbiddenException(
+        'Complete the prerequisite or wait until this learning-path course becomes available',
+      );
+    }
   }
 
   async updateStepProgress(
@@ -604,11 +762,62 @@ export class TrainingService {
     return record;
   }
 
+  async updateLessonProgress(
+    tenantId: string,
+    userId: string,
+    lessonId: string,
+    dto: UpdateTrainingLessonProgressDto,
+  ) {
+    const lesson = await this.prisma.trainingLesson.findUnique({
+      where: { id: lessonId },
+      include: { module: { include: { course: true } } },
+    });
+    if (
+      !lesson ||
+      (lesson.module.course.tenantId !== null && lesson.module.course.tenantId !== tenantId) ||
+      !lesson.module.course.isPublished
+    ) {
+      throw new NotFoundException('Training lesson not found');
+    }
+
+    const now = new Date();
+    const record = await this.prisma.trainingLessonProgress.upsert({
+      where: { tenantId_userId_lessonId: { tenantId, userId, lessonId } },
+      update: {
+        isCompleted: dto.completed,
+        startedAt: now,
+        lastOpenedAt: now,
+        completedAt: dto.completed ? now : null,
+      },
+      create: {
+        tenantId,
+        userId,
+        lessonId,
+        isCompleted: dto.completed,
+        startedAt: now,
+        lastOpenedAt: now,
+        completedAt: dto.completed ? now : null,
+      },
+    });
+
+    await this.syncCourseProgressFromLessons(
+      tenantId,
+      userId,
+      lesson.module.courseId,
+    );
+    await this.syncAnalyticsSnapshot(tenantId, userId);
+    return record;
+  }
+
   async createQuizAttempt(tenantId: string, userId: string, quizId: string) {
     const quiz = await this.prisma.trainingQuiz.findUnique({
       where: { id: quizId },
       include: {
         course: true,
+        questions: {
+          include: { options: { orderBy: { sortOrder: 'asc' } } },
+          orderBy: { sortOrder: 'asc' },
+        },
         attempts: {
           where: { tenantId, userId },
         },
@@ -623,14 +832,43 @@ export class TrainingService {
       throw new ForbiddenException('Max attempts reached for this quiz');
     }
 
-    return this.prisma.trainingQuizAttempt.create({
+    const attempt = await this.prisma.trainingQuizAttempt.create({
       data: {
         tenantId,
         userId,
         quizId,
         startedAt: new Date(),
+        expiresAt: quiz.timeLimitMinutes
+          ? new Date(Date.now() + quiz.timeLimitMinutes * 60_000)
+          : null,
       },
     });
+    const questions = quiz.shuffleQuestions
+      ? [...quiz.questions].sort(() => Math.random() - 0.5)
+      : quiz.questions;
+    return {
+      ...attempt,
+      quiz: {
+        id: quiz.id,
+        courseId: quiz.courseId,
+        title: quiz.title,
+        description: quiz.description,
+        passingScore: quiz.passingScore,
+        maxAttempts: quiz.maxAttempts,
+        timeLimitMinutes: quiz.timeLimitMinutes,
+        shuffleQuestions: quiz.shuffleQuestions,
+        questions: questions.map((question) => ({
+          id: question.id,
+          prompt: question.prompt,
+          questionType: question.questionType,
+          points: question.points,
+          options: question.options.map((option) => ({
+            id: option.id,
+            label: option.label,
+          })),
+        })),
+      },
+    };
   }
 
   async answerQuizAttempt(
@@ -662,11 +900,25 @@ export class TrainingService {
       throw new NotFoundException('Training quiz question not found');
     }
 
-    const correctOption = question.options.find((item) => item.isCorrect);
+    if (attempt.status !== TrainingQuizAttemptStatus.IN_PROGRESS) {
+      throw new ForbiddenException('This assessment attempt is no longer editable');
+    }
+    if (attempt.expiresAt && attempt.expiresAt < new Date()) {
+      throw new ForbiddenException('This assessment attempt has expired');
+    }
+    const selectedOptionIds = dto.selectedOptionIds?.length
+      ? dto.selectedOptionIds
+      : dto.optionId
+        ? [dto.optionId]
+        : [];
+    const correctIds = question.options.filter((item) => item.isCorrect).map((item) => item.id).sort();
+    const selectedIds = [...selectedOptionIds].sort();
     const isCorrect =
       question.questionType === TrainingQuizQuestionType.TEXT
         ? null
-        : dto.optionId === correctOption?.id;
+        : correctIds.length === selectedIds.length &&
+          correctIds.every((id, index) => id === selectedIds[index]);
+    const awardedPoints = isCorrect ? question.points : isCorrect === false ? 0 : null;
 
     return this.prisma.trainingQuizAnswer.upsert({
       where: {
@@ -677,15 +929,19 @@ export class TrainingService {
       },
       update: {
         optionId: dto.optionId,
+        selectedOptionIds,
         textAnswer: dto.textAnswer,
         isCorrect,
+        awardedPoints,
       },
       create: {
         attemptId,
         questionId: dto.questionId,
         optionId: dto.optionId,
+        selectedOptionIds,
         textAnswer: dto.textAnswer,
         isCorrect,
+        awardedPoints,
       },
     });
   }
@@ -721,22 +977,39 @@ export class TrainingService {
       throw new NotFoundException('Training quiz attempt not found');
     }
 
-    const totalQuestions = attempt.quiz.questions.length;
-    const correctAnswers = attempt.answers.filter((item) => item.isCorrect).length;
-    const score = totalQuestions === 0 ? 0 : Math.round((correctAnswers / totalQuestions) * 100);
+    if (attempt.status !== TrainingQuizAttemptStatus.IN_PROGRESS) {
+      throw new ForbiddenException('This assessment attempt was already submitted');
+    }
+    const unanswered = attempt.quiz.questions.filter(
+      (question) => !attempt.answers.some((answer) => answer.questionId === question.id),
+    );
+    if (unanswered.length > 0) {
+      throw new ForbiddenException('Answer every question before submitting the assessment');
+    }
+    const requiresManualReview = attempt.quiz.questions.some(
+      (question) => question.requiresManualGrading,
+    );
+    const totalPoints = attempt.quiz.questions.reduce((sum, question) => sum + question.points, 0);
+    const earnedPoints = attempt.answers.reduce(
+      (sum, answer) => sum + (answer.awardedPoints ?? 0),
+      0,
+    );
+    const score = totalPoints === 0 ? 0 : Math.round((earnedPoints / totalPoints) * 100);
     const passed = score >= attempt.quiz.passingScore;
 
     const updated = await this.prisma.trainingQuizAttempt.update({
       where: { id: attemptId },
       data: {
         submittedAt: new Date(),
-        score,
-        passed,
-        status: TrainingQuizAttemptStatus.GRADED,
+        score: requiresManualReview ? null : score,
+        passed: requiresManualReview ? null : passed,
+        status: requiresManualReview
+          ? TrainingQuizAttemptStatus.PENDING_REVIEW
+          : TrainingQuizAttemptStatus.GRADED,
       },
     });
 
-    if (passed && attempt.quiz.course.steps[0]) {
+    if (!requiresManualReview && passed && attempt.quiz.course.steps[0]) {
       const quizStep = attempt.quiz.course.steps[0];
       await this.prisma.trainingStepProgress.upsert({
         where: {
@@ -782,6 +1055,12 @@ export class TrainingService {
         certificateUrl: item.certificateUrl,
         issuedAt: item.issuedAt,
         expiresAt: item.expiresAt,
+        verificationCode: item.verificationCode,
+        status: item.revokedAt
+          ? 'REVOKED'
+          : item.expiresAt && item.expiresAt < new Date()
+            ? 'EXPIRED'
+            : 'VALID',
         course: item.course ? { id: item.course.id, title: item.course.title } : null,
         curriculum: item.curriculum ? { id: item.curriculum.id, title: item.curriculum.title } : null,
       })),
@@ -922,6 +1201,72 @@ export class TrainingService {
       },
     });
 
+    await this.syncAssignmentFromCourseProgress(tenantId, userId, courseId, progress);
+    await this.syncCurriculumFromCourse(tenantId, userId, courseId);
+    if (status === TrainingProgressStatus.COMPLETED) {
+      await this.ensureCertificate(tenantId, userId, { courseId });
+    }
+  }
+
+  private async syncCourseProgressFromLessons(
+    tenantId: string,
+    userId: string,
+    courseId: string,
+  ) {
+    const course = await this.prisma.trainingCourse.findUnique({
+      where: { id: courseId },
+      include: {
+        modules: {
+          include: {
+            lessons: {
+              include: {
+                progressRecords: { where: { tenantId, userId } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!course || (course.tenantId !== null && course.tenantId !== tenantId)) return;
+
+    const requiredLessons = course.modules
+      .filter((module) => module.isRequired)
+      .flatMap((module) => module.lessons)
+      .filter((lesson) => lesson.isRequired);
+    const completed = requiredLessons.filter(
+      (lesson) => lesson.progressRecords[0]?.isCompleted,
+    ).length;
+    const progressPercent =
+      requiredLessons.length === 0
+        ? 100
+        : Math.round((completed / requiredLessons.length) * 100);
+    const status =
+      progressPercent >= 100
+        ? TrainingProgressStatus.COMPLETED
+        : progressPercent > 0
+          ? TrainingProgressStatus.IN_PROGRESS
+          : TrainingProgressStatus.NOT_STARTED;
+    const now = new Date();
+    const progress = await this.prisma.trainingProgress.upsert({
+      where: { tenantId_userId_courseId: { tenantId, userId, courseId } },
+      update: {
+        progressPercent,
+        status,
+        startedAt: progressPercent > 0 ? now : undefined,
+        lastActivityAt: now,
+        completedAt: status === TrainingProgressStatus.COMPLETED ? now : null,
+      },
+      create: {
+        tenantId,
+        userId,
+        courseId,
+        progressPercent,
+        status,
+        startedAt: progressPercent > 0 ? now : null,
+        lastActivityAt: now,
+        completedAt: status === TrainingProgressStatus.COMPLETED ? now : null,
+      },
+    });
     await this.syncAssignmentFromCourseProgress(tenantId, userId, courseId, progress);
     await this.syncCurriculumFromCourse(tenantId, userId, courseId);
     if (status === TrainingProgressStatus.COMPLETED) {
@@ -1116,7 +1461,8 @@ export class TrainingService {
         userId,
         courseId: target.courseId,
         curriculumId: target.curriculumId,
-        certificateUrl: `https://cdn.saasintegral.local/certificates/${userId}/${target.courseId ?? target.curriculumId}.pdf`,
+        verificationCode: randomBytes(6).toString('hex').toUpperCase(),
+        certificateUrl: `/certificates/verify/${target.courseId ?? target.curriculumId}`,
         issuedAt: new Date(),
       },
     });
@@ -1129,6 +1475,8 @@ export class TrainingService {
 
     return {
       id: assignment.id,
+      courseId: assignment.courseId,
+      curriculumId: assignment.curriculumId,
       title: course?.title ?? curriculum?.title ?? 'Asignacion',
       description: course?.summary ?? curriculum?.description ?? null,
       summary: course?.summary ?? curriculum?.description ?? null,

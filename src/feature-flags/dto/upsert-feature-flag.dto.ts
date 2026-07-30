@@ -6,8 +6,9 @@ export class UpsertFeatureFlagDto {
   @IsUUID()
   tenantId?: string;
 
+  @IsOptional()
   @IsEnum(ModuleCode)
-  moduleCode!: ModuleCode;
+  moduleCode?: ModuleCode;
 
   @IsBoolean()
   enabled!: boolean;

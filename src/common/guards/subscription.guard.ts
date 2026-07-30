@@ -1,17 +1,19 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestWithUser } from '../types/request-with-user.type';
-import { PlatformAccessService } from '../../platform/platform-access.service';
-import { ROUTE_SCOPE_KEY } from '../constants/auth.constants';
+import { ROUTE_SCOPE_KEY, ALLOWED_SUBSCRIPTION_STATES_KEY } from '../constants/auth.constants';
 import { RouteScope } from '../enums/route-scope.enum';
+import { AuthContextService } from '../auth/auth-context.service';
+import { SubscriptionAccessState } from '../auth/subscription-access-state.enum';
+import { AppException } from '../errors/app-exception';
+import { ErrorCode } from '../errors/error-code.enum';
 
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly platformAccessService: PlatformAccessService,
+    private readonly authContextService: AuthContextService,
     private readonly reflector: Reflector,
   ) {}
 
@@ -21,25 +23,42 @@ export class SubscriptionGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    const allowedStates =
+      this.reflector.getAllAndOverride<SubscriptionAccessState[] | undefined>(
+        ALLOWED_SUBSCRIPTION_STATES_KEY,
+        [context.getHandler(), context.getClass()],
+      ) ?? [
+        SubscriptionAccessState.ACTIVE,
+        SubscriptionAccessState.TRIALING,
+        SubscriptionAccessState.GRACE_PERIOD,
+      ];
 
     if (routeScope === RouteScope.GLOBAL_ONLY) {
       return true;
     }
 
-    const tenantId = request.tenant?.id ?? request.user?.tenantId;
+    const tenantId = request.tenant?.id ?? request.user?.activeTenantId ?? request.user?.tenantId;
 
     if (!tenantId) {
-      throw new ForbiddenException('Tenant context missing before subscription validation');
+      throw new AppException(
+        'Tenant context missing before subscription validation',
+        ErrorCode.TENANT_CONTEXT_REQUIRED,
+        HttpStatus.FORBIDDEN,
+      );
     }
 
-    if (request.user.isSuperAdmin) {
+    if (request.user.role === 'SUPERADMIN' && request.user.isGlobalContext) {
       return true;
     }
 
-    return this.attachSubscription(request, tenantId);
+    return this.attachSubscription(request, tenantId, allowedStates);
   }
 
-  private async attachSubscription(request: RequestWithUser, tenantId: string): Promise<boolean> {
+  private async attachSubscription(
+    request: RequestWithUser,
+    tenantId: string,
+    allowedStates: SubscriptionAccessState[],
+  ): Promise<boolean> {
     const subscription = await this.prisma.subscription.findUnique({
       where: { tenantId },
       include: {
@@ -56,26 +75,34 @@ export class SubscriptionGuard implements CanActivate {
     });
 
     if (!subscription) {
-      throw new ForbiddenException('Tenant has no subscription assigned');
+      throw new AppException(
+        'Tenant has no subscription assigned',
+        ErrorCode.SUBSCRIPTION_BLOCKED,
+        HttpStatus.FORBIDDEN,
+      );
     }
 
-    const now = new Date();
-    const statusAllowed =
-      subscription.status === SubscriptionStatus.ACTIVE ||
-      subscription.status === SubscriptionStatus.TRIALING;
-    const dateAllowed = !subscription.endsAt || subscription.endsAt >= now;
+    const accessStatus = this.authContextService.resolveSubscriptionState(subscription);
+    const tenantCapabilities = await this.authContextService.getTenantCapabilities(tenantId);
 
-    if (!statusAllowed || !dateAllowed) {
-      throw new ForbiddenException('Tenant subscription is not active');
+    if (!allowedStates.includes(accessStatus)) {
+      throw new AppException(
+        'Tenant subscription does not allow this operation',
+        ErrorCode.SUBSCRIPTION_BLOCKED,
+        HttpStatus.FORBIDDEN,
+      );
     }
-
-    const tenantCapabilities = await this.platformAccessService.getTenantCapabilities(tenantId);
 
     request.subscription = {
       id: subscription.id,
       planId: subscription.planId,
       status: subscription.status,
       modules: tenantCapabilities.enabledModules,
+      accessStatus,
+      graceEndsAt:
+        accessStatus === SubscriptionAccessState.GRACE_PERIOD
+          ? subscription.endsAt?.toISOString() ?? null
+          : null,
     };
 
     return true;

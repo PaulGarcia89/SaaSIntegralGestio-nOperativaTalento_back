@@ -10,9 +10,10 @@ import { UpdateBranchDto } from './dto/update-branch.dto';
 import { BranchesService } from './branches.service';
 import { RequestWithUser } from '../common/types/request-with-user.type';
 import { TenantScoped } from '../common/decorators/tenant-scoped.decorator';
+import { SubscriptionGuard } from '../common/guards/subscription.guard';
 
 @Controller(['branches', 'company/branches'])
-@UseGuards(JwtAuthGuard, TenantGuard, ScopeGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ScopeGuard, PermissionGuard)
 @TenantScoped()
 export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
@@ -26,13 +27,13 @@ export class BranchesController {
   @Get()
   @RequirePermissions('branches.read')
   findAll(@Req() request: RequestWithUser, @Query() query: ListBranchesDto) {
-    return this.branchesService.findAll(request.tenant!.id, query);
+    return this.branchesService.findAll(request.tenant!.id, request.user, query);
   }
 
   @Get(':id')
   @RequirePermissions('branches.read')
   findOne(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.branchesService.findOne(id, request.tenant!.id);
+    return this.branchesService.findOne(id, request.tenant!.id, request.user);
   }
 
   @Patch(':id')

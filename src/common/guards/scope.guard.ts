@@ -28,7 +28,7 @@ export class ScopeGuard implements CanActivate {
     if (!user) {
       throw new AppException(
         'Missing authenticated user scope',
-        ErrorCode.UNAUTHORIZED,
+        ErrorCode.AUTH_REQUIRED,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -63,6 +63,7 @@ export class ScopeGuard implements CanActivate {
 
     if (routeScope === RouteScope.BRANCH_LOCAL) {
       if (
+        user.roleScope === RoleScope.PLATFORM_ADMIN ||
         user.roleScope === RoleScope.TENANT_ADMIN ||
         user.roleScope === RoleScope.BRANCH_ADMIN ||
         user.roleScope === RoleScope.BRANCH_USER
@@ -72,7 +73,7 @@ export class ScopeGuard implements CanActivate {
 
       throw new AppException(
         'User does not have branch-local access',
-        ErrorCode.FORBIDDEN_BRANCH_SCOPE,
+        ErrorCode.BRANCH_ACCESS_DENIED,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -80,12 +81,16 @@ export class ScopeGuard implements CanActivate {
     if (routeScope === RouteScope.TENANT_WIDE) {
       if (request.method === 'GET') {
         if (
+          user.roleScope === RoleScope.PLATFORM_ADMIN ||
           user.roleScope === RoleScope.TENANT_ADMIN ||
           user.roleScope === RoleScope.BRANCH_ADMIN
         ) {
           return true;
         }
-      } else if (user.roleScope === RoleScope.TENANT_ADMIN) {
+      } else if (
+        user.roleScope === RoleScope.PLATFORM_ADMIN ||
+        user.roleScope === RoleScope.TENANT_ADMIN
+      ) {
         return true;
       }
 

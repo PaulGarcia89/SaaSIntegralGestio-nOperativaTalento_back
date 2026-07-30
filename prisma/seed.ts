@@ -32,11 +32,21 @@ const planCatalog = [
 ];
 
 const permissionCatalog = [
+  'platform.tenant.switch', 'platform.tenant.impersonate', 'branch.switch',
   'tenants.read', 'tenants.create', 'tenants.update', 'tenants.delete',
   'branches.read', 'branches.create', 'branches.update', 'branches.delete',
   'vacancies.read', 'vacancies.create', 'vacancies.update', 'vacancies.delete',
   'applications.read', 'applications.create', 'applications.update', 'applications.delete',
   'training.read', 'training.create', 'training.update', 'training.delete',
+  'training.course.read', 'training.course.create', 'training.course.update',
+  'training.course.review', 'training.course.approve', 'training.course.publish',
+  'training.course.archive', 'training.course.delete',
+  'training.assign', 'training.progress.read',
+  'training.assessment.manage', 'training.assessment.grade',
+  'training.certificate.issue', 'training.certificate.revoke',
+  'training.analytics.read', 'training.compliance.manage', 'training.reports.export',
+  'training.integrations.manage',
+  'inventory.read', 'inventory.manage',
   'users.read', 'users.create', 'users.update', 'users.delete',
   'employees.read', 'employees.create', 'employees.update', 'employees.delete',
   'roles.read', 'roles.create', 'roles.update', 'roles.delete',
@@ -45,15 +55,56 @@ const permissionCatalog = [
   'modules.read', 'modules.create', 'modules.update', 'modules.delete',
   'subscriptions.read', 'subscriptions.create', 'subscriptions.update', 'subscriptions.delete',
   'automation.read', 'automation.create', 'automation.update',
-  'automation.audit.read', 'workflow_master.read', 'domain_events.create',
+  'automation.audit.read', 'audit.read', 'workflow_master.read', 'metrics.read',
+  'metrics.operations.read', 'notifications.read_own', 'notifications.update_own',
+  'notifications.send', 'applications.export', 'applications.bulk_update',
+  'applications.files.read', 'domain_events.create',
+  'domain_events.candidate_hired', 'domain_events.branch_changed',
+  'domain_events.offboarding_started', 'domain_events.onboarding_completed',
+  'domain_events.asset_assigned', 'domain_events.training_completed',
+  'domain_events.operation_handoff_completed', 'domain_events.compliance_closed',
 ];
+
+const tenantAdminPermissionCatalog = permissionCatalog.filter((permission) =>
+  !permission.startsWith('platform.') &&
+  !permission.startsWith('plans.create') &&
+  !permission.startsWith('plans.update') &&
+  !permission.startsWith('plans.delete') &&
+  !permission.startsWith('modules.create') &&
+  !permission.startsWith('modules.update') &&
+  !permission.startsWith('modules.delete') &&
+  permission !== 'tenants.create' &&
+  permission !== 'tenants.delete',
+);
+
+const hrManagerPermissionCatalog = permissionCatalog.filter((permission) =>
+  permission.startsWith('vacancies.') ||
+  permission.startsWith('applications.') ||
+  permission.startsWith('training.') ||
+  permission === 'domain_events.candidate_hired' ||
+  permission === 'branches.read' ||
+  permission === 'users.read' ||
+  ['notifications.read_own', 'notifications.update_own', 'applications.export',
+    'applications.bulk_update', 'applications.files.read'].includes(permission),
+);
+
+const supervisorPermissionCatalog = permissionCatalog.filter((permission) =>
+  permission === 'branches.read' ||
+  permission === 'employees.read' ||
+  permission === 'employees.update' ||
+  permission === 'applications.read' ||
+  permission === 'training.read' ||
+  permission === 'inventory.read' ||
+  permission === 'notifications.read_own' ||
+  permission === 'notifications.update_own',
+);
 
 const scopedRoleCatalog = [
   {
     code: 'TENANT_ADMIN',
     name: 'Tenant Admin',
     description: 'Full tenant-wide access across all branches',
-    permissions: permissionCatalog,
+    permissions: tenantAdminPermissionCatalog,
   },
   {
     code: 'BRANCH_ADMIN',
@@ -61,6 +112,8 @@ const scopedRoleCatalog = [
     description: 'Branch-local operations plus tenant-wide read access',
     permissions: permissionCatalog.filter((permission) =>
       permission.endsWith('.read') ||
+      permission === 'notifications.read_own' ||
+      permission === 'notifications.update_own' ||
       permission.startsWith('employees.') ||
       permission.startsWith('branches.read'),
     ),
@@ -72,7 +125,22 @@ const scopedRoleCatalog = [
     permissions: permissionCatalog.filter((permission) =>
       permission === 'employees.read' ||
       permission === 'employees.update' ||
-      permission === 'branches.read',
+      permission === 'branches.read' ||
+      permission === 'notifications.read_own' ||
+      permission === 'notifications.update_own',
+    ),
+  },
+  {
+    code: 'INVENTORY_MANAGER',
+    name: 'Inventory Manager',
+    description: 'Branch-scoped custody, delivery, transfer and return operations',
+    permissions: permissionCatalog.filter((permission) =>
+      permission.startsWith('inventory.') ||
+      permission === 'employees.read' ||
+      permission === 'branches.read' ||
+      permission === 'branch.switch' ||
+      permission === 'notifications.read_own' ||
+      permission === 'notifications.update_own',
     ),
   },
 ];
@@ -208,10 +276,39 @@ async function main() {
         },
       });
 
+  const platformAdminRole = await prisma.role.upsert({
+    where: {
+      tenantId_code: {
+        tenantId: tenant.id,
+        code: 'PLATFORM_ADMIN',
+      },
+    },
+    update: {
+      name: 'Platform Admin',
+      scope: AccessScope.GLOBAL,
+      isSystem: true,
+    },
+    create: {
+      tenantId: tenant.id,
+      code: 'PLATFORM_ADMIN',
+      name: 'Platform Admin',
+      scope: AccessScope.GLOBAL,
+      isSystem: true,
+    },
+  });
+
   const permissions = await prisma.permission.findMany();
   await prisma.rolePermission.deleteMany({ where: { roleId: superRole.id } });
   await prisma.rolePermission.createMany({
     data: permissions.map((permission) => ({ roleId: superRole.id, permissionId: permission.id })),
+    skipDuplicates: true,
+  });
+
+  await prisma.rolePermission.deleteMany({ where: { roleId: platformAdminRole.id } });
+  await prisma.rolePermission.createMany({
+    data: permissions
+      .filter((permission) => permission.code !== 'platform.tenant.impersonate')
+      .map((permission) => ({ roleId: platformAdminRole.id, permissionId: permission.id })),
     skipDuplicates: true,
   });
 
@@ -295,6 +392,50 @@ async function main() {
     create: { userId: user.id, roleId: superRole.id },
   });
 
+  const platformAdminEmail =
+    process.env.PLATFORM_ADMIN_EMAIL ?? 'platform.admin@saasintegral.com';
+  const platformAdminPassword =
+    process.env.PLATFORM_ADMIN_PASSWORD ?? 'ChangeMe123!';
+  const platformAdminPasswordHash = await bcrypt.hash(platformAdminPassword, 10);
+
+  const existingPlatformAdmin = await prisma.user.findFirst({
+    where: { tenantId: tenant.id, email: platformAdminEmail },
+  });
+
+  const platformAdminUser = existingPlatformAdmin
+    ? await prisma.user.update({
+        where: { id: existingPlatformAdmin.id },
+        data: {
+          firstName: 'Platform',
+          lastName: 'Admin',
+          passwordHash: platformAdminPasswordHash,
+          isSuperAdmin: false,
+          status: UserStatus.ACTIVE,
+        },
+      })
+    : await prisma.user.create({
+        data: {
+          tenantId: tenant.id,
+          email: platformAdminEmail,
+          passwordHash: platformAdminPasswordHash,
+          firstName: 'Platform',
+          lastName: 'Admin',
+          isSuperAdmin: false,
+          status: UserStatus.ACTIVE,
+        },
+      });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: platformAdminUser.id,
+        roleId: platformAdminRole.id,
+      },
+    },
+    update: {},
+    create: { userId: platformAdminUser.id, roleId: platformAdminRole.id },
+  });
+
   const tenantAdminOperationalPermissions = permissions.filter((permission) =>
     permission.code.startsWith('vacancies.') ||
     permission.code.startsWith('branches.') ||
@@ -304,7 +445,7 @@ async function main() {
   const tenantAdminRoles = await prisma.role.findMany({
     where: {
       code: {
-        in: ['SUPERADMIN', 'ADMIN', 'TENANT_ADMIN'],
+        in: ['TENANT_ADMIN'],
       },
     },
     select: {
@@ -392,30 +533,17 @@ async function main() {
     {
       code: 'TENANT_ADMIN',
       name: 'Tenant Admin',
-      permissions: permissionCatalog,
+      permissions: tenantAdminPermissionCatalog,
     },
     {
       code: 'HR_MANAGER',
       name: 'HR Manager',
-      permissions: permissionCatalog.filter((permission) =>
-        permission.startsWith('vacancies.') ||
-        permission.startsWith('applications.') ||
-        permission.startsWith('training.') ||
-        permission.startsWith('users.read') ||
-        permission.startsWith('branches.read') ||
-        permission === 'roles.read' ||
-        permission === 'permissions.read' ||
-        permission === 'tenants.read',
-      ),
+      permissions: hrManagerPermissionCatalog,
     },
     {
       code: 'SUPERVISOR',
       name: 'Supervisor',
-      permissions: permissionCatalog.filter((permission) =>
-        permission.endsWith('.read') ||
-        permission === 'branches.update' ||
-        permission === 'employees.update',
-      ),
+      permissions: supervisorPermissionCatalog,
     },
   ] as const;
 
@@ -430,6 +558,20 @@ async function main() {
         name: demoTenant.name,
         slug: demoTenant.slug,
         status: demoTenant.status,
+      },
+    });
+
+    await prisma.platformTenantAccess.upsert({
+      where: {
+        userId_tenantId: {
+          userId: platformAdminUser.id,
+          tenantId: tenantRecord.id,
+        },
+      },
+      update: {},
+      create: {
+        userId: platformAdminUser.id,
+        tenantId: tenantRecord.id,
       },
     });
 
@@ -1376,6 +1518,7 @@ async function main() {
       tenantId: tenant.id,
       userId: user.id,
       courseId: introCourseId,
+      verificationCode: `DEMO${introCourseId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
       certificateUrl: `https://cdn.saasintegral.local/certificates/${user.id}/${introCourseId}.pdf`,
       issuedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
     },

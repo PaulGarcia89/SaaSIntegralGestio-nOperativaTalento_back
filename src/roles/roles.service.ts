@@ -1,9 +1,17 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessControlService } from '../access-control/access-control.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AppException } from '../common/errors/app-exception';
+import { ErrorCode } from '../common/errors/error-code.enum';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+
+const PROTECTED_ROLE_CODES = new Set(['SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN']);
+const PLATFORM_PERMISSION_CODES = new Set([
+  'platform.tenant.switch',
+  'platform.tenant.impersonate',
+]);
 
 @Injectable()
 export class RolesService {
@@ -13,8 +21,11 @@ export class RolesService {
   ) {}
 
   async create(dto: CreateRoleDto, actor: JwtPayload, tenantId: string) {
-    const targetTenantId = this.accessControl.resolveTenantId(actor, tenantId);
+    const targetTenantId = this.requireTenantContext(
+      this.accessControl.resolveTenantId(actor, tenantId),
+    );
     await this.assertPermissionsExist(dto.permissionIds ?? []);
+    await this.assertRoleMutationAllowed(actor, targetTenantId, dto.code, dto.permissionIds ?? []);
 
     const role = await this.prisma.role.create({
       data: {
@@ -66,6 +77,14 @@ export class RolesService {
       throw new ForbiddenException('System roles can only be edited by superadmins');
     }
 
+    await this.assertRoleMutationAllowed(
+      actor,
+      role.tenantId,
+      dto.code ?? role.code,
+      dto.permissionIds ?? role.rolePermissions.map((entry) => entry.permissionId),
+      role.code,
+    );
+
     await this.prisma.role.update({
       where: { id },
       data: {
@@ -116,6 +135,77 @@ export class RolesService {
 
     if (count !== permissionIds.length) {
       throw new NotFoundException('One or more permissions do not exist');
+    }
+  }
+
+  private requireTenantContext(tenantId: string | null) {
+    if (!tenantId) {
+      throw new AppException(
+        'Tenant context is required for role management',
+        ErrorCode.TENANT_CONTEXT_REQUIRED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    return tenantId;
+  }
+
+  private async assertRoleMutationAllowed(
+    actor: JwtPayload,
+    tenantId: string,
+    nextRoleCode: string,
+    permissionIds: string[],
+    currentRoleCode?: string,
+  ) {
+    const normalizedRoleCode = nextRoleCode.trim().toUpperCase();
+
+    if (
+      (PROTECTED_ROLE_CODES.has(normalizedRoleCode) ||
+        (currentRoleCode && PROTECTED_ROLE_CODES.has(currentRoleCode.toUpperCase()))) &&
+      !actor.isSuperAdmin
+    ) {
+      throw new AppException(
+        'Role is protected and cannot be managed by this actor',
+        ErrorCode.ROLE_NOT_ALLOWED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    const permissions = permissionIds.length
+      ? await this.prisma.permission.findMany({
+          where: { id: { in: permissionIds } },
+          select: { code: true },
+        })
+      : [];
+    const includesPlatformPermission = permissions.some((permission) =>
+      PLATFORM_PERMISSION_CODES.has(permission.code),
+    );
+
+    if (includesPlatformPermission && !actor.isSuperAdmin) {
+      throw new AppException(
+        'Platform permissions cannot be granted by this actor',
+        ErrorCode.PERMISSION_DENIED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (normalizedRoleCode === 'TENANT_ADMIN' && includesPlatformPermission) {
+      throw new AppException(
+        'Tenant admin cannot receive platform permissions',
+        ErrorCode.PERMISSION_DENIED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (
+      normalizedRoleCode === 'PLATFORM_ADMIN' &&
+      tenantId !== actor.tenantId
+    ) {
+      throw new AppException(
+        'Platform admin roles must live in the platform tenant',
+        ErrorCode.ROLE_NOT_ALLOWED,
+        HttpStatus.FORBIDDEN,
+      );
     }
   }
 }

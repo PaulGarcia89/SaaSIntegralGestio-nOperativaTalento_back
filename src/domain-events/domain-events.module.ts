@@ -1,9 +1,13 @@
 import { Module } from '@nestjs/common';
-import { AutomationModule } from '../automation/automation.module';
 import { DomainEventsController } from './domain-events.controller';
+import { DomainEventsService } from './domain-events.service';
+import { OutboxModule } from '../outbox/outbox.module';
+import { QueueWorkersModule } from '../queue-workers/queue-workers.module';
 
 @Module({
-  imports: [AutomationModule],
+  imports: [OutboxModule, QueueWorkersModule],
   controllers: [DomainEventsController],
+  providers: [DomainEventsService],
+  exports: [DomainEventsService],
 })
 export class DomainEventsModule {}

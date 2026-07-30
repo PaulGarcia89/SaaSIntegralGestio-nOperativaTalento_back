@@ -28,7 +28,7 @@ export class TenantGuard implements CanActivate {
     if (!user) {
       throw new AppException(
         'Missing authenticated user context',
-        ErrorCode.UNAUTHORIZED,
+        ErrorCode.AUTH_REQUIRED,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -65,7 +65,11 @@ export class TenantGuard implements CanActivate {
     }
 
     if (tenant.status !== 'ACTIVE' && !user.isSuperAdmin) {
-      throw new AppException('Tenant is not active', ErrorCode.FORBIDDEN, HttpStatus.FORBIDDEN);
+      throw new AppException(
+        'Tenant is not active',
+        ErrorCode.TENANT_ACCESS_DENIED,
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     request.tenant = tenant;

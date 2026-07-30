@@ -1,5 +1,5 @@
 import {
-  ForbiddenException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -9,17 +9,14 @@ import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { Request } from 'express';
+import { AppException } from '../common/errors/app-exception';
+import { ErrorCode } from '../common/errors/error-code.enum';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
-import {
-  deriveAccessScope,
-  derivePrimaryRole,
-  deriveRoleScope,
-} from '../common/auth/role-scope.util';
-import { RoleScope } from '../common/enums/role-scope.enum';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { PlatformAccessService } from '../platform/platform-access.service';
+import { AuthContextService } from '../common/auth/auth-context.service';
+import { SessionTokenPayload } from '../common/interfaces/session-token-payload.interface';
 
 @Injectable()
 export class AuthService {
@@ -27,23 +24,41 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-    private readonly platformAccessService: PlatformAccessService,
+    private readonly authContextService: AuthContextService,
   ) {}
 
   async login(dto: LoginDto, request?: Request) {
-    const user = await this.loadUserByEmail(dto.email, dto.tenantSlug);
+    const user = await this.authContextService.loadUserByEmail(dto.email, dto.tenantSlug);
 
     if (!user || user.status === UserStatus.SUSPENDED) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new AppException(
+        'Invalid credentials',
+        ErrorCode.AUTH_REQUIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
     }
 
     const isValidPassword = await bcrypt.compare(dto.password, user.passwordHash);
     if (!isValidPassword) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new AppException(
+        'Invalid credentials',
+        ErrorCode.AUTH_REQUIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
     }
 
-    const basePayload = await this.buildPayload(user, dto.activeBranchId);
     const session = await this.createSession(user.id, user.tenantId, request);
+    const basePayload = await this.authContextService.buildAuthorizedPayload(user, {
+      requestedActiveTenantId: session.activeTenantId,
+      requestedActiveBranchId: dto.activeBranchId,
+      sessionId: session.id,
+      sessionContext: {
+        activeTenantId: session.activeTenantId,
+        impersonationTenantId: session.impersonationTenantId,
+        impersonationStartedAt: session.impersonationStartedAt,
+        impersonationReason: session.impersonationReason,
+      },
+    });
     const tokens = await this.generateTokens(basePayload, session.id);
     const now = new Date();
 
@@ -53,15 +68,22 @@ export class AuthService {
     ]);
 
     return {
-      user: await this.serializeAuthUser(basePayload, session.id),
-      ...tokens,
+      user: await this.authContextService.serializeAuthUser(basePayload),
+      accessToken: tokens.accessToken,
+      expiresIn: this.resolveAccessTokenTtlSeconds(),
+      refreshToken: tokens.refreshToken,
     };
   }
 
   async refresh(dto: RefreshTokenDto, request?: Request) {
-    const refreshPayload = await this.verifyRefreshToken(dto.refreshToken);
+    const refreshToken = dto.refreshToken ?? '';
+    const refreshPayload = await this.verifyRefreshToken(refreshToken);
     if (!refreshPayload.sessionId) {
-      throw new UnauthorizedException('Refresh token session is missing');
+      throw new AppException(
+        'Refresh token session is missing',
+        ErrorCode.SESSION_EXPIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
     }
 
     const session = await this.prisma.userSession.findUnique({
@@ -69,20 +91,52 @@ export class AuthService {
     });
 
     if (!session || session.revokedAt || session.expiresAt < new Date()) {
-      throw new UnauthorizedException('Session is no longer active');
+      throw new AppException(
+        'Session is no longer active',
+        ErrorCode.SESSION_EXPIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
     }
 
-    const matches = await bcrypt.compare(dto.refreshToken, session.refreshTokenHash);
+    const matches = await bcrypt.compare(refreshToken, session.refreshTokenHash);
     if (!matches) {
-      throw new UnauthorizedException('Invalid refresh token');
+      await this.prisma.userSession.updateMany({
+        where: {
+          userId: session.userId,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+
+      throw new AppException(
+        'Refresh token reuse detected',
+        ErrorCode.SESSION_EXPIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
     }
 
-    const user = await this.loadUserById(refreshPayload.sub);
+    const user = await this.authContextService.loadUserById(refreshPayload.sub);
     if (!user || user.status !== UserStatus.ACTIVE) {
-      throw new UnauthorizedException('User is not active');
+      throw new AppException(
+        'User is not active',
+        ErrorCode.SESSION_EXPIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
     }
 
-    const basePayload = await this.buildPayload(user);
+    const basePayload = await this.authContextService.buildAuthorizedPayload(user, {
+      requestedActiveTenantId: session.activeTenantId,
+      requestedActiveBranchId: user.activeBranchId,
+      sessionId: session.id,
+      sessionContext: {
+        activeTenantId: session.activeTenantId,
+        impersonationTenantId: session.impersonationTenantId,
+        impersonationStartedAt: session.impersonationStartedAt,
+        impersonationReason: session.impersonationReason,
+      },
+    });
     const tokens = await this.generateTokens(basePayload, session.id);
 
     await Promise.all([
@@ -99,8 +153,10 @@ export class AuthService {
     ]);
 
     return {
-      user: await this.serializeAuthUser(basePayload, session.id),
-      ...tokens,
+      user: await this.authContextService.serializeAuthUser(basePayload),
+      accessToken: tokens.accessToken,
+      expiresIn: this.resolveAccessTokenTtlSeconds(),
+      refreshToken: tokens.refreshToken,
     };
   }
 
@@ -124,7 +180,188 @@ export class AuthService {
   }
 
   async getCurrentUser(payload: JwtPayload) {
-    return this.serializeAuthUser(payload, payload.sessionId);
+    return this.authContextService.serializeAuthUser(payload);
+  }
+
+  async updateActiveBranch(payload: JwtPayload, branchId: string) {
+    const updatedPayload = await this.authContextService.updateActiveBranch(payload, branchId);
+    return this.authContextService.serializeAuthUser(updatedPayload);
+  }
+
+  async updateActiveTenant(payload: JwtPayload, tenantId: string) {
+    if (payload.role !== 'PLATFORM_ADMIN') {
+      throw new AppException(
+        'Role cannot switch tenant context',
+        ErrorCode.ROLE_NOT_ALLOWED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (!payload.permissions.includes('platform.tenant.switch')) {
+      throw new AppException('Permission denied', ErrorCode.PERMISSION_DENIED, HttpStatus.FORBIDDEN);
+    }
+
+    if (!payload.allowedTenantIds.includes(tenantId)) {
+      throw new AppException('Tenant is outside the allowed scope', ErrorCode.TENANT_ACCESS_DENIED, HttpStatus.FORBIDDEN);
+    }
+
+    const targetTenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { subscription: true },
+    });
+
+    if (!targetTenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    if (targetTenant.status !== 'ACTIVE') {
+      throw new AppException('Tenant is not active', ErrorCode.RESOURCE_CONFLICT, HttpStatus.CONFLICT);
+    }
+
+    if (!payload.sessionId) {
+      throw new AppException('Session is required', ErrorCode.SESSION_EXPIRED, HttpStatus.UNAUTHORIZED);
+    }
+
+    const firstBranchAccess = await this.prisma.userBranchAccess.findFirst({
+      where: {
+        userId: payload.sub,
+        branch: {
+          tenantId,
+        },
+      },
+      orderBy: { assignedAt: 'asc' },
+      select: { branchId: true },
+    });
+
+    await this.prisma.userSession.update({
+      where: { id: payload.sessionId },
+      data: {
+        activeTenantId: tenantId,
+      },
+    });
+
+    await this.prisma.user.update({
+      where: { id: payload.sub },
+      data: {
+        activeBranchId: firstBranchAccess?.branchId ?? null,
+      },
+    });
+
+    const user = await this.authContextService.loadUserById(payload.sub);
+    if (!user) {
+      throw new AppException('User does not exist', ErrorCode.AUTH_REQUIRED, HttpStatus.UNAUTHORIZED);
+    }
+
+    const updatedPayload = await this.authContextService.buildAuthorizedPayload(user, {
+      requestedActiveTenantId: tenantId,
+      requestedActiveBranchId: firstBranchAccess?.branchId ?? null,
+      sessionId: payload.sessionId,
+      sessionContext: {
+        activeTenantId: tenantId,
+      },
+    });
+
+    return this.authContextService.serializeAuthUser(updatedPayload);
+  }
+
+  async startImpersonation(payload: JwtPayload, tenantId: string, reason: string) {
+    if (payload.role !== 'SUPERADMIN') {
+      throw new AppException(
+        'Role cannot impersonate tenant context',
+        ErrorCode.ROLE_NOT_ALLOWED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (!payload.permissions.includes('platform.tenant.impersonate')) {
+      throw new AppException('Permission denied', ErrorCode.PERMISSION_DENIED, HttpStatus.FORBIDDEN);
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    if (!payload.sessionId) {
+      throw new AppException('Session is required', ErrorCode.SESSION_EXPIRED, HttpStatus.UNAUTHORIZED);
+    }
+
+    await this.prisma.userSession.update({
+      where: { id: payload.sessionId },
+      data: {
+        activeTenantId: tenantId,
+        impersonationTenantId: tenantId,
+        impersonationStartedAt: new Date(),
+        impersonationReason: reason,
+      },
+    });
+
+    const user = await this.authContextService.loadUserById(payload.sub);
+    if (!user) {
+      throw new AppException('User does not exist', ErrorCode.AUTH_REQUIRED, HttpStatus.UNAUTHORIZED);
+    }
+
+    const updatedPayload = await this.authContextService.buildAuthorizedPayload(user, {
+      requestedActiveTenantId: tenantId,
+      sessionId: payload.sessionId,
+      sessionContext: {
+        activeTenantId: tenantId,
+        impersonationTenantId: tenantId,
+        impersonationStartedAt: new Date(),
+        impersonationReason: reason,
+      },
+    });
+
+    return this.authContextService.serializeAuthUser(updatedPayload);
+  }
+
+  async stopImpersonation(payload: JwtPayload) {
+    if (payload.role !== 'SUPERADMIN') {
+      throw new AppException(
+        'Role cannot stop impersonation',
+        ErrorCode.ROLE_NOT_ALLOWED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (!payload.sessionId) {
+      throw new AppException('Session is required', ErrorCode.SESSION_EXPIRED, HttpStatus.UNAUTHORIZED);
+    }
+
+    await this.prisma.userSession.update({
+      where: { id: payload.sessionId },
+      data: {
+        activeTenantId: null,
+        impersonationTenantId: null,
+        impersonationStartedAt: null,
+        impersonationReason: null,
+      },
+    });
+
+    await this.prisma.user.update({
+      where: { id: payload.sub },
+      data: { activeBranchId: null },
+    });
+
+    const user = await this.authContextService.loadUserById(payload.sub);
+    if (!user) {
+      throw new AppException('User does not exist', ErrorCode.AUTH_REQUIRED, HttpStatus.UNAUTHORIZED);
+    }
+
+    const updatedPayload = await this.authContextService.buildAuthorizedPayload(user, {
+      sessionId: payload.sessionId,
+      sessionContext: {
+        activeTenantId: null,
+        impersonationTenantId: null,
+        impersonationStartedAt: null,
+        impersonationReason: null,
+      },
+    });
+
+    return this.authContextService.serializeAuthUser(updatedPayload);
   }
 
   async getSessions(payload: JwtPayload) {
@@ -167,82 +404,24 @@ export class AuthService {
     return { revoked: true };
   }
 
-  private async buildPayload(user: LoadedUser, requestedActiveBranchId?: string): Promise<JwtPayload> {
-    const roleCodes = user.userRoles.map((entry) => entry.role.code);
-    const permissions = new Set<string>();
-
-    for (const userRole of user.userRoles) {
-      for (const rolePermission of userRole.role.rolePermissions) {
-        permissions.add(rolePermission.permission.code);
-      }
-    }
-
-    for (const userPermission of user.userPermissions) {
-      permissions.add(userPermission.permission.code);
-    }
-
-    const roleScope = deriveRoleScope(roleCodes, user.isSuperAdmin);
-    const accessScope = deriveAccessScope(roleScope, user.isSuperAdmin);
-    const allowedBranchIds =
-      roleScope === RoleScope.TENANT_ADMIN
-        ? (
-            await this.prisma.branch.findMany({
-              where: { tenantId: user.tenantId },
-              select: { id: true },
-              orderBy: { createdAt: 'asc' },
-            })
-          ).map((branch) => branch.id)
-        : user.branchAccesses.map((entry) => entry.branchId);
-
-    const resolvedActiveBranchId = this.resolveActiveBranchId({
-      roleScope,
-      requestedActiveBranchId,
-      currentActiveBranchId: user.activeBranchId,
-      allowedBranchIds,
-    });
-
-    if (resolvedActiveBranchId && resolvedActiveBranchId !== user.activeBranchId) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { activeBranchId: resolvedActiveBranchId },
-      });
-    }
-
-    const tenantCapabilities = await this.platformAccessService.getTenantCapabilities(user.tenantId);
-
-    return {
-      sub: user.id,
-      userId: user.id,
-      tenantId: user.tenantId,
-      tenantSlug: user.tenant.slug,
-      tenantName: user.tenant.name,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: derivePrimaryRole(roleCodes, user.isSuperAdmin),
-      scope: accessScope,
-      isSuperAdmin: user.isSuperAdmin,
-      roleScope,
-      allowedBranchIds,
-      activeBranchId: resolvedActiveBranchId,
-      roles: roleCodes,
-      permissions: [...permissions],
-      enabledModules: tenantCapabilities.enabledModules,
-    };
-  }
-
   private async generateTokens(payload: JwtPayload, sessionId: string) {
-    const tokenPayload: JwtPayload = {
-      ...payload,
+    const baseTokenPayload = {
+      sub: payload.sub,
       sessionId,
     };
 
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(tokenPayload, {
+      this.jwtService.signAsync({
+        ...baseTokenPayload,
+        tokenType: 'access',
+      } satisfies SessionTokenPayload, {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
         expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRES_IN', '15m'),
       }),
-      this.jwtService.signAsync(tokenPayload, {
+      this.jwtService.signAsync({
+        ...baseTokenPayload,
+        tokenType: 'refresh',
+      } satisfies SessionTokenPayload, {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
       }),
@@ -251,59 +430,42 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private async serializeAuthUser(payload: JwtPayload, sessionId?: string) {
-    const [availableBranches, tenantCapabilities] = await Promise.all([
-      payload.allowedBranchIds.length
-        ? this.prisma.branch.findMany({
-            where: {
-              tenantId: payload.tenantId,
-              id: { in: payload.allowedBranchIds },
-            },
-            select: {
-              id: true,
-              tenantId: true,
-              name: true,
-              location: true,
-            },
-            orderBy: { createdAt: 'asc' },
-          })
-        : Promise.resolve([]),
-      this.platformAccessService.getTenantCapabilities(payload.tenantId),
-    ]);
+  private resolveAccessTokenTtlSeconds() {
+    const ttl = this.configService.get<string>('JWT_ACCESS_EXPIRES_IN', '15m').trim().toLowerCase();
+    const match = ttl.match(/^(\d+)([smhd])$/);
+    if (!match) {
+      return 900;
+    }
 
-    return {
-      id: payload.sub,
-      userId: payload.userId,
-      sessionId: sessionId ?? payload.sessionId ?? null,
-      email: payload.email,
-      tenantId: payload.tenantId,
-      tenantSlug: payload.tenantSlug,
-      tenantName: payload.tenantName,
-      role: payload.role,
-      scope: payload.scope,
-      roleScope: payload.roleScope,
-      allowedBranchIds: payload.allowedBranchIds,
-      activeBranchId: payload.activeBranchId,
-      availableBranches,
-      firstName: payload.firstName,
-      lastName: payload.lastName,
-      isSuperAdmin: payload.isSuperAdmin,
-      roles: payload.roles,
-      permissions: payload.permissions,
-      enabledModules: tenantCapabilities.enabledModules,
-      tenantCapabilities,
+    const value = Number(match[1]);
+    const multipliers: Record<string, number> = {
+      s: 1,
+      m: 60,
+      h: 60 * 60,
+      d: 24 * 60 * 60,
     };
+
+    return value * (multipliers[match[2]] ?? 60);
   }
 
   private async createSession(userId: string, tenantId: string, request?: Request) {
     const ttl = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d');
     const expiresAt = this.resolveExpiryFromNow(ttl);
+    const user = await this.authContextService.loadUserById(userId);
+    const roleCodes = user?.userRoles.map((entry) => entry.role.code) ?? [];
+    const activeTenantId =
+      user?.isSuperAdmin
+        ? null
+        : roleCodes.includes('PLATFORM_ADMIN')
+          ? user?.platformTenantAccesses[0]?.tenantId ?? null
+          : tenantId;
 
     return this.prisma.userSession.create({
       data: {
         userId,
         tenantId,
         refreshTokenHash: 'pending',
+        activeTenantId,
         expiresAt,
         ipAddress: this.resolveIp(request),
         userAgent: this.resolveUserAgent(request),
@@ -329,42 +491,32 @@ export class AuthService {
     });
   }
 
-  private verifyRefreshToken(refreshToken: string) {
+  private async verifyRefreshToken(refreshToken: string) {
+    if (!refreshToken) {
+      throw new AppException(
+        'Refresh token is required',
+        ErrorCode.AUTH_REQUIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
     try {
-      return this.jwtService.verifyAsync<JwtPayload>(refreshToken, {
+      const payload = await this.jwtService.verifyAsync<SessionTokenPayload>(refreshToken, {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
       });
+
+      if (payload.tokenType !== 'refresh') {
+        throw new Error('Unexpected token type');
+      }
+
+      return payload;
     } catch {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new AppException(
+        'Invalid refresh token',
+        ErrorCode.SESSION_EXPIRED,
+        HttpStatus.UNAUTHORIZED,
+      );
     }
-  }
-
-  private resolveActiveBranchId(input: {
-    roleScope: RoleScope;
-    requestedActiveBranchId?: string;
-    currentActiveBranchId: string | null;
-    allowedBranchIds: string[];
-  }) {
-    const {
-      roleScope,
-      requestedActiveBranchId,
-      currentActiveBranchId,
-      allowedBranchIds,
-    } = input;
-
-    if (roleScope === RoleScope.TENANT_ADMIN) {
-      return requestedActiveBranchId ?? currentActiveBranchId ?? allowedBranchIds[0] ?? null;
-    }
-
-    if (requestedActiveBranchId && !allowedBranchIds.includes(requestedActiveBranchId)) {
-      throw new ForbiddenException('Requested branch is outside the user scope');
-    }
-
-    if (currentActiveBranchId && allowedBranchIds.includes(currentActiveBranchId)) {
-      return requestedActiveBranchId ?? currentActiveBranchId;
-    }
-
-    return requestedActiveBranchId ?? allowedBranchIds[0] ?? null;
   }
 
   private resolveExpiryFromNow(ttl: string) {
@@ -415,46 +567,4 @@ export class AuthService {
 
     return userAgent ?? null;
   }
-
-  private loadUserByEmail(email: string, tenantSlug?: string) {
-    return this.prisma.user.findFirst({
-      where: {
-        email,
-        ...(tenantSlug ? { tenant: { slug: tenantSlug } } : {}),
-      },
-      include: userInclude,
-    });
-  }
-
-  private loadUserById(id: string) {
-    return this.prisma.user.findUnique({
-      where: { id },
-      include: userInclude,
-    });
-  }
 }
-
-const userInclude = {
-  tenant: true,
-  userRoles: {
-    include: {
-      role: {
-        include: {
-          rolePermissions: {
-            include: { permission: true },
-          },
-        },
-      },
-    },
-  },
-  userPermissions: {
-    include: { permission: true },
-  },
-  branchAccesses: {
-    include: {
-      branch: true,
-    },
-  },
-} as const;
-
-type LoadedUser = NonNullable<Awaited<ReturnType<AuthService['loadUserById']>>>;

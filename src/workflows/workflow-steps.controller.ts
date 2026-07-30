@@ -8,9 +8,13 @@ import { RequestWithUser } from '../common/types/request-with-user.type';
 import { UpdateWorkflowStepStatusDto } from './dto/update-workflow-step-status.dto';
 import { UpdateWorkflowStepProgressDto } from './dto/update-workflow-step-progress.dto';
 import { WorkflowsService } from './workflows.service';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
+import { RequireModule } from '../common/decorators/module-access.decorator';
+import { ModuleCode } from '@prisma/client';
 
 @Controller('workflow-steps')
-@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, PermissionGuard)
+@RequireModule(ModuleCode.ONBOARDING)
 export class WorkflowStepsController {
   constructor(private readonly workflowsService: WorkflowsService) {}
 

@@ -5,60 +5,87 @@ import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { RequestWithUser } from '../common/types/request-with-user.type';
-import { AutomationService } from '../automation/automation.service';
 import { CandidateHiredDto } from './dto/candidate-hired.dto';
 import { SimpleDomainEventDto } from './dto/simple-domain-event.dto';
+import { DomainEventsService } from './domain-events.service';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
+import { RequireModule } from '../common/decorators/module-access.decorator';
+import { ModuleCode } from '@prisma/client';
 
 @Controller('domain-events')
-@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, PermissionGuard)
 export class DomainEventsController {
-  constructor(private readonly automationService: AutomationService) {}
+  constructor(private readonly domainEventsService: DomainEventsService) {}
 
   @Post('candidate-hired')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.ATS)
+  @RequirePermissions('domain_events.candidate_hired')
   candidateHired(@Req() request: RequestWithUser, @Body() dto: CandidateHiredDto) {
-    return this.automationService.processCandidateHired(request.user, dto);
+    return this.domainEventsService.candidateHired(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 
   @Post('branch-changed')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.ONBOARDING)
+  @RequirePermissions('domain_events.branch_changed')
   branchChanged(@Req() request: RequestWithUser, @Body() dto: SimpleDomainEventDto) {
-    return this.automationService.processBranchChanged(request.user, dto);
+    return this.domainEventsService.branchChanged(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 
   @Post('offboarding-started')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.ONBOARDING)
+  @RequirePermissions('domain_events.offboarding_started')
   offboardingStarted(@Req() request: RequestWithUser, @Body() dto: SimpleDomainEventDto) {
-    return this.automationService.processOffboardingStarted(request.user, dto);
+    return this.domainEventsService.offboardingStarted(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 
   @Post('onboarding-completed')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.ONBOARDING)
+  @RequirePermissions('domain_events.onboarding_completed')
   onboardingCompleted(@Req() request: RequestWithUser, @Body() dto: SimpleDomainEventDto) {
-    return this.automationService.processOnboardingCompleted(request.user, dto);
+    return this.domainEventsService.onboardingCompleted(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 
   @Post('asset-assigned')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.INVENTORY)
+  @RequirePermissions('domain_events.asset_assigned')
   assetAssigned(@Req() request: RequestWithUser, @Body() dto: SimpleDomainEventDto) {
-    return this.automationService.processAssetAssigned(request.user, dto);
+    return this.domainEventsService.assetAssigned(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 
   @Post('training-completed')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.TRAINING)
+  @RequirePermissions('domain_events.training_completed')
   trainingCompleted(@Req() request: RequestWithUser, @Body() dto: SimpleDomainEventDto) {
-    return this.automationService.processTrainingCompleted(request.user, dto);
+    return this.domainEventsService.trainingCompleted(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 
   @Post('operation-handoff-completed')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.ONBOARDING)
+  @RequirePermissions('domain_events.operation_handoff_completed')
   operationHandoffCompleted(@Req() request: RequestWithUser, @Body() dto: SimpleDomainEventDto) {
-    return this.automationService.processOperationHandoffCompleted(request.user, dto);
+    return this.domainEventsService.operationHandoffCompleted(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 
   @Post('compliance-closed')
-  @RequirePermissions('domain_events.create')
+  @RequireModule(ModuleCode.ONBOARDING)
+  @RequirePermissions('domain_events.compliance_closed')
   complianceClosed(@Req() request: RequestWithUser, @Body() dto: SimpleDomainEventDto) {
-    return this.automationService.processComplianceClosed(request.user, dto);
+    return this.domainEventsService.complianceClosed(request.user, dto, {
+      correlationId: request.requestId,
+    });
   }
 }

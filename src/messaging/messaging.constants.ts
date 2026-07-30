@@ -1,0 +1,20 @@
+export const MESSAGE_QUEUE_NAMES = {
+  AUTOMATION_EVENTS: 'automation-events',
+  WORKFLOW_EVENTS: 'workflow-events',
+  NOTIFICATIONS: 'notifications',
+  DOCUMENTS: 'documents',
+  TRAINING: 'training',
+  TRAINING_WEBHOOK: 'training-webhook',
+} as const;
+
+export type MessageQueueName =
+  (typeof MESSAGE_QUEUE_NAMES)[keyof typeof MESSAGE_QUEUE_NAMES];
+
+export const MESSAGE_QUEUE_LIST: MessageQueueName[] = [
+  MESSAGE_QUEUE_NAMES.AUTOMATION_EVENTS,
+  MESSAGE_QUEUE_NAMES.WORKFLOW_EVENTS,
+  MESSAGE_QUEUE_NAMES.NOTIFICATIONS,
+  MESSAGE_QUEUE_NAMES.DOCUMENTS,
+  MESSAGE_QUEUE_NAMES.TRAINING,
+  MESSAGE_QUEUE_NAMES.TRAINING_WEBHOOK,
+];

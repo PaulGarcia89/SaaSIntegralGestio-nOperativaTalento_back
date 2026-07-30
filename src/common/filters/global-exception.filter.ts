@@ -8,7 +8,9 @@ import {
   HttpStatus,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   PayloadTooLargeException,
+  UnprocessableEntityException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
@@ -26,9 +28,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     const payload = this.normalizeException(exception);
     const body = {
-      error: payload.error,
-      code: payload.code,
-      status: payload.status,
+      error: {
+        code: payload.code,
+        message: payload.message,
+        ...(payload.details !== undefined ? { details: payload.details } : {}),
+        ...(payload.fieldErrors ? { fieldErrors: payload.fieldErrors } : {}),
+        ...(payload.retryAfter !== undefined ? { retryAfter: payload.retryAfter } : {}),
+        requestId: request.requestId ?? null,
+      },
     };
 
     this.logger.error(
@@ -41,9 +48,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         route: request.originalUrl ?? request.url,
         statusCode: payload.status,
         code: payload.code,
-        error: payload.error,
+        message: payload.message,
+        requestId: request.requestId ?? null,
       }),
     );
+
+    if (payload.retryAfter !== undefined) {
+      response.setHeader('Retry-After', String(payload.retryAfter));
+    }
 
     response.status(payload.status).json(body);
   }
@@ -59,7 +71,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       if (exception instanceof BadRequestException) {
         return {
-          error: this.extractMessage(response, 'Bad request'),
+          message: this.extractMessage(response, 'Bad request'),
+          code: ErrorCode.VALIDATION_ERROR,
+          status,
+        };
+      }
+
+      if (exception instanceof UnprocessableEntityException) {
+        return {
+          message: this.extractMessage(response, 'Validation failed'),
           code: ErrorCode.VALIDATION_ERROR,
           status,
         };
@@ -67,15 +87,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       if (exception instanceof UnauthorizedException) {
         return {
-          error: this.extractMessage(response, 'Unauthorized'),
-          code: ErrorCode.UNAUTHORIZED,
+          message: this.extractMessage(response, 'Unauthorized'),
+          code: ErrorCode.AUTH_REQUIRED,
           status,
         };
       }
 
       if (exception instanceof ForbiddenException) {
         return {
-          error: this.extractMessage(response, 'Forbidden'),
+          message: this.extractMessage(response, 'Forbidden'),
           code: ErrorCode.FORBIDDEN,
           status,
         };
@@ -83,14 +103,31 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       if (exception instanceof NotFoundException) {
         return {
-          error: this.extractMessage(response, 'Resource not found'),
+          message: this.extractMessage(response, 'Resource not found'),
           code: ErrorCode.RESOURCE_NOT_FOUND,
           status,
         };
       }
 
+      if (status === HttpStatus.TOO_MANY_REQUESTS) {
+        return {
+          message: this.extractMessage(response, 'Too many requests'),
+          code: ErrorCode.RATE_LIMITED,
+          status,
+          retryAfter: this.extractRetryAfter(response),
+        };
+      }
+
+      if (exception instanceof ServiceUnavailableException) {
+        return {
+          message: this.extractMessage(response, 'Service temporarily unavailable'),
+          code: ErrorCode.SERVICE_UNAVAILABLE,
+          status,
+        };
+      }
+
       return {
-        error: this.extractMessage(response, 'Request failed'),
+        message: this.extractMessage(response, 'Request failed'),
         code: status >= 500 ? ErrorCode.INTERNAL_SERVER_ERROR : ErrorCode.BAD_REQUEST,
         status,
       };
@@ -98,14 +135,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (this.isPayloadTooLargeException(exception)) {
       return {
-        error: 'Request payload is too large',
+        message: 'Request payload is too large',
         code: ErrorCode.BAD_REQUEST,
         status: HttpStatus.PAYLOAD_TOO_LARGE,
       };
     }
 
     return {
-      error: 'Internal server error',
+      message: 'Internal server error',
       code: ErrorCode.INTERNAL_SERVER_ERROR,
       status: HttpStatus.INTERNAL_SERVER_ERROR,
     };
@@ -132,14 +169,30 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
   private isStandardErrorResponse(
     response: string | object,
-  ): response is { error: string; code: ErrorCode; status: number } {
+  ): response is {
+    message: string;
+    code: ErrorCode;
+    status: number;
+    details?: unknown;
+    fieldErrors?: Record<string, string[]>;
+    retryAfter?: number;
+  } {
     return (
       typeof response === 'object' &&
       response !== null &&
-      'error' in response &&
+      'message' in response &&
       'code' in response &&
       'status' in response
     );
+  }
+
+  private extractRetryAfter(response: string | object) {
+    if (typeof response !== 'object' || response === null || !('retryAfter' in response)) {
+      return undefined;
+    }
+
+    const value = (response as { retryAfter?: unknown }).retryAfter;
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
   }
 
   private isPayloadTooLargeException(exception: unknown) {

@@ -27,7 +27,7 @@ export class TenantsService {
           include: { plan: true },
         },
         _count: {
-          select: { branches: true },
+          select: { branches: true, employees: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -46,7 +46,7 @@ export class TenantsService {
         },
         users: true,
         _count: {
-          select: { branches: true },
+          select: { branches: true, employees: true },
         },
       },
     });
@@ -81,6 +81,7 @@ export class TenantsService {
       id: string;
       _count?: {
         branches?: number;
+        employees?: number;
       };
     },
   >(tenant: T) {
@@ -90,6 +91,7 @@ export class TenantsService {
     return {
       ...rest,
       branchCount: _count?.branches ?? 0,
+      employeeCount: _count?.employees ?? 0,
       planCode: capabilities.plan?.code ?? null,
       enabledModules: capabilities.enabledModules,
       capabilities,

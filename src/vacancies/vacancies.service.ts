@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
@@ -7,13 +7,16 @@ import { CreateVacancyFormTemplateDto } from './dto/create-vacancy-form-template
 import { ListVacanciesDto } from './dto/list-vacancies.dto';
 import { ListPublicVacanciesDto } from './dto/list-public-vacancies.dto';
 import { UpdateVacancyDto } from './dto/update-vacancy.dto';
+import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { AccessScope } from '../common/enums/access-scope.enum';
 
 @Injectable()
 export class VacanciesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(tenantId: string, userId: string, dto: CreateVacancyDto) {
+  async create(tenantId: string, actor: JwtPayload, dto: CreateVacancyDto) {
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
+    this.assertActorCanAccessBranch(actor, dto.branchId);
 
     const applicationFormSchema = this.normalizeApplicationFormSchema(dto.applicationFormSchema);
 
@@ -21,7 +24,7 @@ export class VacanciesService {
       data: {
         tenantId,
         branchId: dto.branchId,
-        createdByUserId: userId,
+        createdByUserId: actor.sub,
         title: dto.title,
         summary: dto.summary,
         description: dto.description,
@@ -56,14 +59,16 @@ export class VacanciesService {
     });
   }
 
-  async findAll(tenantId: string, query: ListVacanciesDto) {
+  async findAll(tenantId: string, actor: JwtPayload, query: ListVacanciesDto) {
     const pagination = normalizeOffsetPagination(query);
     if (query.branchId) {
       await this.assertBranchBelongsToTenant(query.branchId, tenantId);
+      this.assertActorCanAccessBranch(actor, query.branchId);
     }
 
     const where: Prisma.VacancyWhereInput = {
       tenantId,
+      ...this.vacancyScope(actor),
       ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.workMode ? { workMode: query.workMode } : {}),
@@ -113,11 +118,12 @@ export class VacanciesService {
     };
   }
 
-  async findOne(id: string, tenantId: string) {
+  async findOne(id: string, tenantId: string, actor?: JwtPayload) {
     const vacancy = await this.prisma.vacancy.findFirst({
       where: {
         id,
         tenantId,
+        ...(actor ? this.vacancyScope(actor) : {}),
       },
       include: {
         branch: true,
@@ -139,10 +145,11 @@ export class VacanciesService {
     return vacancy;
   }
 
-  async update(id: string, tenantId: string, dto: UpdateVacancyDto) {
-    await this.findOne(id, tenantId);
+  async update(id: string, tenantId: string, actor: JwtPayload, dto: UpdateVacancyDto) {
+    await this.findOne(id, tenantId, actor);
     if (dto.branchId) {
       await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
+      this.assertActorCanAccessBranch(actor, dto.branchId);
     }
 
     const data: Prisma.VacancyUncheckedUpdateInput = {
@@ -179,7 +186,7 @@ export class VacanciesService {
       data,
     });
 
-    return this.findOne(id, tenantId);
+    return this.findOne(id, tenantId, actor);
   }
 
   async findPublic(query: ListPublicVacanciesDto) {
@@ -319,6 +326,24 @@ export class VacanciesService {
 
     if (!branch) {
       throw new NotFoundException('Branch not found');
+    }
+  }
+
+  private vacancyScope(actor: JwtPayload): Prisma.VacancyWhereInput {
+    if (actor.scope !== AccessScope.BRANCH || actor.isSuperAdmin) {
+      return {};
+    }
+
+    return { branchId: { in: actor.allowedBranchIds } };
+  }
+
+  private assertActorCanAccessBranch(actor: JwtPayload, branchId: string) {
+    if (
+      actor.scope === AccessScope.BRANCH &&
+      !actor.isSuperAdmin &&
+      !actor.allowedBranchIds.includes(branchId)
+    ) {
+      throw new ForbiddenException('Branch is outside the actor access scope');
     }
   }
 

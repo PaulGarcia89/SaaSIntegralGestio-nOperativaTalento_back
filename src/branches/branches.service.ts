@@ -5,6 +5,8 @@ import { CreateBranchDto } from './dto/create-branch.dto';
 import { ListBranchesDto } from './dto/list-branches.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
+import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { AccessScope } from '../common/enums/access-scope.enum';
 
 @Injectable()
 export class BranchesService {
@@ -20,10 +22,11 @@ export class BranchesService {
     });
   }
 
-  async findAll(tenantId: string, query: ListBranchesDto) {
+  async findAll(tenantId: string, actor: JwtPayload, query: ListBranchesDto) {
     const pagination = normalizeOffsetPagination(query);
     const where: Prisma.BranchWhereInput = {
       tenantId,
+      ...this.branchScope(actor),
       ...(query.search
         ? {
             OR: [
@@ -55,11 +58,12 @@ export class BranchesService {
     };
   }
 
-  async findOne(id: string, tenantId: string) {
+  async findOne(id: string, tenantId: string, actor?: JwtPayload) {
     const branch = await this.prisma.branch.findFirst({
       where: {
         id,
         tenantId,
+        ...(actor ? this.branchScope(actor) : {}),
       },
     });
 
@@ -82,5 +86,14 @@ export class BranchesService {
   async remove(id: string, tenantId: string) {
     await this.findOne(id, tenantId);
     return this.prisma.branch.delete({ where: { id } });
+  }
+
+  private branchScope(actor: JwtPayload): Prisma.BranchWhereInput {
+    if (actor.scope !== AccessScope.BRANCH || actor.isSuperAdmin) {
+      return {};
+    }
+
+    // An empty assignment must never degrade into tenant-wide access.
+    return { id: { in: actor.allowedBranchIds } };
   }
 }

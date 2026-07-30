@@ -18,7 +18,7 @@ export class AuditLogsController {
   constructor(private readonly auditLogsService: AuditLogsService) {}
 
   @Get()
-  @RequirePermissions('tenants.read')
+  @RequirePermissions('audit.read')
   findAll(@CurrentUser() user: JwtPayload, @Query() query: ListAuditLogsDto) {
     return this.auditLogsService.findAll(user, query);
   }

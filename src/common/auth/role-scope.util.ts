@@ -1,12 +1,17 @@
 import { AccessScope } from '../enums/access-scope.enum';
 import { RoleScope } from '../enums/role-scope.enum';
 
-const TENANT_ADMIN_CODES = new Set(['TENANT_ADMIN', 'SUPERADMIN', 'ADMIN']);
+const PLATFORM_ADMIN_CODES = new Set(['SUPERADMIN', 'PLATFORM_ADMIN']);
+const TENANT_ADMIN_CODES = new Set(['TENANT_ADMIN', 'ADMIN']);
 const BRANCH_ADMIN_CODES = new Set(['BRANCH_ADMIN']);
 const BRANCH_USER_CODES = new Set(['BRANCH_USER']);
 
 export function deriveRoleScope(roleCodes: string[], isSuperAdmin: boolean): RoleScope {
-  if (isSuperAdmin || roleCodes.some((roleCode) => TENANT_ADMIN_CODES.has(roleCode))) {
+  if (isSuperAdmin || roleCodes.some((roleCode) => PLATFORM_ADMIN_CODES.has(roleCode))) {
+    return RoleScope.PLATFORM_ADMIN;
+  }
+
+  if (roleCodes.some((roleCode) => TENANT_ADMIN_CODES.has(roleCode))) {
     return RoleScope.TENANT_ADMIN;
   }
 
@@ -22,7 +27,7 @@ export function deriveRoleScope(roleCodes: string[], isSuperAdmin: boolean): Rol
 }
 
 export function deriveAccessScope(roleScope: RoleScope, isSuperAdmin: boolean): AccessScope {
-  if (isSuperAdmin) {
+  if (isSuperAdmin || roleScope === RoleScope.PLATFORM_ADMIN) {
     return AccessScope.GLOBAL;
   }
 
@@ -35,11 +40,15 @@ export function deriveAccessScope(roleScope: RoleScope, isSuperAdmin: boolean): 
 
 export function derivePrimaryRole(roleCodes: string[], isSuperAdmin: boolean) {
   if (isSuperAdmin) {
-    return 'admin_saas';
+    return 'SUPERADMIN';
+  }
+
+  if (roleCodes.includes('PLATFORM_ADMIN')) {
+    return 'PLATFORM_ADMIN';
   }
 
   if (roleCodes.includes('TENANT_ADMIN') || roleCodes.includes('ADMIN')) {
-    return 'admin_empresa';
+    return 'TENANT_ADMIN';
   }
 
   return roleCodes[0] ?? null;

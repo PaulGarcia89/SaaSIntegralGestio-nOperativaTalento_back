@@ -5,6 +5,8 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { AccessScope } from '../common/enums/access-scope.enum';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 import { CreatePublicApplicationDto } from './dto/create-public-application.dto';
 import {
@@ -14,6 +16,7 @@ import {
 } from './dto/application-tracking.dto';
 import { ListApplicationsDto } from './dto/list-applications.dto';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto';
+import { BulkUpdateApplicationsDto } from './dto/bulk-update-applications.dto';
 
 const applicationInclude = {
   candidate: true,
@@ -25,6 +28,15 @@ const applicationInclude = {
   timelineEvents: {
     orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
   },
+  interviews: {
+    include: {
+      stage: true,
+      interviewer: {
+        select: { id: true, firstName: true, lastName: true },
+      },
+    },
+    orderBy: { startsAt: 'asc' },
+  },
 } satisfies Prisma.VacancyApplicationInclude;
 
 type ApplicationWithRelations = Prisma.VacancyApplicationGetPayload<{
@@ -35,7 +47,15 @@ type ApplicationWithRelations = Prisma.VacancyApplicationGetPayload<{
 export class ApplicationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createPublic(vacancyId: string, dto: CreatePublicApplicationDto) {
+  async createPublic(
+    vacancyId: string,
+    candidateAccountId: string,
+    authenticatedEmail: string,
+    dto: CreatePublicApplicationDto,
+  ) {
+    if (dto.email.trim().toLowerCase() !== authenticatedEmail.trim().toLowerCase()) {
+      throw new BadRequestException('Application email must match the candidate identity');
+    }
     const vacancy = await this.prisma.vacancy.findFirst({
       where: {
         id: vacancyId,
@@ -65,6 +85,7 @@ export class ApplicationsService {
         },
       },
       update: {
+        accountId: candidateAccountId,
         fullName: dto.fullName,
         phone: dto.phone,
         city: dto.city,
@@ -73,6 +94,7 @@ export class ApplicationsService {
         resumeUrl: dto.resumeUrl,
       },
       create: {
+        accountId: candidateAccountId,
         tenantId: vacancy.tenantId,
         fullName: dto.fullName,
         email: dto.email,
@@ -112,11 +134,31 @@ export class ApplicationsService {
     return this.serializeApplication(created);
   }
 
-  async listForTenant(tenantId: string, query: ListApplicationsDto) {
+  async listForCandidate(candidateAccountId: string) {
+    const applications = await this.prisma.vacancyApplication.findMany({
+      where: { candidate: { accountId: candidateAccountId } },
+      include: applicationInclude,
+      orderBy: { appliedAt: 'desc' },
+    });
+
+    return applications.map((application) => this.serializeApplication(application));
+  }
+
+  async listForTenant(actor: JwtPayload, tenantId: string, query: ListApplicationsDto) {
     const pagination = normalizeOffsetPagination(query);
+    const effectiveBranchFilter = this.resolveBranchFilter(actor, query.branchId);
     const where: Prisma.VacancyApplicationWhereInput = {
       tenantId,
-      ...(query.branchId ? { vacancy: { branchId: query.branchId } } : {}),
+      ...((actor.role === 'INTERVIEWER' || actor.roles.includes('INTERVIEWER'))
+        ? { interviewerUserId: actor.sub }
+        : {}),
+      ...(effectiveBranchFilter
+        ? {
+            vacancy: {
+              branchId: effectiveBranchFilter,
+            },
+          }
+        : {}),
       ...(query.vacancyId ? { vacancyId: query.vacancyId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.search
@@ -152,18 +194,123 @@ export class ApplicationsService {
     };
   }
 
-  async listForBranch(tenantId: string, branchId: string, query: ListApplicationsDto) {
-    return this.listForTenant(tenantId, {
+  async exportForTenant(actor: JwtPayload, tenantId: string, query: ListApplicationsDto) {
+    const result = await this.listForTenant(actor, tenantId, {
       ...query,
-      branchId,
+      page: 1,
+      pageSize: Math.min(query.pageSize ?? 100, 100),
     });
+    return {
+      generatedAt: new Date().toISOString(),
+      tenantId,
+      count: result.data.length,
+      data: result.data,
+    };
   }
 
-  async findOneForTenant(id: string, tenantId: string) {
+  async bulkUpdateStatus(
+    actor: JwtPayload,
+    tenantId: string,
+    dto: BulkUpdateApplicationsDto,
+  ) {
+    const ids = [...new Set(dto.ids)];
+    const where: Prisma.VacancyApplicationWhereInput = {
+      id: { in: ids },
+      tenantId,
+      ...this.buildBranchScopedWhere(actor),
+    };
+    const authorized = await this.prisma.vacancyApplication.findMany({
+      where,
+      select: { id: true },
+    });
+    if (authorized.length !== ids.length) {
+      throw new NotFoundException('One or more applications were not found');
+    }
+
+    const result = await this.prisma.vacancyApplication.updateMany({
+      where,
+      data: {
+        status: dto.status,
+        reviewedAt: dto.status === ApplicationStatus.SUBMITTED ? null : new Date(),
+      },
+    });
+    return { updated: result.count };
+  }
+
+  async getResumeFile(id: string, actor: JwtPayload, tenantId: string) {
     const application = await this.prisma.vacancyApplication.findFirst({
       where: {
         id,
         tenantId,
+        ...this.buildBranchScopedWhere(actor),
+      },
+      select: {
+        id: true,
+        candidate: {
+          select: {
+            resumeUrl: true,
+          },
+        },
+      },
+    });
+    if (!application) {
+      throw new NotFoundException('Application file not found');
+    }
+    if (!application.candidate.resumeUrl) {
+      throw new NotFoundException('Resume file not found');
+    }
+    return {
+      applicationId: application.id,
+      url: application.candidate.resumeUrl,
+    };
+  }
+
+  async listForBranch(tenantId: string, branchId: string, query: ListApplicationsDto) {
+    return this.listForTenant(
+      {
+        sub: 'branch-context',
+        userId: 'branch-context',
+        tenantId,
+        allowedBranchIds: [branchId],
+        allowedTenantIds: [tenantId],
+        activeTenantId: tenantId,
+        tenantSlug: '',
+        tenantName: '',
+        email: '',
+        firstName: '',
+        lastName: '',
+        role: 'BRANCH_USER',
+        activeBranchId: branchId,
+        scope: AccessScope.BRANCH,
+        isSuperAdmin: false,
+        roleScope: 'branch_user',
+        roles: ['BRANCH_USER'],
+        permissions: [],
+        enabledModules: [],
+        isGlobalContext: false,
+        impersonation: {
+          active: false,
+          tenantId: null,
+          startedAt: null,
+          reason: null,
+        },
+        subscriptionStatus: 'ACTIVE',
+        subscriptionGraceEndsAt: null,
+      } as JwtPayload,
+      tenantId,
+      {
+      ...query,
+      branchId,
+      },
+    );
+  }
+
+  async findOneForTenant(id: string, actor: JwtPayload, tenantId: string) {
+    const application = await this.prisma.vacancyApplication.findFirst({
+      where: {
+        id,
+        tenantId,
+        ...this.buildBranchScopedWhere(actor),
       },
       include: applicationInclude,
     });
@@ -175,8 +322,9 @@ export class ApplicationsService {
     return this.serializeApplication(application);
   }
 
-  async updateStatus(id: string, tenantId: string, dto: UpdateApplicationStatusDto) {
-    await this.assertBelongsToTenant(id, tenantId);
+  async updateStatus(id: string, actor: JwtPayload, tenantId: string, dto: UpdateApplicationStatusDto) {
+    await this.assertBelongsToTenant(id, actor, tenantId);
+    await this.assertInterviewerBelongsToTenant(dto.interview?.interviewerUserId, tenantId);
 
     await this.prisma.vacancyApplication.update({
       where: { id },
@@ -187,7 +335,7 @@ export class ApplicationsService {
       await this.replaceTimelineEvents(id, dto.tracking);
     }
 
-    return this.findOneForTenant(id, tenantId);
+    return this.findOneForTenant(id, actor, tenantId);
   }
 
   async findOneForBranch(id: string, tenantId: string, branchId: string) {
@@ -229,9 +377,13 @@ export class ApplicationsService {
     return this.findOneForBranch(id, tenantId, branchId);
   }
 
-  private async assertBelongsToTenant(id: string, tenantId: string) {
+  private async assertBelongsToTenant(id: string, actor: JwtPayload, tenantId: string) {
     const application = await this.prisma.vacancyApplication.findFirst({
-      where: { id, tenantId },
+      where: {
+        id,
+        tenantId,
+        ...this.buildBranchScopedWhere(actor),
+      },
       select: { id: true },
     });
 
@@ -273,12 +425,16 @@ export class ApplicationsService {
         data.interviewScheduledAt = null;
         data.interviewFollowUpAt = null;
         data.interviewObservations = null;
+        data.interviewer = { disconnect: true };
       } else {
         const interview = this.normalizeInterview(dto.interview);
         data.interviewType = interview.type;
         data.interviewScheduledAt = interview.scheduledAt;
         data.interviewFollowUpAt = interview.followUpAt;
         data.interviewObservations = interview.observations;
+        data.interviewer = interview.interviewerUserId
+          ? { connect: { id: interview.interviewerUserId } }
+          : { disconnect: true };
       }
     }
 
@@ -322,6 +478,51 @@ export class ApplicationsService {
     });
   }
 
+  private buildBranchScopedWhere(actor: JwtPayload): Prisma.VacancyApplicationWhereInput {
+    if (actor.role === 'INTERVIEWER' || actor.roles.includes('INTERVIEWER')) {
+      return {
+        interviewerUserId: actor.sub,
+        vacancy: {
+          branchId: {
+            in: actor.allowedBranchIds,
+          },
+        },
+      };
+    }
+
+    if (actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH) {
+      return {};
+    }
+
+    return {
+      vacancy: {
+        branchId: {
+          in: actor.allowedBranchIds,
+        },
+      },
+    };
+  }
+
+  private resolveBranchFilter(actor: JwtPayload, requestedBranchId?: string) {
+    if (actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH) {
+      return requestedBranchId;
+    }
+
+    if (requestedBranchId) {
+      if (!actor.allowedBranchIds.includes(requestedBranchId)) {
+        throw new NotFoundException('Branch not found');
+      }
+
+      return requestedBranchId;
+    }
+
+    return actor.allowedBranchIds.length > 0
+      ? {
+          in: actor.allowedBranchIds,
+        }
+      : '__no_branch_access__';
+  }
+
   private serializeApplication(application: ApplicationWithRelations) {
     const interview =
       application.interviewType ||
@@ -359,6 +560,20 @@ export class ApplicationsService {
       notes: application.notes,
       interview,
       tracking,
+      interviews: application.interviews.map((item) => ({
+        id: item.id,
+        title: item.title,
+        type: item.type,
+        timezone: item.timezone,
+        startsAt: item.startsAt,
+        endsAt: item.endsAt,
+        location: item.location,
+        meetingUrl: item.meetingUrl,
+        notes: item.notes,
+        status: item.status,
+        stage: item.stage,
+        interviewer: item.interviewer,
+      })),
       appliedAt: application.appliedAt,
       reviewedAt: application.reviewedAt,
       createdAt: application.createdAt,
@@ -404,6 +619,11 @@ export class ApplicationsService {
       this.buildBaseTimelineEvent(
         PrismaApplicationTimelineEventType.INTERVIEW_COMPLETED,
         application.interviewCompletedAt,
+        persistedByType,
+      ),
+      this.buildBaseTimelineEvent(
+        PrismaApplicationTimelineEventType.HIRED,
+        null,
         persistedByType,
       ),
     ];
@@ -522,7 +742,34 @@ export class ApplicationsService {
       scheduledAt: interview.scheduledAt ? new Date(interview.scheduledAt) : null,
       followUpAt: interview.followUpAt ? new Date(interview.followUpAt) : null,
       observations: interview.observations?.trim() || null,
+      interviewerUserId: interview.interviewerUserId ?? null,
     };
+  }
+
+  private async assertInterviewerBelongsToTenant(
+    interviewerUserId: string | null | undefined,
+    tenantId: string,
+  ) {
+    if (!interviewerUserId) return;
+
+    const interviewer = await this.prisma.user.findFirst({
+      where: {
+        id: interviewerUserId,
+        tenantId,
+        userRoles: {
+          some: {
+            role: {
+              code: 'INTERVIEWER',
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!interviewer) {
+      throw new NotFoundException('Interviewer not found');
+    }
   }
 
   private normalizeTracking(tracking: ApplicationTrackingDto) {

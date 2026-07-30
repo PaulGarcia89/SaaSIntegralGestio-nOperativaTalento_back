@@ -20,4 +20,9 @@ export class CandidateHiredDto extends DomainEventBaseDto {
   @IsOptional()
   @IsEmail()
   employeeEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  jobTitle?: string;
 }

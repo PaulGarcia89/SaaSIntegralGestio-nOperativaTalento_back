@@ -27,9 +27,21 @@ import { UpdateTrainingCourseProgressDto } from './dto/update-training-course-pr
 import { UpdateTrainingStepProgressDto } from './dto/update-training-step-progress.dto';
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingService } from './training.service';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
+import { RequireModule } from '../common/decorators/module-access.decorator';
+import { ModuleCode } from '@prisma/client';
+import { UpdateTrainingLessonProgressDto } from './dto/training-assignment-admin.dto';
 
 @Controller('training')
-@UseGuards(JwtAuthGuard, TenantGuard)
+@UseGuards(
+  JwtAuthGuard,
+  TenantGuard,
+  SubscriptionGuard,
+  ModuleAccessGuard,
+  TrainingAccessGuard,
+  PermissionGuard,
+)
+@RequireModule(ModuleCode.TRAINING)
 export class TrainingController {
   constructor(private readonly trainingService: TrainingService) {}
 
@@ -39,56 +51,48 @@ export class TrainingController {
   }
 
   @Get('overview')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   getOverview(@Req() request: RequestWithUser) {
     return this.trainingService.getOverview(request.tenant!.id, request.user.sub);
   }
 
   @Get('assignments')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   listAssignments(@Req() request: RequestWithUser, @Query() query: ListTrainingAssignmentsDto) {
     return this.trainingService.listAssignments(request.tenant!.id, request.user.sub, query);
   }
 
   @Get('catalog')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   listCatalog(@Req() request: RequestWithUser, @Query() query: ListTrainingCatalogDto) {
     return this.trainingService.listCatalog(request.tenant!.id, request.user.sub, query);
   }
 
   @Get('library')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   listLibrary(@Req() request: RequestWithUser, @Query() query: ListTrainingLibraryDto) {
     return this.trainingService.listLibrary(request.tenant!.id, request.user.sub, query);
   }
 
   @Get('events')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   listEvents(@Req() request: RequestWithUser, @Query() query: ListTrainingEventsDto) {
     return this.trainingService.listEvents(request.tenant!.id, request.user.sub, query);
   }
 
   @Get('analytics')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   getAnalytics(@Req() request: RequestWithUser) {
     return this.trainingService.getAnalytics(request.tenant!.id, request.user.sub);
   }
 
   @Get('courses/:courseId')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   getCourse(@Req() request: RequestWithUser, @Param('courseId') courseId: string) {
     return this.trainingService.getCourseDetail(request.tenant!.id, request.user.sub, courseId);
   }
 
   @Get('curriculums/:curriculumId')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   getCurriculum(@Req() request: RequestWithUser, @Param('curriculumId') curriculumId: string) {
     return this.trainingService.getCurriculumDetail(
@@ -99,21 +103,18 @@ export class TrainingController {
   }
 
   @Post('favorites')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.update')
   createFavorite(@Req() request: RequestWithUser, @Body() dto: TrainingFavoriteDto) {
     return this.trainingService.createFavorite(request.tenant!.id, request.user.sub, dto);
   }
 
   @Delete('favorites')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.update')
   deleteFavorite(@Req() request: RequestWithUser, @Body() dto: TrainingFavoriteDto) {
     return this.trainingService.deleteFavorite(request.tenant!.id, request.user.sub, dto);
   }
 
   @Patch('progress/course/:courseId')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.update')
   updateCourseProgress(
     @Req() request: RequestWithUser,
@@ -124,7 +125,6 @@ export class TrainingController {
   }
 
   @Patch('progress/step/:stepId')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.update')
   updateStepProgress(
     @Req() request: RequestWithUser,
@@ -134,15 +134,28 @@ export class TrainingController {
     return this.trainingService.updateStepProgress(request.tenant!.id, request.user.sub, stepId, dto);
   }
 
+  @Patch('progress/lessons/:lessonId')
+  @RequirePermissions('training.update')
+  updateLessonProgress(
+    @Req() request: RequestWithUser,
+    @Param('lessonId') lessonId: string,
+    @Body() dto: UpdateTrainingLessonProgressDto,
+  ) {
+    return this.trainingService.updateLessonProgress(
+      request.tenant!.id,
+      request.user.sub,
+      lessonId,
+      dto,
+    );
+  }
+
   @Post('quizzes/:quizId/attempts')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.update')
   createAttempt(@Req() request: RequestWithUser, @Param('quizId') quizId: string) {
     return this.trainingService.createQuizAttempt(request.tenant!.id, request.user.sub, quizId);
   }
 
   @Post('quizzes/:quizId/attempts/:attemptId/answers')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.update')
   answerAttempt(
     @Req() request: RequestWithUser,
@@ -160,7 +173,6 @@ export class TrainingController {
   }
 
   @Post('quizzes/:quizId/attempts/:attemptId/submit')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.update')
   submitAttempt(
     @Req() request: RequestWithUser,
@@ -178,7 +190,6 @@ export class TrainingController {
   }
 
   @Get('certificates')
-  @UseGuards(SubscriptionGuard, TrainingAccessGuard, PermissionGuard)
   @RequirePermissions('training.read')
   listCertificates(@Req() request: RequestWithUser) {
     return this.trainingService.listCertificates(request.tenant!.id, request.user.sub);

@@ -22,6 +22,7 @@ import { ApplicationsModule } from './applications/applications.module';
 import { TrainingModule } from './training/training.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { RequestLoggingMiddleware } from './common/logging/request-logging.middleware';
+import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { PlatformModule } from './platform/platform.module';
 import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -34,10 +35,16 @@ import { AutomationModule } from './automation/automation.module';
 import { DomainEventsModule } from './domain-events/domain-events.module';
 import { WorkflowMasterModule } from './workflow-master/workflow-master.module';
 import { HealthModule } from './health/health.module';
+import { MessagingModule } from './messaging/messaging.module';
+import { RecruitmentModule } from './recruitment/recruitment.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
+import { SignaturesModule } from './signatures/signatures.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    MessagingModule,
     PrismaModule,
     AccessControlModule,
     PlatformModule,
@@ -60,6 +67,10 @@ import { HealthModule } from './health/health.module';
     EmployeesModule,
     VacanciesModule,
     ApplicationsModule,
+    RecruitmentModule,
+    OnboardingModule,
+    SignaturesModule,
+    InventoryModule,
     TrainingModule,
     WorkflowsModule,
     HealthModule,
@@ -84,6 +95,6 @@ import { HealthModule } from './health/health.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestLoggingMiddleware, AuditLogMiddleware).forRoutes('*');
+    consumer.apply(RequestContextMiddleware, RequestLoggingMiddleware, AuditLogMiddleware).forRoutes('*');
   }
 }

@@ -6,6 +6,7 @@ import { AccessScope } from '../src/common/enums/access-scope.enum';
 import { JwtPayload } from '../src/common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { RoleScope } from '../src/common/enums/role-scope.enum';
+import { SubscriptionAccessState } from '../src/common/auth/subscription-access-state.enum';
 
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
@@ -33,20 +34,31 @@ async function main() {
       sub: user.id,
       userId: user.id,
       tenantId: tenant.id,
+      allowedTenantIds: [tenant.id],
+      activeTenantId: tenant.id,
       tenantSlug: tenant.slug,
       tenantName: tenant.name,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
-      role: 'Tenant Admin',
+      role: 'TENANT_ADMIN',
       scope: AccessScope.TENANT,
       isSuperAdmin: false,
       roleScope: RoleScope.TENANT_ADMIN,
       allowedBranchIds: [branch.id],
       activeBranchId: branch.id,
-      roles: ['Tenant Admin'],
+      roles: ['TENANT_ADMIN'],
       permissions: ['applications.update', 'employees.update', 'training.update', 'domain_events.create'],
       enabledModules: [],
+      isGlobalContext: false,
+      impersonation: {
+        active: false,
+        tenantId: null,
+        startedAt: null,
+        reason: null,
+      },
+      subscriptionStatus: SubscriptionAccessState.ACTIVE,
+      subscriptionGraceEndsAt: null,
     };
 
     const hired = await automationService.processCandidateHired(actor, {
