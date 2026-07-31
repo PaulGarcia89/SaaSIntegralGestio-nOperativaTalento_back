@@ -328,7 +328,27 @@ export class WorkflowsService {
       const application = dto.applicationId
         ? await tx.vacancyApplication.findFirst({
             where: { id: dto.applicationId, tenantId },
-            include: { candidate: true, vacancy: true },
+            include: {
+              candidate: {
+                include: {
+                  resumeFiles: {
+                    where: { status: 'ACTIVE' },
+                    orderBy: { version: 'desc' },
+                    take: 1,
+                  },
+                },
+              },
+              currentStage: true,
+              vacancy: {
+                include: {
+                  stages: {
+                    where: { applicationStatus: 'HIRED' },
+                    orderBy: { position: 'asc' },
+                    take: 1,
+                  },
+                },
+              },
+            },
           })
         : null;
 
@@ -671,23 +691,84 @@ export class WorkflowsService {
             supervisorUserId: dto.supervisorUserId ?? null,
             onboardingTemplateId: onboardingTemplate?.id ?? null,
             employmentStartDate: employmentStartDate.toISOString(),
-            sourceDocumentsPreserved: Boolean(candidate.resumeUrl || application?.dynamicResponses),
+            sourceDocumentsPreserved: Boolean(
+              candidate.resumeUrl
+              || application?.candidate.resumeFiles.length
+              || application?.dynamicResponses,
+            ),
           }),
         },
       });
 
       if (application) {
+        const hiredStage = application.vacancy.stages?.[0];
         await tx.vacancyApplication.update({
           where: { id: application.id },
           data: {
             status: 'HIRED',
+            ...(hiredStage
+              ? { currentStage: { connect: { id: hiredStage.id } } }
+              : {}),
+            ...(hiredStage && hiredStage.id !== application.currentStageId
+              ? { stageEnteredAt: hiredAt }
+              : {}),
             reviewedAt: new Date(),
             timelineEvents: {
-              create: {
-                type: 'HIRED',
-                occurredAt: new Date(),
-                note: `Contratación formalizada para ${jobTitle}`,
-              },
+              create: [
+                {
+                  tenantId,
+                  type: 'HIRED',
+                  occurredAt: hiredAt,
+                  note: `Contratación formalizada para ${jobTitle}`,
+                  actorType: 'USER',
+                  actorId: actor.sub,
+                  actorDisplayName: [actor.firstName, actor.lastName].filter(Boolean).join(' ').trim()
+                    || actor.email
+                    || actor.sub,
+                  previousValue: {
+                    status: application.status,
+                    stageId: application.currentStage?.id ?? null,
+                    stageCode: application.currentStage?.code ?? null,
+                    stageName: application.currentStage?.name ?? null,
+                  },
+                  newValue: {
+                    status: 'HIRED',
+                    stageId: hiredStage?.id ?? null,
+                    stageCode: hiredStage?.code ?? null,
+                    stageName: hiredStage?.name ?? null,
+                    jobTitle,
+                  },
+                  reason: 'Contratación formalizada',
+                  source: 'HIRING_WORKFLOW',
+                },
+                ...(hiredStage && hiredStage.id !== application.currentStageId
+                  ? [{
+                      tenantId,
+                      type: 'STAGE_CHANGED' as const,
+                      occurredAt: hiredAt,
+                      note: `Etapa actualizada a ${hiredStage.name}`,
+                      actorType: 'USER',
+                      actorId: actor.sub,
+                      actorDisplayName: [actor.firstName, actor.lastName].filter(Boolean).join(' ').trim()
+                        || actor.email
+                        || actor.sub,
+                      previousValue: {
+                        status: application.status,
+                        stageId: application.currentStage?.id ?? null,
+                        stageCode: application.currentStage?.code ?? null,
+                        stageName: application.currentStage?.name ?? null,
+                      },
+                      newValue: {
+                        status: 'HIRED',
+                        stageId: hiredStage.id,
+                        stageCode: hiredStage.code,
+                        stageName: hiredStage.name,
+                      },
+                      reason: 'Contratación formalizada',
+                      source: 'HIRING_WORKFLOW',
+                    }]
+                  : []),
+              ],
             },
           },
         });

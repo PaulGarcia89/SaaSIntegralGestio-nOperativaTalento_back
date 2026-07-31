@@ -17,6 +17,10 @@ export class ListApplicationsDto extends OffsetPaginationQueryDto {
   vacancyId?: string;
 
   @IsOptional()
+  @IsUUID()
+  currentStageId?: string;
+
+  @IsOptional()
   @IsEnum(ApplicationStatus)
   status?: ApplicationStatus;
 }

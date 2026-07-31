@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { ScopeGuard } from '../common/guards/scope.guard';
@@ -14,6 +15,7 @@ import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import { RequireModule } from '../common/decorators/module-access.decorator';
 import { ModuleCode } from '@prisma/client';
+import { DeleteVacancyImageDto } from './dto/vacancy-image.dto';
 
 @Controller('vacancies')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
@@ -55,6 +57,42 @@ export class VacanciesController {
   @RequirePermissions('vacancies.read')
   findOne(@Req() request: RequestWithUser, @Param('id') id: string) {
     return this.vacanciesService.findOne(id, request.tenant!.id, request.user);
+  }
+
+  @Post(':id/image')
+  @RequirePermissions('vacancies.update')
+  @UseInterceptors(FileInterceptor('image', {
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  }))
+  uploadImage(
+    @Req() request: RequestWithUser,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.vacanciesService.uploadImage(id, request.tenant!.id, request.user, file);
+  }
+
+  @Get(':id/image/versions')
+  @RequirePermissions('vacancies.read')
+  imageVersions(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.vacanciesService.listImageVersions(id, request.tenant!.id, request.user);
+  }
+
+  @Delete(':id/image/:imageId')
+  @RequirePermissions('vacancies.update')
+  deleteImage(
+    @Req() request: RequestWithUser,
+    @Param('id') id: string,
+    @Param('imageId') imageId: string,
+    @Body() dto: DeleteVacancyImageDto,
+  ) {
+    return this.vacanciesService.deleteImage(
+      id,
+      imageId,
+      request.tenant!.id,
+      request.user,
+      dto.reason,
+    );
   }
 
   @Patch(':id')

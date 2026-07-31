@@ -47,7 +47,14 @@ describe('VacanciesService', () => {
     const result = await service.create('tenant-1', actor, {
       branchId: 'branch-1',
       title: 'Operations coordinator',
-      stages: [{ code: 'applied', name: 'Postulación', position: 0 }],
+      stages: [
+        {
+          code: 'applied',
+          name: 'Postulación',
+          position: 0,
+          applicationStatus: 'SUBMITTED',
+        },
+      ],
       responsibles: [{ userId: actor.sub, role: 'RECRUITER' }],
     });
 
@@ -59,6 +66,7 @@ describe('VacanciesService', () => {
           vacancyId: 'vacancy-1',
           code: 'APPLIED',
           position: 0,
+          applicationStatus: 'SUBMITTED',
         }),
       ],
     });

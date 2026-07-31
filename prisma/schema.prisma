@@ -58,6 +58,54 @@ enum ApplicationStatus {
   HIRED
 }
 
+enum ApplicationTransitionRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum AtsFileStatus {
+  ACTIVE
+  SUPERSEDED
+  DELETED
+  EXPIRED
+  QUARANTINED
+}
+
+enum AtsFileScanStatus {
+  CLEAN
+  SKIPPED
+  INFECTED
+}
+
+enum AtsCommunicationType {
+  APPLICATION_CONFIRMATION
+  STAGE_UPDATE
+  REJECTION
+  INTERVIEW_SCHEDULED
+  INTERVIEW_REMINDER
+  INTERVIEW_RESCHEDULED
+  INTERVIEW_CANCELLED
+  OFFER
+  APPROVAL_REQUEST
+  MANUAL
+}
+
+enum AtsCommunicationAudience {
+  CANDIDATE
+  RESPONSIBLE
+}
+
+enum AtsMessageStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+  DEAD_LETTER
+  CANCELLED
+}
+
 enum InterviewType {
   PRESENTIAL
   VIRTUAL
@@ -79,6 +127,35 @@ enum InterviewStatus {
   NO_SHOW
 }
 
+enum CalendarProvider {
+  GOOGLE
+  MICROSOFT
+  ZOOM
+}
+
+enum VideoConferenceProvider {
+  NONE
+  GOOGLE_MEET
+  MICROSOFT_TEAMS
+  ZOOM
+  MANUAL
+}
+
+enum CalendarConnectionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  ERROR
+}
+
+enum CalendarSyncStatus {
+  NOT_CONNECTED
+  PENDING
+  SYNCED
+  FAILED
+  CANCELLED
+}
+
 enum InterviewRecommendation {
   STRONG_YES
   YES
@@ -86,12 +163,41 @@ enum InterviewRecommendation {
   NO
 }
 
+enum ScorecardCriterionType {
+  RATING
+  TEXT
+  BOOLEAN
+}
+
+enum ScorecardStatus {
+  DRAFT
+  SIGNED
+}
+
+enum DecisionCommitteeStatus {
+  OPEN
+  DECIDED
+  CANCELLED
+}
+
+enum DecisionCommitteeRole {
+  CHAIR
+  MEMBER
+  OBSERVER
+}
+
 enum ApplicationTimelineEventType {
   VACANCY_PUBLISHED
   APPLIED
   CONTACTED
   INTERVIEW_SCHEDULED
+  INTERVIEW_RESCHEDULED
+  INTERVIEW_CANCELLED
   INTERVIEW_COMPLETED
+  STAGE_CHANGE_REQUESTED
+  STAGE_CHANGE_APPROVED
+  STAGE_CHANGE_REJECTED
+  STAGE_CHANGED
   HIRED
 }
 
@@ -719,12 +825,12 @@ enum OperationalEventType {
 }
 
 model Tenant {
-  id                            String                        @id @default(uuid())
+  id                            String                          @id @default(uuid())
   name                          String
-  slug                          String                        @unique
-  status                        TenantStatus                  @default(ACTIVE)
-  createdAt                     DateTime                      @default(now())
-  updatedAt                     DateTime                      @updatedAt
+  slug                          String                          @unique
+  status                        TenantStatus                    @default(ACTIVE)
+  createdAt                     DateTime                        @default(now())
+  updatedAt                     DateTime                        @updatedAt
   users                         User[]
   roles                         Role[]
   subscription                  Subscription?
@@ -740,6 +846,13 @@ model Tenant {
   applications                  VacancyApplication[]
   applicationInterviews         ApplicationInterview[]
   interviewScorecards           InterviewScorecard[]
+  scorecardTemplates            ScorecardTemplate[]
+  scorecardCriteria             ScorecardCriterion[]
+  scorecardResponses            InterviewScorecardResponse[]
+  decisionCommittees            HiringDecisionCommittee[]
+  decisionCommitteeMembers      HiringDecisionCommitteeMember[]
+  calendarConnections           AtsCalendarConnection[]
+  interviewerAvailabilities     InterviewerAvailability[]
   inventoryItems                InventoryItem[]
   inventoryStocks               InventoryStock[]
   inventoryAssets               InventoryAsset[]
@@ -811,34 +924,34 @@ model Tenant {
 }
 
 model User {
-  id                            String                      @id @default(uuid())
+  id                            String                          @id @default(uuid())
   tenantId                      String
   activeBranchId                String?
   email                         String
   passwordHash                  String
   firstName                     String
   lastName                      String
-  status                        UserStatus                  @default(ACTIVE)
-  isSuperAdmin                  Boolean                     @default(false)
+  status                        UserStatus                      @default(ACTIVE)
+  isSuperAdmin                  Boolean                         @default(false)
   refreshTokenHash              String?
   lastLoginAt                   DateTime?
   lastSeenAt                    DateTime?
-  createdAt                     DateTime                    @default(now())
-  updatedAt                     DateTime                    @updatedAt
-  tenant                        Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  activeBranch                  Branch?                     @relation("UserActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
+  createdAt                     DateTime                        @default(now())
+  updatedAt                     DateTime                        @updatedAt
+  tenant                        Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  activeBranch                  Branch?                         @relation("UserActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
   userRoles                     UserRole[]
   userPermissions               UserPermission[]
   auditLogs                     AuditLog[]
   branchAccesses                UserBranchAccess[]
   platformTenantAccesses        PlatformTenantAccess[]
-  createdVacancies              Vacancy[]                   @relation("VacancyCreatedBy")
-  assignedTrainingAssignments   TrainingAssignment[]        @relation("TrainingAssignmentsUser")
-  createdTrainingAssignments    TrainingAssignment[]        @relation("TrainingAssignmentsAssignedBy")
-  createdTrainingLaunches       TrainingLaunch[]            @relation("TrainingLaunchCreatedBy")
-  ownedTrainingImprovements     TrainingCourseImprovement[] @relation("TrainingImprovementOwner")
-  createdTrainingImprovements   TrainingCourseImprovement[] @relation("TrainingImprovementCreatedBy")
-  triggeredTrainingOperations   TrainingOperationRun[]      @relation("TrainingOperationActor")
+  createdVacancies              Vacancy[]                       @relation("VacancyCreatedBy")
+  assignedTrainingAssignments   TrainingAssignment[]            @relation("TrainingAssignmentsUser")
+  createdTrainingAssignments    TrainingAssignment[]            @relation("TrainingAssignmentsAssignedBy")
+  createdTrainingLaunches       TrainingLaunch[]                @relation("TrainingLaunchCreatedBy")
+  ownedTrainingImprovements     TrainingCourseImprovement[]     @relation("TrainingImprovementOwner")
+  createdTrainingImprovements   TrainingCourseImprovement[]     @relation("TrainingImprovementCreatedBy")
+  triggeredTrainingOperations   TrainingOperationRun[]          @relation("TrainingOperationActor")
   trainingProgressRecords       TrainingProgress[]
   trainingStepProgressRecords   TrainingStepProgress[]
   trainingLessonProgressRecords TrainingLessonProgress[]
@@ -852,19 +965,25 @@ model User {
   notificationDeliveries        NotificationDelivery[]
   sessions                      UserSession[]
   outboxEvents                  OutboxEvent[]
-  triggeredWorkflows            MasterWorkflow[]            @relation("WorkflowTriggeredBy")
-  operationalEvents             OperationalEvent[]          @relation("OperationalEventActor")
-  productivityReviews           ProductivityReview[]        @relation("ProductivityReviewActor")
-  createdAutomationRules        AutomationRule[]            @relation("AutomationRuleCreatedBy")
-  automationExecutions          AutomationExecution[]       @relation("AutomationExecutionActor")
-  automationAuditLogs           AutomationAuditLog[]        @relation("AutomationAuditActor")
-  policyChecks                  PolicyCheck[]               @relation("PolicyCheckCreatedBy")
-  assignedInterviews            VacancyApplication[]        @relation("ApplicationInterviewer")
-  supervisedEmployees           Employee[]                  @relation("EmployeeSupervisor")
+  triggeredWorkflows            MasterWorkflow[]                @relation("WorkflowTriggeredBy")
+  operationalEvents             OperationalEvent[]              @relation("OperationalEventActor")
+  productivityReviews           ProductivityReview[]            @relation("ProductivityReviewActor")
+  createdAutomationRules        AutomationRule[]                @relation("AutomationRuleCreatedBy")
+  automationExecutions          AutomationExecution[]           @relation("AutomationExecutionActor")
+  automationAuditLogs           AutomationAuditLog[]            @relation("AutomationAuditActor")
+  policyChecks                  PolicyCheck[]                   @relation("PolicyCheckCreatedBy")
+  assignedInterviews            VacancyApplication[]            @relation("ApplicationInterviewer")
+  supervisedEmployees           Employee[]                      @relation("EmployeeSupervisor")
   vacancyResponsibilities       VacancyResponsible[]
-  scheduledInterviews           ApplicationInterview[]      @relation("ScheduledInterviewer")
-  createdInterviews             ApplicationInterview[]      @relation("InterviewCreatedBy")
+  scheduledInterviews           ApplicationInterview[]          @relation("ScheduledInterviewer")
+  createdInterviews             ApplicationInterview[]          @relation("InterviewCreatedBy")
   interviewScorecards           InterviewScorecard[]
+  createdScorecardTemplates     ScorecardTemplate[]             @relation("ScorecardTemplateCreatedBy")
+  signedScorecards              InterviewScorecard[]            @relation("ScorecardSignedBy")
+  decisionCommitteeMemberships  HiringDecisionCommitteeMember[]
+  decidedHiringCommittees       HiringDecisionCommittee[]       @relation("HiringCommitteeDecidedBy")
+  calendarConnections           AtsCalendarConnection[]
+  interviewerAvailability       InterviewerAvailability?
 
   @@unique([tenantId, email])
   @@index([activeBranchId])
@@ -1020,6 +1139,7 @@ model Notification {
   tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user             User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
   deliveries       NotificationDelivery[]
+  atsMessage       AtsMessage?
 
   @@unique([tenantId, userId, deduplicationKey])
   @@index([tenantId, createdAt])
@@ -1053,6 +1173,7 @@ model NotificationDelivery {
   id                String                     @id @default(uuid())
   tenantId          String
   userId            String?
+  recipientEmail    String?
   notificationId    String
   channel           NotificationChannel
   status            NotificationDeliveryStatus @default(PENDING)
@@ -2112,37 +2233,42 @@ model UserBranchAccess {
 }
 
 model Vacancy {
-  id                    String                @id @default(uuid())
-  tenantId              String
-  branchId              String
-  createdByUserId       String?
-  title                 String
-  summary               String?
-  description           String?
-  requirements          String?
-  responsibilities      String?
-  benefits              String?
-  city                  String?
-  country               String?
-  department            String?
-  seniority             String?
-  workMode              VacancyWorkMode       @default(ON_SITE)
-  employmentType        VacancyEmploymentType @default(FULL_TIME)
-  openings              Int                   @default(1)
-  salaryMin             Int?
-  salaryMax             Int?
-  currency              String?               @default("COP")
-  imageUrl              String?
-  applicationFormSchema Json?
-  status                VacancyStatus         @default(OPEN)
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
-  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch                Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  createdByUser         User?                 @relation("VacancyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  applications          VacancyApplication[]
-  stages                VacancyStage[]
-  responsibles          VacancyResponsible[]
+  id                     String                     @id @default(uuid())
+  tenantId               String
+  branchId               String
+  createdByUserId        String?
+  title                  String
+  summary                String?
+  description            String?
+  requirements           String?
+  responsibilities       String?
+  benefits               String?
+  city                   String?
+  country                String?
+  department             String?
+  seniority              String?
+  workMode               VacancyWorkMode            @default(ON_SITE)
+  employmentType         VacancyEmploymentType      @default(FULL_TIME)
+  openings               Int                        @default(1)
+  salaryMin              Int?
+  salaryMax              Int?
+  currency               String?                    @default("COP")
+  imageUrl               String?
+  applicationFormSchema  Json?
+  status                 VacancyStatus              @default(OPEN)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  tenant                 Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                 Branch                     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdByUser          User?                      @relation("VacancyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  applications           VacancyApplication[]
+  stages                 VacancyStage[]
+  responsibles           VacancyResponsible[]
+  imageFiles             VacancyImageFile[]
+  communicationTemplates AtsCommunicationTemplate[]
+  communications         AtsMessage[]
+  scorecardTemplates     ScorecardTemplate[]
+  decisionCommittees     HiringDecisionCommittee[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
@@ -2151,19 +2277,30 @@ model Vacancy {
 }
 
 model VacancyStage {
-  id         String                 @id @default(uuid())
-  tenantId   String
-  vacancyId  String
-  code       String
-  name       String
-  position   Int
-  color      String?
-  isTerminal Boolean                @default(false)
-  createdAt  DateTime               @default(now())
-  updatedAt  DateTime               @updatedAt
-  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  vacancy    Vacancy                @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-  interviews ApplicationInterview[]
+  id                     String                              @id @default(uuid())
+  tenantId               String
+  vacancyId              String
+  code                   String
+  name                   String
+  position               Int
+  color                  String?
+  applicationStatus      ApplicationStatus                   @default(REVIEWING)
+  allowedNextStageCodes  String[]                            @default([])
+  requiredFields         String[]                            @default([])
+  requiresApproval       Boolean                             @default(false)
+  requiredApprovals      Int                                 @default(0)
+  allowReopen            Boolean                             @default(false)
+  slaHours               Int?
+  isTerminal             Boolean                             @default(false)
+  createdAt              DateTime                            @default(now())
+  updatedAt              DateTime                            @updatedAt
+  tenant                 Tenant                              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy                Vacancy                             @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  applications           VacancyApplication[]                @relation("ApplicationCurrentStage")
+  transitionRequestsFrom ApplicationStageTransitionRequest[] @relation("TransitionFromStage")
+  transitionRequestsTo   ApplicationStageTransitionRequest[] @relation("TransitionToStage")
+  interviews             ApplicationInterview[]
+  scorecardTemplates     ScorecardTemplate[]
 
   @@unique([vacancyId, code])
   @@unique([vacancyId, position])
@@ -2223,10 +2360,75 @@ model Candidate {
   automationExecutions AutomationExecution[]
   automationAuditLogs  AutomationAuditLog[]
   employees            Employee[]
+  resumeFiles          CandidateResumeFile[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([accountId])
+}
+
+model CandidateResumeFile {
+  id               String              @id @default(uuid())
+  tenantId         String
+  candidateId      String
+  applicationId    String?
+  version          Int
+  status           AtsFileStatus       @default(ACTIVE)
+  storageKey       String              @unique
+  originalName     String
+  mimeType         String
+  sizeBytes        Int
+  sha256           String
+  scanStatus       AtsFileScanStatus
+  scanEngine       String?
+  uploadedByType   String
+  uploadedById     String?
+  consentGrantedAt DateTime
+  consentVersion   String
+  consentIp        String?
+  consentUserAgent String?
+  retainUntil      DateTime
+  supersededAt     DateTime?
+  deletedAt        DateTime?
+  deletedByUserId  String?
+  deletionReason   String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  candidate        Candidate           @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  application      VacancyApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@unique([candidateId, version])
+  @@index([tenantId, candidateId, status])
+  @@index([tenantId, retainUntil, status])
+  @@index([applicationId, status])
+}
+
+model VacancyImageFile {
+  id               String            @id @default(uuid())
+  tenantId         String
+  vacancyId        String
+  version          Int
+  status           AtsFileStatus     @default(ACTIVE)
+  storageKey       String            @unique
+  originalName     String
+  mimeType         String
+  sizeBytes        Int
+  sha256           String
+  scanStatus       AtsFileScanStatus
+  scanEngine       String?
+  uploadedByUserId String
+  retainUntil      DateTime
+  supersededAt     DateTime?
+  deletedAt        DateTime?
+  deletedByUserId  String?
+  deletionReason   String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  vacancy          Vacancy           @relation(fields: [vacancyId], references: [id], onDelete: Restrict)
+
+  @@unique([vacancyId, version])
+  @@index([tenantId, vacancyId, status])
+  @@index([tenantId, retainUntil, status])
 }
 
 model CandidateAccount {
@@ -2434,11 +2636,14 @@ model TrainingActivation {
 }
 
 model VacancyApplication {
-  id                    String                     @id @default(uuid())
+  id                    String                              @id @default(uuid())
   tenantId              String
   vacancyId             String
   candidateId           String
-  status                ApplicationStatus          @default(SUBMITTED)
+  currentStageId        String?
+  stageEnteredAt        DateTime                            @default(now())
+  rejectionReason       String?
+  status                ApplicationStatus                   @default(SUBMITTED)
   coverLetter           String?
   dynamicResponses      Json?
   notes                 String?
@@ -2449,88 +2654,387 @@ model VacancyApplication {
   interviewerUserId     String?
   contactedAt           DateTime?
   interviewCompletedAt  DateTime?
-  appliedAt             DateTime                   @default(now())
+  appliedAt             DateTime                            @default(now())
   reviewedAt            DateTime?
-  createdAt             DateTime                   @default(now())
-  updatedAt             DateTime                   @updatedAt
-  tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  vacancy               Vacancy                    @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-  candidate             Candidate                  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  interviewer           User?                      @relation("ApplicationInterviewer", fields: [interviewerUserId], references: [id], onDelete: SetNull)
+  createdAt             DateTime                            @default(now())
+  updatedAt             DateTime                            @updatedAt
+  tenant                Tenant                              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy               Vacancy                             @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  candidate             Candidate                           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  currentStage          VacancyStage?                       @relation("ApplicationCurrentStage", fields: [currentStageId], references: [id], onDelete: SetNull)
+  interviewer           User?                               @relation("ApplicationInterviewer", fields: [interviewerUserId], references: [id], onDelete: SetNull)
   timelineEvents        ApplicationTimelineEvent[]
   hiringFlows           HiringFlow[]
   interviews            ApplicationInterview[]
+  transitionRequests    ApplicationStageTransitionRequest[]
+  resumeFiles           CandidateResumeFile[]
+  communications        AtsMessage[]
+  decisionCommittee     HiringDecisionCommittee?
 
   @@unique([vacancyId, candidateId])
   @@index([tenantId, status])
+  @@index([tenantId, currentStageId])
   @@index([tenantId, vacancyId])
   @@index([candidateId])
   @@index([tenantId, interviewerUserId, interviewScheduledAt])
 }
 
-model ApplicationInterview {
-  id                String               @id @default(uuid())
+model ApplicationStageTransitionRequest {
+  id                String                               @id @default(uuid())
   tenantId          String
   applicationId     String
-  stageId           String?
-  interviewerUserId String
-  createdByUserId   String
-  title             String
-  type              InterviewType
-  timezone          String
-  startsAt          DateTime
-  endsAt            DateTime
-  location          String?
-  meetingUrl        String?
-  notes             String?
-  status            InterviewStatus      @default(SCHEDULED)
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  tenant            Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  application       VacancyApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  stage             VacancyStage?        @relation(fields: [stageId], references: [id], onDelete: SetNull)
-  interviewer       User                 @relation("ScheduledInterviewer", fields: [interviewerUserId], references: [id], onDelete: Restrict)
-  createdBy         User                 @relation("InterviewCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  scorecards        InterviewScorecard[]
+  fromStageId       String?
+  toStageId         String
+  requestedByUserId String
+  requiredApprovals Int                                  @default(1)
+  reason            String?
+  status            ApplicationTransitionRequestStatus   @default(PENDING)
+  requestedAt       DateTime                             @default(now())
+  decidedAt         DateTime?
+  application       VacancyApplication                   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fromStage         VacancyStage?                        @relation("TransitionFromStage", fields: [fromStageId], references: [id], onDelete: SetNull)
+  toStage           VacancyStage                         @relation("TransitionToStage", fields: [toStageId], references: [id], onDelete: Cascade)
+  approvals         ApplicationStageTransitionApproval[]
 
+  @@index([tenantId, status, requestedAt])
+  @@index([applicationId, status])
+}
+
+model ApplicationStageTransitionApproval {
+  id             String                            @id @default(uuid())
+  requestId      String
+  reviewerUserId String
+  approved       Boolean
+  note           String?
+  decidedAt      DateTime                          @default(now())
+  request        ApplicationStageTransitionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, reviewerUserId])
+  @@index([reviewerUserId, decidedAt])
+}
+
+model ApplicationInterview {
+  id                  String                  @id @default(uuid())
+  tenantId            String
+  applicationId       String
+  stageId             String?
+  scorecardTemplateId String?
+  interviewerUserId   String
+  createdByUserId     String
+  title               String
+  type                InterviewType
+  timezone            String
+  startsAt            DateTime
+  endsAt              DateTime
+  location            String?
+  meetingUrl          String?
+  calendarProvider    CalendarProvider?
+  videoProvider       VideoConferenceProvider @default(NONE)
+  externalEventId     String?
+  externalMeetingId   String?
+  externalICalUid     String?
+  calendarSyncStatus  CalendarSyncStatus      @default(NOT_CONNECTED)
+  calendarSyncError   String?
+  calendarSyncedAt    DateTime?
+  icsSequence         Int                     @default(0)
+  notes               String?
+  status              InterviewStatus         @default(SCHEDULED)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application         VacancyApplication      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  stage               VacancyStage?           @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  scorecardTemplate   ScorecardTemplate?      @relation(fields: [scorecardTemplateId], references: [id], onDelete: SetNull)
+  interviewer         User                    @relation("ScheduledInterviewer", fields: [interviewerUserId], references: [id], onDelete: Restrict)
+  createdBy           User                    @relation("InterviewCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  scorecards          InterviewScorecard[]
+  communications      AtsMessage[]
+
+  @@unique([calendarProvider, externalEventId])
   @@index([tenantId, startsAt])
   @@index([applicationId, startsAt])
   @@index([interviewerUserId, startsAt])
+  @@index([tenantId, calendarSyncStatus, updatedAt])
+}
+
+model AtsCalendarConnection {
+  id                    String                   @id @default(uuid())
+  tenantId              String
+  userId                String
+  provider              CalendarProvider
+  status                CalendarConnectionStatus @default(ACTIVE)
+  externalAccountId     String?
+  externalEmail         String?
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  scopes                String[]
+  lastSyncedAt          DateTime?
+  lastError             String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  tenant                Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, provider])
+  @@index([tenantId, provider, status])
+}
+
+model InterviewerAvailability {
+  id             String   @id @default(uuid())
+  tenantId       String
+  userId         String   @unique
+  timezone       String   @default("UTC")
+  weeklySchedule Json
+  bufferMinutes  Int      @default(15)
+  minNoticeHours Int      @default(2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
 }
 
 model InterviewScorecard {
-  id             String                  @id @default(uuid())
-  tenantId       String
-  interviewId    String
-  reviewerUserId String
-  criteria       Json
-  overallRating  Int
-  recommendation InterviewRecommendation
-  strengths      String?
-  concerns       String?
-  comments       String?
-  submittedAt    DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  interview      ApplicationInterview    @relation(fields: [interviewId], references: [id], onDelete: Cascade)
-  reviewer       User                    @relation(fields: [reviewerUserId], references: [id], onDelete: Restrict)
+  id              String                       @id @default(uuid())
+  tenantId        String
+  interviewId     String
+  reviewerUserId  String
+  templateId      String?
+  templateVersion Int?
+  criteria        Json
+  overallRating   Int
+  weightedScore   Decimal?                     @db.Decimal(5, 2)
+  recommendation  InterviewRecommendation
+  strengths       String?
+  concerns        String?
+  comments        String?
+  status          ScorecardStatus              @default(DRAFT)
+  signedAt        DateTime?
+  signedByUserId  String?
+  signatureHash   String?
+  submittedAt     DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  tenant          Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  interview       ApplicationInterview         @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  reviewer        User                         @relation(fields: [reviewerUserId], references: [id], onDelete: Restrict)
+  signedBy        User?                        @relation("ScorecardSignedBy", fields: [signedByUserId], references: [id], onDelete: Restrict)
+  template        ScorecardTemplate?           @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  responses       InterviewScorecardResponse[]
 
   @@unique([interviewId, reviewerUserId])
   @@index([tenantId, interviewId])
   @@index([reviewerUserId, submittedAt])
+  @@index([tenantId, status, signedAt])
+}
+
+model ScorecardTemplate {
+  id              String                 @id @default(uuid())
+  tenantId        String
+  vacancyId       String
+  stageId         String?
+  name            String
+  instructions    String?
+  version         Int                    @default(1)
+  isActive        Boolean                @default(true)
+  createdByUserId String
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy         Vacancy                @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  stage           VacancyStage?          @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  createdBy       User                   @relation("ScorecardTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  criteria        ScorecardCriterion[]
+  interviews      ApplicationInterview[]
+  scorecards      InterviewScorecard[]
+
+  @@unique([vacancyId, stageId, version])
+  @@index([tenantId, vacancyId, stageId, isActive])
+}
+
+model ScorecardCriterion {
+  id               String                       @id @default(uuid())
+  tenantId         String
+  templateId       String
+  key              String
+  label            String
+  description      String?
+  competencyCode   String?
+  competencyName   String?
+  type             ScorecardCriterionType       @default(RATING)
+  weight           Int                          @default(0)
+  isRequired       Boolean                      @default(true)
+  requiresEvidence Boolean                      @default(false)
+  ratingAnchors    Json?
+  sortOrder        Int                          @default(0)
+  tenant           Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template         ScorecardTemplate            @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  responses        InterviewScorecardResponse[]
+
+  @@unique([templateId, key])
+  @@index([tenantId, templateId, sortOrder])
+}
+
+model InterviewScorecardResponse {
+  id             String                 @id @default(uuid())
+  tenantId       String
+  scorecardId    String
+  criterionId    String
+  criterionKey   String
+  criterionLabel String
+  competencyCode String?
+  competencyName String?
+  criterionType  ScorecardCriterionType
+  weight         Int
+  rating         Int?
+  textValue      String?
+  booleanValue   Boolean?
+  evidence       String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scorecard      InterviewScorecard     @relation(fields: [scorecardId], references: [id], onDelete: Cascade)
+  criterion      ScorecardCriterion     @relation(fields: [criterionId], references: [id], onDelete: Restrict)
+
+  @@unique([scorecardId, criterionId])
+  @@index([tenantId, scorecardId])
+  @@index([criterionId])
+}
+
+model HiringDecisionCommittee {
+  id              String                          @id @default(uuid())
+  tenantId        String
+  vacancyId       String
+  applicationId   String                          @unique
+  status          DecisionCommitteeStatus         @default(OPEN)
+  quorum          Int                             @default(2)
+  finalDecision   InterviewRecommendation?
+  rationale       String?
+  decidedByUserId String?
+  decidedAt       DateTime?
+  createdAt       DateTime                        @default(now())
+  updatedAt       DateTime                        @updatedAt
+  tenant          Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy         Vacancy                         @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  application     VacancyApplication              @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  decidedBy       User?                           @relation("HiringCommitteeDecidedBy", fields: [decidedByUserId], references: [id], onDelete: Restrict)
+  members         HiringDecisionCommitteeMember[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([vacancyId, status])
+}
+
+model HiringDecisionCommitteeMember {
+  id                         String                   @id @default(uuid())
+  tenantId                   String
+  committeeId                String
+  userId                     String
+  role                       DecisionCommitteeRole    @default(MEMBER)
+  isRequired                 Boolean                  @default(true)
+  vote                       InterviewRecommendation?
+  voteRationale              String?
+  conflictOfInterestDeclared Boolean?
+  recusedAt                  DateTime?
+  votedAt                    DateTime?
+  tenant                     Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  committee                  HiringDecisionCommittee  @relation(fields: [committeeId], references: [id], onDelete: Cascade)
+  user                       User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([committeeId, userId])
+  @@index([tenantId, userId, votedAt])
+}
+
+model AtsCommunicationTemplate {
+  id              String                   @id @default(uuid())
+  tenantId        String
+  vacancyId       String?
+  stageCode       String?
+  type            AtsCommunicationType
+  audience        AtsCommunicationAudience
+  name            String
+  subject         String
+  body            String
+  version         Int                      @default(1)
+  isActive        Boolean                  @default(true)
+  createdByUserId String
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  vacancy         Vacancy?                 @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  messages        AtsMessage[]
+
+  @@unique([tenantId, vacancyId, stageCode, type, audience, version])
+  @@index([tenantId, type, audience, isActive])
+  @@index([tenantId, vacancyId, stageCode])
+}
+
+model AtsMessage {
+  id                String                    @id @default(uuid())
+  tenantId          String
+  vacancyId         String
+  applicationId     String
+  interviewId       String?
+  notificationId    String?                   @unique
+  templateId        String?
+  templateVersion   Int?
+  type              AtsCommunicationType
+  audience          AtsCommunicationAudience
+  recipientEmail    String
+  recipientName     String?
+  recipientUserId   String?
+  subject           String
+  body              String
+  status            AtsMessageStatus          @default(PENDING)
+  scheduledAt       DateTime                  @default(now())
+  nextAttemptAt     DateTime                  @default(now())
+  attempts          Int                       @default(0)
+  maxAttempts       Int                       @default(5)
+  lastAttemptAt     DateTime?
+  deliveredAt       DateTime?
+  providerMessageId String?
+  lastError         String?
+  correlationId     String?
+  deduplicationKey  String
+  createdByType     String                    @default("SYSTEM")
+  createdById       String?
+  payload           Json?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  vacancy           Vacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Restrict)
+  application       VacancyApplication        @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  interview         ApplicationInterview?     @relation(fields: [interviewId], references: [id], onDelete: SetNull)
+  template          AtsCommunicationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  notification      Notification?             @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, deduplicationKey])
+  @@index([tenantId, applicationId, createdAt])
+  @@index([tenantId, status, nextAttemptAt])
+  @@index([tenantId, recipientEmail, createdAt])
+  @@index([interviewId, type])
 }
 
 model ApplicationTimelineEvent {
-  id            String                       @id @default(uuid())
-  applicationId String
-  type          ApplicationTimelineEventType
-  occurredAt    DateTime?
-  note          String?
-  createdAt     DateTime                     @default(now())
-  updatedAt     DateTime                     @updatedAt
-  application   VacancyApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  id               String                       @id @default(uuid())
+  tenantId         String
+  applicationId    String
+  type             ApplicationTimelineEventType
+  occurredAt       DateTime?
+  note             String?
+  actorType        String                       @default("SYSTEM")
+  actorId          String?
+  actorDisplayName String?
+  previousValue    Json?
+  newValue         Json?
+  metadata         Json?
+  reason           String?
+  source           String                       @default("ATS")
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  application      VacancyApplication           @relation(fields: [applicationId], references: [id], onDelete: Restrict)
 
+  @@index([tenantId, occurredAt])
   @@index([applicationId])
+  @@index([actorId, occurredAt])
   @@index([type])
   @@index([occurredAt])
 }

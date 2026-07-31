@@ -52,6 +52,7 @@ describe('WorkflowsService hiring conversion', () => {
         title: 'Operations Analyst',
         status: 'OPEN',
         openings: 1,
+        stages: [{ id: 'stage-hired', applicationStatus: 'HIRED' }],
       },
     };
     const tx = {
@@ -207,6 +208,9 @@ describe('WorkflowsService hiring conversion', () => {
       status: InventoryAssignmentStatus.PENDING,
     });
     expect(writes.application[0].status).toBe('HIRED');
+    expect(writes.application[0].currentStage).toEqual({
+      connect: { id: 'stage-hired' },
+    });
     expect(writes.vacancy[0].status).toBe('FILLED');
   });
 

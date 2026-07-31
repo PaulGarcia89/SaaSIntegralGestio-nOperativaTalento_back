@@ -15,12 +15,22 @@ import { UpdateVacancyDto } from './dto/update-vacancy.dto';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { PlanLimitsService } from '../plan-limits/plan-limits.service';
+import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
+import { TrainingAntivirusService } from '../training/training-antivirus.service';
 
 @Injectable()
 export class VacanciesService {
-  constructor(private readonly prisma: PrismaService, private readonly planLimits?: PlanLimitsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly planLimits?: PlanLimitsService,
+    private readonly files?: AtsPrivateFileService,
+    private readonly antivirus?: TrainingAntivirusService,
+  ) {}
 
   async create(tenantId: string, actor: JwtPayload, dto: CreateVacancyDto) {
+    if (dto.imageUrl) {
+      throw new BadRequestException('Use the private multipart image endpoint instead of imageUrl');
+    }
     await this.planLimits?.assertCapacity(tenantId, 'maxActiveVacancies');
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
     this.assertActorCanAccessBranch(actor, dto.branchId);
@@ -55,7 +65,6 @@ export class VacanciesService {
           salaryMin: dto.salaryMin,
           salaryMax: dto.salaryMax,
           currency: dto.currency,
-          imageUrl: dto.imageUrl,
           applicationFormSchema,
           status: dto.status,
         },
@@ -70,6 +79,13 @@ export class VacanciesService {
             name: stage.name.trim(),
             position: stage.position,
             color: stage.color,
+            applicationStatus: stage.applicationStatus,
+            allowedNextStageCodes: stage.allowedNextStageCodes?.map((code) => code.trim().toUpperCase()),
+            requiredFields: stage.requiredFields,
+            requiresApproval: stage.requiresApproval ?? false,
+            requiredApprovals: stage.requiresApproval ? Math.max(1, stage.requiredApprovals ?? 1) : 0,
+            allowReopen: stage.allowReopen ?? false,
+            slaHours: stage.slaHours,
             isTerminal: stage.isTerminal ?? false,
           })),
         });
@@ -108,6 +124,7 @@ export class VacanciesService {
             },
             orderBy: { createdAt: 'asc' },
           },
+          imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 },
         },
       });
     });
@@ -153,6 +170,7 @@ export class VacanciesService {
               lastName: true,
             },
           },
+          imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 },
         },
         orderBy: { createdAt: 'desc' },
         skip: pagination.skip,
@@ -162,7 +180,7 @@ export class VacanciesService {
     ]);
 
     return {
-      data: items,
+      data: items.map((item) => this.withSignedImage(item)),
       meta: {
         total,
         page: pagination.page,
@@ -189,6 +207,7 @@ export class VacanciesService {
             lastName: true,
           },
         },
+        imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 },
       },
     });
 
@@ -196,7 +215,7 @@ export class VacanciesService {
       throw new NotFoundException('Vacancy not found');
     }
 
-    return vacancy;
+    return this.withSignedImage(vacancy);
   }
 
   async update(id: string, tenantId: string, actor: JwtPayload, dto: UpdateVacancyDto) {
@@ -226,7 +245,6 @@ export class VacanciesService {
       ...(dto.salaryMin !== undefined ? { salaryMin: dto.salaryMin } : {}),
       ...(dto.salaryMax !== undefined ? { salaryMax: dto.salaryMax } : {}),
       ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
-      ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl } : {}),
       ...(dto.applicationFormSchema !== undefined
         ? {
             applicationFormSchema: this.normalizeApplicationFormSchema(dto.applicationFormSchema),
@@ -283,6 +301,7 @@ export class VacanciesService {
               location: true,
             },
           },
+          imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 },
         },
         orderBy: { createdAt: 'desc' },
         skip: pagination.skip,
@@ -292,7 +311,7 @@ export class VacanciesService {
     ]);
 
     return {
-      data: items,
+      data: items.map((item) => this.withSignedImage(item)),
       meta: {
         total,
         page: pagination.page,
@@ -323,6 +342,7 @@ export class VacanciesService {
             location: true,
           },
         },
+        imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 },
       },
     });
 
@@ -330,7 +350,123 @@ export class VacanciesService {
       throw new NotFoundException('Vacancy not found');
     }
 
-    return vacancy;
+    return this.withSignedImage(vacancy);
+  }
+
+  async uploadImage(
+    id: string,
+    tenantId: string,
+    actor: JwtPayload,
+    file: Express.Multer.File,
+  ) {
+    await this.findOne(id, tenantId, actor);
+    if (!this.files || !this.antivirus) throw new BadRequestException('Vacancy image upload is not available');
+    const mimeType = this.files.validateVacancyImage(file);
+    const scan = await this.antivirus.scan(file.buffer);
+    const stored = await this.files.store('vacancy-image', tenantId, id, file, mimeType);
+    try {
+      const created = await this.prisma.$transaction(async (tx) => {
+        const latest = await tx.vacancyImageFile.aggregate({
+          where: { vacancyId: id },
+          _max: { version: true },
+        });
+        await tx.vacancyImageFile.updateMany({
+          where: { vacancyId: id, status: 'ACTIVE' },
+          data: { status: 'SUPERSEDED', supersededAt: new Date() },
+        });
+        await tx.vacancy.update({ where: { id }, data: { imageUrl: null } });
+        return tx.vacancyImageFile.create({
+          data: {
+            tenantId,
+            vacancyId: id,
+            version: (latest._max.version ?? 0) + 1,
+            storageKey: stored.storageKey,
+            originalName: file.originalname,
+            mimeType,
+            sizeBytes: file.size,
+            sha256: stored.sha256,
+            scanStatus: scan.status,
+            scanEngine: scan.engine,
+            uploadedByUserId: actor.sub,
+            retainUntil: this.files!.retentionDate('vacancy-image'),
+          },
+        });
+      });
+      return {
+        id: created.id,
+        version: created.version,
+        originalName: created.originalName,
+        mimeType: created.mimeType,
+        sizeBytes: created.sizeBytes,
+        ...this.files.createSignedUrl('vacancy-image', created.id, 900),
+      };
+    } catch (error) {
+      await this.files.delete(stored.storageKey);
+      throw error;
+    }
+  }
+
+  async listImageVersions(id: string, tenantId: string, actor: JwtPayload) {
+    await this.findOne(id, tenantId, actor);
+    return this.prisma.vacancyImageFile.findMany({
+      where: { vacancyId: id, tenantId },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+        originalName: true,
+        mimeType: true,
+        sizeBytes: true,
+        sha256: true,
+        scanStatus: true,
+        retainUntil: true,
+        createdAt: true,
+        deletedAt: true,
+        deletionReason: true,
+      },
+      orderBy: { version: 'desc' },
+    });
+  }
+
+  async deleteImage(
+    id: string,
+    imageId: string,
+    tenantId: string,
+    actor: JwtPayload,
+    reason: string,
+  ) {
+    await this.findOne(id, tenantId, actor);
+    if (!reason?.trim()) throw new BadRequestException('Deletion reason is required');
+    const image = await this.prisma.vacancyImageFile.findFirst({
+      where: { id: imageId, vacancyId: id, tenantId, status: { not: 'DELETED' } },
+    });
+    if (!image) throw new NotFoundException('Vacancy image version not found');
+    const deleted = await this.prisma.vacancyImageFile.update({
+      where: { id: image.id },
+      data: {
+        status: 'DELETED',
+        deletedAt: new Date(),
+        deletedByUserId: actor.sub,
+        deletionReason: reason.trim(),
+      },
+      select: { id: true, version: true, status: true, deletedAt: true, deletionReason: true },
+    });
+    await this.files?.delete(image.storageKey);
+    return deleted;
+  }
+
+  private withSignedImage<T extends { imageUrl?: string | null; imageFiles?: Array<{ id: string }> }>(
+    vacancy: T,
+  ) {
+    const active = vacancy.imageFiles?.[0];
+    const { imageFiles: _imageFiles, ...rest } = vacancy;
+    return {
+      ...rest,
+      imageUrl: active && this.files
+        ? this.files.createSignedUrl('vacancy-image', active.id, 900).url
+        : vacancy.imageUrl,
+      imageFileId: active?.id ?? null,
+    };
   }
 
   async listFormTemplates(tenantId: string) {
@@ -406,6 +542,14 @@ export class VacanciesService {
     const positions = stages.map((stage) => stage.position);
     if (new Set(codes).size !== codes.length || new Set(positions).size !== positions.length) {
       throw new BadRequestException('Stage codes and positions must be unique');
+    }
+    const knownCodes = new Set(codes);
+    const invalidDestination = stages
+      .flatMap((stage) => stage.allowedNextStageCodes ?? [])
+      .map((code) => code.trim().toUpperCase())
+      .find((code) => !knownCodes.has(code));
+    if (invalidDestination) {
+      throw new BadRequestException(`Unknown destination stage code: ${invalidDestination}`);
     }
   }
 

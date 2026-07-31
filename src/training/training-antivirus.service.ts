@@ -3,10 +3,12 @@ import { createConnection } from 'node:net';
 
 @Injectable()
 export class TrainingAntivirusService {
-  readonly mode = (process.env.SCORM_ANTIVIRUS_MODE ?? 'disabled').toLowerCase();
+  readonly mode = (process.env.ANTIVIRUS_MODE ?? process.env.SCORM_ANTIVIRUS_MODE ?? 'disabled').toLowerCase();
   async scan(buffer: Buffer) {
     if (this.mode === 'disabled') {
-      if (process.env.NODE_ENV === 'production' && process.env.SCORM_ALLOW_UNSCANNED_UPLOADS !== 'true') throw new ServiceUnavailableException('Antivirus scanning is required');
+      const allowUnscanned = process.env.ANTIVIRUS_ALLOW_UNSCANNED_UPLOADS
+        ?? process.env.SCORM_ALLOW_UNSCANNED_UPLOADS;
+      if (process.env.NODE_ENV === 'production' && allowUnscanned !== 'true') throw new ServiceUnavailableException('Antivirus scanning is required');
       return { status: 'SKIPPED' as const, engine: null };
     }
     const host = process.env.CLAMAV_HOST ?? '127.0.0.1';
@@ -28,12 +30,12 @@ export class TrainingAntivirusService {
       socket.on('end', () => {
         clearTimeout(timer);
         const result = Buffer.concat(chunks).toString('utf8');
-        if (result.includes('FOUND')) reject(new BadRequestException('The SCORM package contains malware'));
+        if (result.includes('FOUND')) reject(new BadRequestException('The uploaded file contains malware'));
         else if (result.includes('OK')) resolve({ status: 'CLEAN', engine: 'clamav' });
         else reject(new ServiceUnavailableException('Antivirus returned an invalid response'));
       });
       socket.on('error', (error) => { clearTimeout(timer); reject(new ServiceUnavailableException(`Antivirus unavailable: ${error.message}`)); });
     });
   }
-  describe() { return { mode: this.mode, required: process.env.NODE_ENV === 'production' && process.env.SCORM_ALLOW_UNSCANNED_UPLOADS !== 'true' }; }
+  describe() { return { mode: this.mode, required: process.env.NODE_ENV === 'production' && (process.env.ANTIVIRUS_ALLOW_UNSCANNED_UPLOADS ?? process.env.SCORM_ALLOW_UNSCANNED_UPLOADS) !== 'true' }; }
 }

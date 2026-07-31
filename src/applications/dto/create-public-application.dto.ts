@@ -1,4 +1,5 @@
-import { IsEmail, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsEmail, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreatePublicApplicationDto {
   @IsString()
@@ -30,9 +31,14 @@ export class CreatePublicApplicationDto {
   portfolioUrl?: string;
 
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  resumeConsent?: boolean;
+
+  @IsOptional()
   @IsString()
-  @MaxLength(5000000)
-  resumeUrl?: string;
+  @MaxLength(40)
+  resumeConsentVersion?: string;
 
   @IsOptional()
   @IsString()
@@ -40,6 +46,10 @@ export class CreatePublicApplicationDto {
   coverLetter?: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    try { return JSON.parse(value); } catch { return value; }
+  })
   @IsObject()
   dynamicResponses?: Record<string, unknown>;
 }

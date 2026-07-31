@@ -9,14 +9,19 @@ import { CandidateApplicationsController } from './candidate-applications.contro
 import { CandidateAuthController } from './candidate-auth.controller';
 import { CandidateAuthGuard } from './candidate-auth.guard';
 import { CandidateAuthService } from './candidate-auth.service';
+import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
+import { AtsFileAccessController } from '../common/files/ats-file-access.controller';
+import { TrainingAntivirusService } from '../training/training-antivirus.service';
+import { AtsCommunicationsModule } from '../ats-communications/ats-communications.module';
 
 @Module({
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), AtsCommunicationsModule],
   controllers: [
     ApplicationsController,
     PublicApplicationsController,
     CandidateAuthController,
     CandidateApplicationsController,
+    AtsFileAccessController,
   ],
   providers: [
     ApplicationsService,
@@ -24,6 +29,8 @@ import { CandidateAuthService } from './candidate-auth.service';
     ModuleAccessGuard,
     CandidateAuthService,
     CandidateAuthGuard,
+    AtsPrivateFileService,
+    TrainingAntivirusService,
   ],
 })
 export class ApplicationsModule {}

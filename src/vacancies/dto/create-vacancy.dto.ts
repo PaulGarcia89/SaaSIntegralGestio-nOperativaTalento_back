@@ -1,4 +1,5 @@
 import {
+  ApplicationStatus,
   VacancyEmploymentType,
   VacancyResponsibleRole,
   VacancyStatus,
@@ -42,6 +43,42 @@ export class CreateVacancyStageDto {
   @IsString()
   @MaxLength(20)
   color?: string;
+
+  @IsOptional()
+  @IsEnum(ApplicationStatus)
+  applicationStatus?: ApplicationStatus;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  allowedNextStageCodes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  requiredFields?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  requiresApproval?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(20)
+  requiredApprovals?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowReopen?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(8760)
+  slaHours?: number;
 
   @IsOptional()
   @IsBoolean()
