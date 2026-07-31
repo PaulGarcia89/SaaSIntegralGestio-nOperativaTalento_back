@@ -10,6 +10,9 @@ import {
   TrainingContentBlockType,
   TrainingCourseStatus,
   TrainingCourseType,
+  TrainingPilotStatus,
+  TrainingQualityReviewStatus,
+  TrainingQualityReviewType,
   TrainingResourceType,
 } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -19,16 +22,24 @@ import {
   CreateTrainingContentBlockDto,
   CreateTrainingCourseDto,
   CreateTrainingCourseModuleDto,
+  CreateTrainingCompetencyDto,
+  CreateTrainingCoursePilotDto,
   CreateTrainingLessonDto,
   DuplicateTrainingCourseDto,
   ListTrainingAdminCoursesDto,
+  ReorderTrainingEntitiesDto,
+  RequestTrainingQualityReviewsDto,
   TrainingCourseScope,
   TransitionTrainingCourseDto,
   UpdateTrainingCategoryDto,
   UpdateTrainingContentBlockDto,
   UpdateTrainingCourseDto,
   UpdateTrainingCourseModuleDto,
+  UpdateTrainingCompetencyDto,
+  UpdateTrainingCourseDesignDto,
   UpdateTrainingLessonDto,
+  UpdateTrainingCoursePilotStatusDto,
+  DecideTrainingQualityReviewDto,
 } from './dto/training-course-authoring.dto';
 import { PlanLimitsService } from '../plan-limits/plan-limits.service';
 
@@ -47,6 +58,24 @@ const courseTreeInclude = {
   },
   transitions: { orderBy: { createdAt: 'desc' as const }, take: 50 },
   versions: { orderBy: { version: 'desc' as const } },
+  brief: true,
+  courseCompetencies: { orderBy: { sortOrder: 'asc' as const }, include: { competency: true } },
+  learningObjectives: { orderBy: { sortOrder: 'asc' as const }, include: { competency: true } },
+  audienceRules: { orderBy: { sortOrder: 'asc' as const } },
+  certificationPolicy: true,
+  qualityReviews: { orderBy: { updatedAt: 'desc' as const } },
+  pilots: {
+    orderBy: { updatedAt: 'desc' as const },
+    include: { feedback: { orderBy: { updatedAt: 'desc' as const } } },
+  },
+  quizzes: {
+    include: {
+      questions: {
+        orderBy: { sortOrder: 'asc' as const },
+        include: { options: { orderBy: { sortOrder: 'asc' as const } } },
+      },
+    },
+  },
 } satisfies Prisma.TrainingCourseInclude;
 
 const editableStatuses = new Set<TrainingCourseStatus>([
@@ -243,6 +272,40 @@ export class TrainingAdminService {
             actorId: actor.sub,
           },
         },
+        brief: source.brief ? { create: {
+          businessNeed: source.brief.businessNeed,
+          targetOutcome: source.brief.targetOutcome,
+          successKpi: source.brief.successKpi,
+          audienceDescription: source.brief.audienceDescription,
+          baselineMetric: source.brief.baselineMetric,
+          targetMetric: source.brief.targetMetric,
+          riskIfNotCompleted: source.brief.riskIfNotCompleted,
+          contentOwnerId: source.brief.contentOwnerId,
+          subjectMatterExpertId: source.brief.subjectMatterExpertId,
+          targetDate: source.brief.targetDate,
+        } } : undefined,
+        courseCompetencies: { create: source.courseCompetencies.map((item) => ({
+          competencyId: item.competencyId,
+          targetLevel: item.targetLevel,
+          isRequired: item.isRequired,
+          sortOrder: item.sortOrder,
+        })) },
+        learningObjectives: { create: source.learningObjectives.map((item) => ({
+          competencyId: item.competencyId,
+          statement: item.statement,
+          successCriteria: item.successCriteria,
+          assessmentMethod: item.assessmentMethod,
+          targetLevel: item.targetLevel,
+          isRequired: item.isRequired,
+          sortOrder: item.sortOrder,
+        })) },
+        audienceRules: { create: source.audienceRules.map((item) => ({
+          ruleType: item.ruleType,
+          operator: item.operator,
+          value: item.value,
+          description: item.description,
+          sortOrder: item.sortOrder,
+        })) },
         modules: {
           create: source.modules.map((module) => ({
             title: module.title,
@@ -270,9 +333,129 @@ export class TrainingAdminService {
             },
           })),
         },
+        quizzes: {
+          create: source.quizzes.map((quiz) => ({
+            title: quiz.title,
+            description: quiz.description,
+            passingScore: quiz.passingScore,
+            maxAttempts: quiz.maxAttempts,
+            timeLimitMinutes: quiz.timeLimitMinutes,
+            shuffleQuestions: quiz.shuffleQuestions,
+            shuffleOptions: quiz.shuffleOptions,
+            randomQuestionCount: quiz.randomQuestionCount,
+            cooldownMinutes: quiz.cooldownMinutes,
+            availableFrom: quiz.availableFrom,
+            availableUntil: quiz.availableUntil,
+            requireAllQuestions: quiz.requireAllQuestions,
+            feedbackMode: quiz.feedbackMode,
+            rubric: quiz.rubric as Prisma.InputJsonValue | undefined,
+            questions: {
+              create: quiz.questions.map((question) => ({
+                bankItemId: source.tenantId === targetTenantId ? question.bankItemId : null,
+                prompt: question.prompt,
+                questionType: question.questionType,
+                sortOrder: question.sortOrder,
+                explanation: question.explanation,
+                points: question.points,
+                requiresManualGrading: question.requiresManualGrading,
+                category: question.category,
+                difficulty: question.difficulty,
+                tags: question.tags,
+                rubric: question.rubric as Prisma.InputJsonValue | undefined,
+                options: {
+                  create: question.options.map((option) => ({
+                    label: option.label,
+                    isCorrect: option.isCorrect,
+                    sortOrder: option.sortOrder,
+                  })),
+                },
+              })),
+            },
+          })),
+        },
+        certificationPolicy: source.certificationPolicy
+          ? {
+              create: {
+                tenantId: targetTenantId!,
+                isEnabled: source.certificationPolicy.isEnabled,
+                autoIssue: source.certificationPolicy.autoIssue,
+                requireAssessment: source.certificationPolicy.requireAssessment,
+                requireAllRequiredLessons: source.certificationPolicy.requireAllRequiredLessons,
+                validityDays: source.certificationPolicy.validityDays,
+                renewalWindowDays: source.certificationPolicy.renewalWindowDays,
+                reminderDays: source.certificationPolicy.reminderDays,
+                certificateTitle: source.certificationPolicy.certificateTitle,
+                certificateDescription: source.certificationPolicy.certificateDescription,
+                signatoryName: source.certificationPolicy.signatoryName,
+                signatoryTitle: source.certificationPolicy.signatoryTitle,
+                badgeImageUrl: source.certificationPolicy.badgeImageUrl,
+                createdById: actor.sub,
+                updatedById: actor.sub,
+              },
+            }
+          : undefined,
       },
       include: courseTreeInclude,
     });
+  }
+
+  async getCourseDesign(tenantId: string, actor: JwtPayload, courseId: string) {
+    const course = await this.getCourse(tenantId, actor, courseId);
+    return this.designResponse(course);
+  }
+
+  async updateCourseDesign(tenantId: string, actor: JwtPayload, courseId: string, dto: UpdateTrainingCourseDesignDto) {
+    const course = await this.assertEditableCourse(tenantId, actor, courseId);
+    const competencyIds = [...new Set(dto.competencies.map((item) => item.competencyId))];
+    if (competencyIds.length !== dto.competencies.length) throw new BadRequestException('Competencies cannot be duplicated');
+    const visibleCompetencies = await this.prisma.trainingCompetency.findMany({
+      where: { id: { in: competencyIds }, OR: [{ tenantId: course.tenantId }, { tenantId: null }], isActive: true },
+      select: { id: true },
+    });
+    if (visibleCompetencies.length !== competencyIds.length) throw new BadRequestException('A competency is outside the course scope');
+    const selected = new Set(competencyIds);
+    if (dto.objectives.some((item) => item.competencyId && !selected.has(item.competencyId))) {
+      throw new BadRequestException('Every objective competency must be selected for the course');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await this.storeVersion(tx, courseId, actor.sub);
+      await tx.trainingCourseBrief.upsert({
+        where: { courseId },
+        update: { ...dto.brief },
+        create: { courseId, ...dto.brief },
+      });
+      await tx.trainingLearningObjective.deleteMany({ where: { courseId } });
+      await tx.trainingCourseCompetency.deleteMany({ where: { courseId } });
+      await tx.trainingAudienceRule.deleteMany({ where: { courseId } });
+      if (dto.competencies.length) await tx.trainingCourseCompetency.createMany({ data: dto.competencies.map((item, index) => ({ courseId, competencyId: item.competencyId, targetLevel: item.targetLevel, isRequired: item.isRequired ?? true, sortOrder: item.sortOrder ?? index })) });
+      if (dto.objectives.length) await tx.trainingLearningObjective.createMany({ data: dto.objectives.map((item, index) => ({ courseId, competencyId: item.competencyId, statement: item.statement.trim(), successCriteria: item.successCriteria.trim(), assessmentMethod: item.assessmentMethod.trim(), targetLevel: item.targetLevel, isRequired: item.isRequired ?? true, sortOrder: item.sortOrder ?? index })) });
+      if (dto.audienceRules.length) await tx.trainingAudienceRule.createMany({ data: dto.audienceRules.map((item, index) => ({ courseId, ruleType: item.ruleType, operator: item.operator, value: item.value.trim(), description: item.description?.trim(), sortOrder: item.sortOrder ?? index })) });
+      await tx.trainingCourse.update({ where: { id: courseId }, data: { version: { increment: 1 }, updatedById: actor.sub, transitions: { create: { fromStatus: course.status, toStatus: course.status, action: 'DESIGN_UPDATED', actorId: actor.sub } } } });
+    });
+    return this.getCourseDesign(tenantId, actor, courseId);
+  }
+
+  async listCompetencies(tenantId: string, actor: JwtPayload) {
+    return this.prisma.trainingCompetency.findMany({
+      where: this.canManageGlobal(actor) ? {} : { OR: [{ tenantId }, { tenantId: null }] },
+      orderBy: [{ tenantId: 'desc' }, { name: 'asc' }],
+    });
+  }
+
+  async createCompetency(tenantId: string, actor: JwtPayload, dto: CreateTrainingCompetencyDto) {
+    const targetTenantId = this.resolveWriteTenant(tenantId, actor, dto.scope);
+    const exists = await this.prisma.trainingCompetency.findFirst({ where: { tenantId: targetTenantId, code: dto.code.trim().toUpperCase() } });
+    if (exists) throw new ConflictException('A competency with this code already exists');
+    const { scope: _scope, ...data } = dto;
+    return this.prisma.trainingCompetency.create({ data: { ...data, tenantId: targetTenantId, code: dto.code.trim().toUpperCase(), name: dto.name.trim(), createdById: actor.sub } });
+  }
+
+  async updateCompetency(tenantId: string, actor: JwtPayload, competencyId: string, dto: UpdateTrainingCompetencyDto) {
+    const competency = await this.prisma.trainingCompetency.findUnique({ where: { id: competencyId } });
+    if (!competency) throw new NotFoundException('Competency not found');
+    if ((competency.tenantId === null && !this.canManageGlobal(actor)) || (competency.tenantId && competency.tenantId !== tenantId && !this.canManageGlobal(actor))) throw new ForbiddenException('Competency is outside the active tenant scope');
+    const { scope: _scope, ...data } = dto;
+    return this.prisma.trainingCompetency.update({ where: { id: competencyId }, data: { ...data, code: dto.code?.trim().toUpperCase(), name: dto.name?.trim() } });
   }
 
   async transitionCourse(
@@ -296,18 +479,41 @@ export class TrainingAdminService {
       await this.assertCourseComplete(courseId);
     }
     if (
+      [TrainingCourseStatus.APPROVED, TrainingCourseStatus.PUBLISHED, TrainingCourseStatus.SCHEDULED]
+        .some((status) => status === dto.status)
+    ) {
+      await this.assertQualityApproved(courseId, course.version);
+    }
+    if (
       dto.status === TrainingCourseStatus.SCHEDULED &&
       (!dto.scheduledPublishAt || dto.scheduledPublishAt <= new Date())
     ) {
       throw new BadRequestException('A future scheduledPublishAt is required');
     }
     const isPublished = dto.status === TrainingCourseStatus.PUBLISHED;
+    const reviewVersion = dto.status === TrainingCourseStatus.IN_REVIEW
+      ? course.version + 1
+      : course.version;
     return this.prisma.$transaction(async (tx) => {
       await this.storeVersion(tx, courseId, actor.sub);
+      if (dto.status === TrainingCourseStatus.IN_REVIEW) {
+        await tx.trainingCourseQualityReview.createMany({
+          data: this.requiredReviewTypes().map((reviewType) => ({
+            tenantId: course.tenantId,
+            courseId,
+            courseVersion: reviewVersion,
+            reviewType,
+            requestedById: actor.sub,
+            checklist: {},
+          })),
+          skipDuplicates: true,
+        });
+      }
       return tx.trainingCourse.update({
         where: { id: courseId },
         data: {
           status: dto.status,
+          version: dto.status === TrainingCourseStatus.IN_REVIEW ? { increment: 1 } : undefined,
           isPublished,
           scheduledPublishAt:
             dto.status === TrainingCourseStatus.SCHEDULED
@@ -331,6 +537,183 @@ export class TrainingAdminService {
         },
         include: courseTreeInclude,
       });
+    });
+  }
+
+  async getCourseQuality(tenantId: string, actor: JwtPayload, courseId: string) {
+    const course = await this.getCourse(tenantId, actor, courseId);
+    return this.qualityResponse(course);
+  }
+
+  async requestQualityReviews(
+    tenantId: string,
+    actor: JwtPayload,
+    courseId: string,
+    dto: RequestTrainingQualityReviewsDto,
+  ) {
+    const course = await this.assertWritableCourse(tenantId, actor, courseId);
+    if (course.status !== TrainingCourseStatus.IN_REVIEW) {
+      throw new ConflictException('Quality review can only be requested after submitting the course for review');
+    }
+    await this.prisma.trainingCourseQualityReview.createMany({
+      data: dto.reviewTypes.map((reviewType) => ({
+        tenantId: course.tenantId,
+        courseId,
+        courseVersion: course.version,
+        reviewType,
+        reviewerId: dto.reviewerId,
+        requestedById: actor.sub,
+        checklist: {},
+      })),
+      skipDuplicates: true,
+    });
+    return this.getCourseQuality(tenantId, actor, courseId);
+  }
+
+  async decideQualityReview(
+    tenantId: string,
+    actor: JwtPayload,
+    reviewId: string,
+    dto: DecideTrainingQualityReviewDto,
+  ) {
+    if (dto.status === TrainingQualityReviewStatus.PENDING) {
+      throw new BadRequestException('A review decision must approve or request changes');
+    }
+    if (
+      dto.status === TrainingQualityReviewStatus.APPROVED &&
+      (!Object.keys(dto.checklist).length || Object.values(dto.checklist).some((value) => value !== true))
+    ) {
+      throw new BadRequestException('Every quality checklist item must pass before approval');
+    }
+    const review = await this.prisma.trainingCourseQualityReview.findUnique({
+      where: { id: reviewId },
+      include: { course: true },
+    });
+    if (!review) throw new NotFoundException('Quality review not found');
+    await this.assertWritableCourse(tenantId, actor, review.courseId);
+    if (review.courseVersion !== review.course.version) {
+      throw new ConflictException('This review belongs to an obsolete course version');
+    }
+    if (review.reviewerId && review.reviewerId !== actor.sub && !this.canManageGlobal(actor)) {
+      throw new ForbiddenException('This review is assigned to another reviewer');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.trainingCourseQualityReview.update({
+        where: { id: reviewId },
+        data: {
+          status: dto.status,
+          reviewerId: review.reviewerId ?? actor.sub,
+          checklist: dto.checklist as Prisma.InputJsonValue,
+          summary: dto.summary,
+          decidedAt: new Date(),
+        },
+      });
+      if (
+        dto.status === TrainingQualityReviewStatus.CHANGES_REQUESTED &&
+        review.course.status === TrainingCourseStatus.IN_REVIEW
+      ) {
+        await tx.trainingCourse.update({
+          where: { id: review.courseId },
+          data: {
+            status: TrainingCourseStatus.DRAFT,
+            transitions: {
+              create: {
+                fromStatus: TrainingCourseStatus.IN_REVIEW,
+                toStatus: TrainingCourseStatus.DRAFT,
+                action: 'QUALITY_CHANGES_REQUESTED',
+                actorId: actor.sub,
+                reason: dto.summary,
+              },
+            },
+          },
+        });
+      }
+    });
+    return this.getCourseQuality(tenantId, actor, review.courseId);
+  }
+
+  async createCoursePilot(
+    tenantId: string,
+    actor: JwtPayload,
+    courseId: string,
+    dto: CreateTrainingCoursePilotDto,
+  ) {
+    const course = await this.assertWritableCourse(tenantId, actor, courseId);
+    if (!course.tenantId || course.tenantId !== tenantId) {
+      throw new BadRequestException('Pilots require a tenant-owned course');
+    }
+    if (course.status !== TrainingCourseStatus.IN_REVIEW) {
+      throw new ConflictException('A pilot can only be created for the version currently in review');
+    }
+    if (dto.startsAt && dto.endsAt && dto.endsAt <= dto.startsAt) {
+      throw new BadRequestException('Pilot end must be after its start');
+    }
+    const participants = await this.prisma.user.findMany({
+      where: { id: { in: dto.participantIds }, tenantId, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    if (participants.length !== dto.participantIds.length || participants.length === 0) {
+      throw new BadRequestException('Every pilot participant must be active in the tenant');
+    }
+    return this.prisma.trainingCoursePilot.create({
+      data: {
+        tenantId,
+        courseId,
+        courseVersion: course.version,
+        name: dto.name.trim(),
+        participantIds: dto.participantIds,
+        successCriteria: dto.successCriteria as Prisma.InputJsonValue,
+        startsAt: dto.startsAt,
+        endsAt: dto.endsAt,
+        createdById: actor.sub,
+      },
+      include: { feedback: true },
+    });
+  }
+
+  async updateCoursePilotStatus(
+    tenantId: string,
+    actor: JwtPayload,
+    pilotId: string,
+    dto: UpdateTrainingCoursePilotStatusDto,
+  ) {
+    const pilot = await this.prisma.trainingCoursePilot.findFirst({
+      where: { id: pilotId, tenantId },
+      include: { course: true, feedback: true },
+    });
+    if (!pilot) throw new NotFoundException('Course pilot not found');
+    await this.assertWritableCourse(tenantId, actor, pilot.courseId);
+    const transitions: Record<TrainingPilotStatus, TrainingPilotStatus[]> = {
+      DRAFT: [TrainingPilotStatus.ACTIVE, TrainingPilotStatus.CANCELLED],
+      ACTIVE: [TrainingPilotStatus.COMPLETED, TrainingPilotStatus.CANCELLED],
+      COMPLETED: [],
+      CANCELLED: [],
+    };
+    if (!transitions[pilot.status].includes(dto.status)) {
+      throw new ConflictException(`Pilot transition ${pilot.status} → ${dto.status} is not allowed`);
+    }
+    if (dto.status === TrainingPilotStatus.COMPLETED) this.assertPilotSuccessful(pilot);
+    const now = new Date();
+    if (dto.status === TrainingPilotStatus.ACTIVE) {
+      await this.prisma.notification.createMany({
+        data: pilot.participantIds.map((userId) => ({
+          tenantId,
+          userId,
+          type: 'INFO',
+          title: 'Invitación a piloto de capacitación',
+          message: `Participa en el piloto “${pilot.name}” y comparte tu experiencia.`,
+          payload: { kind: 'TRAINING_PILOT_INVITATION', pilotId, courseId: pilot.courseId },
+        })),
+      });
+    }
+    return this.prisma.trainingCoursePilot.update({
+      where: { id: pilotId },
+      data: {
+        status: dto.status,
+        activatedAt: dto.status === TrainingPilotStatus.ACTIVE ? now : undefined,
+        completedAt: dto.status === TrainingPilotStatus.COMPLETED ? now : undefined,
+      },
+      include: { feedback: true },
     });
   }
 
@@ -389,6 +772,53 @@ export class TrainingAdminService {
     return { deleted: true, id: moduleId };
   }
 
+  async duplicateModule(tenantId: string, actor: JwtPayload, moduleId: string) {
+    const module = await this.prisma.trainingCourseModule.findUnique({
+      where: { id: moduleId },
+      include: { lessons: { orderBy: { sortOrder: 'asc' }, include: { blocks: { orderBy: { sortOrder: 'asc' } } } } },
+    });
+    if (!module) throw new NotFoundException('Course module not found');
+    await this.assertEditableCourse(tenantId, actor, module.courseId);
+    const sortOrder = await this.prisma.trainingCourseModule.count({ where: { courseId: module.courseId } });
+    return this.prisma.trainingCourseModule.create({
+      data: {
+        courseId: module.courseId,
+        title: `${module.title} (copia)`,
+        description: module.description,
+        isRequired: module.isRequired,
+        sortOrder,
+        lessons: {
+          create: module.lessons.map((lesson, lessonIndex) => ({
+            title: lesson.title,
+            description: lesson.description,
+            estimatedMinutes: lesson.estimatedMinutes,
+            isRequired: lesson.isRequired,
+            sortOrder: lessonIndex,
+            blocks: {
+              create: lesson.blocks.map((block, blockIndex) => ({
+                type: block.type,
+                title: block.title,
+                content: block.content as Prisma.InputJsonValue | undefined,
+                resourceUrl: block.resourceUrl,
+                isRequired: block.isRequired,
+                sortOrder: blockIndex,
+              })),
+            },
+          })),
+        },
+      },
+      include: { lessons: { orderBy: { sortOrder: 'asc' }, include: { blocks: { orderBy: { sortOrder: 'asc' } } } } },
+    });
+  }
+
+  async reorderModules(tenantId: string, actor: JwtPayload, courseId: string, dto: ReorderTrainingEntitiesDto) {
+    await this.assertEditableCourse(tenantId, actor, courseId);
+    const modules = await this.prisma.trainingCourseModule.findMany({ where: { courseId }, select: { id: true } });
+    this.assertCompleteOrder(modules.map((item) => item.id), dto.entityIds, 'modules');
+    await this.prisma.$transaction(dto.entityIds.map((id, sortOrder) => this.prisma.trainingCourseModule.update({ where: { id }, data: { sortOrder } })));
+    return { ordered: true, entityIds: dto.entityIds };
+  }
+
   async createLesson(
     tenantId: string,
     actor: JwtPayload,
@@ -420,6 +850,46 @@ export class TrainingAdminService {
     await this.assertEditableCourse(tenantId, actor, lesson.module.courseId);
     await this.prisma.trainingLesson.delete({ where: { id: lessonId } });
     return { deleted: true, id: lessonId };
+  }
+
+  async duplicateLesson(tenantId: string, actor: JwtPayload, lessonId: string) {
+    const lesson = await this.prisma.trainingLesson.findUnique({
+      where: { id: lessonId },
+      include: { module: true, blocks: { orderBy: { sortOrder: 'asc' } } },
+    });
+    if (!lesson) throw new NotFoundException('Lesson not found');
+    await this.assertEditableCourse(tenantId, actor, lesson.module.courseId);
+    const sortOrder = await this.prisma.trainingLesson.count({ where: { moduleId: lesson.moduleId } });
+    return this.prisma.trainingLesson.create({
+      data: {
+        moduleId: lesson.moduleId,
+        title: `${lesson.title} (copia)`,
+        description: lesson.description,
+        estimatedMinutes: lesson.estimatedMinutes,
+        isRequired: lesson.isRequired,
+        sortOrder,
+        blocks: {
+          create: lesson.blocks.map((block, blockIndex) => ({
+            type: block.type,
+            title: block.title,
+            content: block.content as Prisma.InputJsonValue | undefined,
+            resourceUrl: block.resourceUrl,
+            isRequired: block.isRequired,
+            sortOrder: blockIndex,
+          })),
+        },
+      },
+      include: { blocks: { orderBy: { sortOrder: 'asc' } } },
+    });
+  }
+
+  async reorderLessons(tenantId: string, actor: JwtPayload, moduleId: string, dto: ReorderTrainingEntitiesDto) {
+    const module = await this.findOwnedModule(tenantId, actor, moduleId);
+    await this.assertEditableCourse(tenantId, actor, module.courseId);
+    const lessons = await this.prisma.trainingLesson.findMany({ where: { moduleId }, select: { id: true } });
+    this.assertCompleteOrder(lessons.map((item) => item.id), dto.entityIds, 'lessons');
+    await this.prisma.$transaction(dto.entityIds.map((id, sortOrder) => this.prisma.trainingLesson.update({ where: { id }, data: { sortOrder } })));
+    return { ordered: true, entityIds: dto.entityIds };
   }
 
   async createBlock(
@@ -459,6 +929,32 @@ export class TrainingAdminService {
     await this.assertEditableCourse(tenantId, actor, block.lesson.module.courseId);
     await this.prisma.trainingContentBlock.delete({ where: { id: blockId } });
     return { deleted: true, id: blockId };
+  }
+
+  async duplicateBlock(tenantId: string, actor: JwtPayload, blockId: string) {
+    const block = await this.findOwnedBlock(tenantId, actor, blockId);
+    await this.assertEditableCourse(tenantId, actor, block.lesson.module.courseId);
+    const sortOrder = await this.prisma.trainingContentBlock.count({ where: { lessonId: block.lessonId } });
+    return this.prisma.trainingContentBlock.create({
+      data: {
+        lessonId: block.lessonId,
+        type: block.type,
+        title: block.title ? `${block.title} (copia)` : null,
+        content: block.content as Prisma.InputJsonValue | undefined,
+        resourceUrl: block.resourceUrl,
+        isRequired: block.isRequired,
+        sortOrder,
+      },
+    });
+  }
+
+  async reorderBlocks(tenantId: string, actor: JwtPayload, lessonId: string, dto: ReorderTrainingEntitiesDto) {
+    const lesson = await this.findOwnedLesson(tenantId, actor, lessonId);
+    await this.assertEditableCourse(tenantId, actor, lesson.module.courseId);
+    const blocks = await this.prisma.trainingContentBlock.findMany({ where: { lessonId }, select: { id: true } });
+    this.assertCompleteOrder(blocks.map((item) => item.id), dto.entityIds, 'blocks');
+    await this.prisma.$transaction(dto.entityIds.map((id, sortOrder) => this.prisma.trainingContentBlock.update({ where: { id }, data: { sortOrder } })));
+    return { ordered: true, entityIds: dto.entityIds };
   }
 
   async listCategories(tenantId: string, actor: JwtPayload) {
@@ -569,6 +1065,10 @@ export class TrainingAdminService {
     const course = await this.prisma.trainingCourse.findUnique({
       where: { id: courseId },
       include: {
+        brief: true,
+        courseCompetencies: true,
+        learningObjectives: true,
+        audienceRules: true,
         modules: {
           include: { lessons: { include: { blocks: true } } },
         },
@@ -577,15 +1077,28 @@ export class TrainingAdminService {
     if (!course?.summary?.trim() || !course.description?.trim()) {
       throw new BadRequestException('Summary and description are required before review');
     }
+    if (!course.brief?.businessNeed.trim() || !course.brief.targetOutcome.trim() || !course.brief.successKpi.trim()) {
+      throw new BadRequestException('Business need, target outcome and success KPI are required before review');
+    }
+    if (!course.brief.audienceDescription?.trim() && course.audienceRules.length === 0) {
+      throw new BadRequestException('The target audience is required before review');
+    }
+    if (course.courseCompetencies.length === 0 || course.learningObjectives.length === 0) {
+      throw new BadRequestException('At least one competency and learning objective are required before review');
+    }
     if (
       course.modules.length === 0 ||
       course.modules.some(
         (module) =>
           module.lessons.length === 0 ||
-          module.lessons.some((lesson) => lesson.blocks.length === 0),
+          module.lessons.some(
+            (lesson) => (lesson.estimatedMinutes ?? 0) <= 0 || lesson.blocks.length === 0,
+          ),
       )
     ) {
-      throw new BadRequestException('Every course needs modules, lessons and content blocks');
+      throw new BadRequestException(
+        'Every course needs modules, lessons with estimated duration and content blocks',
+      );
     }
   }
 
@@ -610,6 +1123,100 @@ export class TrainingAdminService {
         createdById: actorId,
       },
     });
+  }
+
+  private designResponse(course: any) {
+    const errors = [
+      !course.brief?.businessNeed?.trim() ? 'Define la necesidad del negocio' : null,
+      !course.brief?.targetOutcome?.trim() ? 'Define el resultado esperado' : null,
+      !course.brief?.successKpi?.trim() ? 'Define el KPI de éxito' : null,
+      !course.brief?.audienceDescription?.trim() && !course.audienceRules?.length ? 'Define la audiencia' : null,
+      !course.courseCompetencies?.length ? 'Selecciona al menos una competencia' : null,
+      !course.learningObjectives?.length ? 'Agrega al menos un objetivo de aprendizaje' : null,
+    ].filter(Boolean);
+    return { brief: course.brief, competencies: course.courseCompetencies ?? [], objectives: course.learningObjectives ?? [], audienceRules: course.audienceRules ?? [], readiness: { ready: errors.length === 0, errors } };
+  }
+
+  private requiredReviewTypes() {
+    return [
+      TrainingQualityReviewType.CONTENT,
+      TrainingQualityReviewType.PEDAGOGY,
+      TrainingQualityReviewType.ACCESSIBILITY,
+      TrainingQualityReviewType.COMPLIANCE,
+    ];
+  }
+
+  private qualityResponse(course: any) {
+    const reviews = (course.qualityReviews ?? []).filter(
+      (review: any) => review.courseVersion === course.version,
+    );
+    const pilots = (course.pilots ?? []).filter(
+      (pilot: any) => pilot.courseVersion === course.version,
+    );
+    const errors = [
+      ...this.requiredReviewTypes()
+        .filter((type) => !reviews.some((review: any) =>
+          review.reviewType === type && review.status === TrainingQualityReviewStatus.APPROVED,
+        ))
+        .map((type) => `Falta aprobación de ${type.toLowerCase()}`),
+      pilots.some((pilot: any) => pilot.status !== TrainingPilotStatus.CANCELLED) &&
+      !pilots.some((pilot: any) => pilot.status === TrainingPilotStatus.COMPLETED)
+        ? 'El piloto de la versión actual no está completado'
+        : null,
+    ].filter(Boolean);
+    return {
+      courseId: course.id,
+      courseVersion: course.version,
+      reviews,
+      pilots: pilots.map((pilot: any) => ({ ...pilot, metrics: this.pilotMetrics(pilot) })),
+      readiness: { ready: errors.length === 0, errors },
+    };
+  }
+
+  private async assertQualityApproved(courseId: string, courseVersion: number) {
+    const course = await this.prisma.trainingCourse.findUnique({
+      where: { id: courseId },
+      include: {
+        qualityReviews: { where: { courseVersion } },
+        pilots: { where: { courseVersion }, include: { feedback: true } },
+      },
+    });
+    if (!course) throw new NotFoundException('Course not found');
+    const quality = this.qualityResponse(course);
+    if (!quality.readiness.ready) {
+      throw new BadRequestException(`Quality gates are incomplete: ${quality.readiness.errors.join('; ')}`);
+    }
+  }
+
+  private assertPilotSuccessful(pilot: any) {
+    const metrics = this.pilotMetrics(pilot);
+    const criteria = (pilot.successCriteria ?? {}) as Record<string, unknown>;
+    const minResponses = Number(criteria.minResponses ?? 1);
+    const minAverageRating = Number(criteria.minAverageRating ?? 4);
+    if (metrics.responses < minResponses) {
+      throw new BadRequestException(`Pilot requires at least ${minResponses} feedback responses`);
+    }
+    if (metrics.averageRating < minAverageRating) {
+      throw new BadRequestException(`Pilot average rating must be at least ${minAverageRating}`);
+    }
+    if (metrics.blockingIssues > 0) {
+      throw new BadRequestException('Pilot has unresolved blocking issues');
+    }
+  }
+
+  private pilotMetrics(pilot: any) {
+    const feedback = pilot.feedback ?? [];
+    const average = (field: string) => feedback.length
+      ? Number((feedback.reduce((sum: number, item: any) => sum + item[field], 0) / feedback.length).toFixed(2))
+      : 0;
+    return {
+      participants: pilot.participantIds?.length ?? 0,
+      responses: feedback.length,
+      averageRating: average('rating'),
+      averageClarity: average('clarityRating'),
+      averageRelevance: average('relevanceRating'),
+      blockingIssues: feedback.filter((item: any) => item.blockingIssue).length,
+    };
   }
 
   private moduleCreateInput(dto: CreateTrainingCourseModuleDto) {
@@ -651,6 +1258,16 @@ export class TrainingAdminService {
     }
     if (!resourceTypes.has(dto.type) && !dto.content) {
       throw new BadRequestException(`content is required for ${dto.type} blocks`);
+    }
+  }
+
+  private assertCompleteOrder(existingIds: string[], orderedIds: string[], entityName: string) {
+    const existing = new Set(existingIds);
+    if (
+      existingIds.length !== orderedIds.length ||
+      orderedIds.some((id) => !existing.has(id))
+    ) {
+      throw new BadRequestException(`The order must include every ${entityName} item exactly once`);
     }
   }
 

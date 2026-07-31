@@ -25,6 +25,7 @@ import { SubmitTrainingQuizAttemptDto } from './dto/submit-training-quiz-attempt
 import { TrainingFavoriteDto } from './dto/training-favorite.dto';
 import { UpdateTrainingCourseProgressDto } from './dto/update-training-course-progress.dto';
 import { UpdateTrainingStepProgressDto } from './dto/update-training-step-progress.dto';
+import { SubmitTrainingPilotFeedbackDto } from './dto/training-course-authoring.dto';
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingService } from './training.service';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
@@ -193,5 +194,26 @@ export class TrainingController {
   @RequirePermissions('training.read')
   listCertificates(@Req() request: RequestWithUser) {
     return this.trainingService.listCertificates(request.tenant!.id, request.user.sub);
+  }
+
+  @Get('pilots')
+  @RequirePermissions('training.read')
+  listMyPilots(@Req() request: RequestWithUser) {
+    return this.trainingService.listMyPilots(request.tenant!.id, request.user.sub);
+  }
+
+  @Post('pilots/:pilotId/feedback')
+  @RequirePermissions('training.update')
+  submitPilotFeedback(
+    @Req() request: RequestWithUser,
+    @Param('pilotId') pilotId: string,
+    @Body() dto: SubmitTrainingPilotFeedbackDto,
+  ) {
+    return this.trainingService.submitPilotFeedback(
+      request.tenant!.id,
+      request.user.sub,
+      pilotId,
+      dto,
+    );
   }
 }

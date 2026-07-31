@@ -1,20 +1,28 @@
 import { Type } from 'class-transformer';
+import { PartialType } from '@nestjs/mapped-types';
 import {
+  ArrayUnique,
   ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  IsUrl,
   Max,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { TrainingQuizQuestionType } from '@prisma/client';
+import {
+  TrainingQuestionDifficulty,
+  TrainingQuizFeedbackMode,
+  TrainingQuizQuestionType,
+} from '@prisma/client';
 
 export class TrainingQuizOptionInputDto {
   @IsOptional()
@@ -59,9 +67,18 @@ export class CreateTrainingQuizDto {
   @IsOptional()
   @IsBoolean()
   shuffleQuestions?: boolean;
+
+  @IsOptional() @IsBoolean() shuffleOptions?: boolean;
+  @IsOptional() @IsInt() @Min(1) @Max(500) randomQuestionCount?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(10080) cooldownMinutes?: number;
+  @IsOptional() @IsDateString() availableFrom?: string;
+  @IsOptional() @IsDateString() availableUntil?: string;
+  @IsOptional() @IsBoolean() requireAllQuestions?: boolean;
+  @IsOptional() @IsEnum(TrainingQuizFeedbackMode) feedbackMode?: TrainingQuizFeedbackMode;
+  @IsOptional() @IsObject() rubric?: Record<string, unknown>;
 }
 
-export class UpdateTrainingQuizDto extends CreateTrainingQuizDto {}
+export class UpdateTrainingQuizDto extends PartialType(CreateTrainingQuizDto) {}
 
 export class CreateTrainingQuizQuestionDto {
   @IsString()
@@ -90,6 +107,29 @@ export class CreateTrainingQuizQuestionDto {
   @ValidateNested({ each: true })
   @Type(() => TrainingQuizOptionInputDto)
   options!: TrainingQuizOptionInputDto[];
+
+  @IsOptional() @IsString() @MaxLength(120) category?: string;
+  @IsOptional() @IsEnum(TrainingQuestionDifficulty) difficulty?: TrainingQuestionDifficulty;
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @ArrayUnique() @IsString({ each: true }) @MaxLength(60, { each: true }) tags?: string[];
+  @IsOptional() @IsObject() rubric?: Record<string, unknown>;
+}
+
+export class CreateTrainingQuestionBankItemDto extends CreateTrainingQuizQuestionDto {}
+export class UpdateTrainingQuestionBankItemDto extends PartialType(CreateTrainingQuestionBankItemDto) {}
+
+export class ImportTrainingQuestionBankItemsDto {
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  itemIds!: string[];
+}
+
+export class ListTrainingQuestionBankDto {
+  @IsOptional() @IsString() @MaxLength(200) search?: string;
+  @IsOptional() @IsString() @MaxLength(120) category?: string;
+  @IsOptional() @IsEnum(TrainingQuestionDifficulty) difficulty?: TrainingQuestionDifficulty;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) pageSize = 20;
 }
 
 export class GradeTrainingAttemptAnswerDto {
@@ -140,6 +180,25 @@ export class RevokeTrainingCertificateDto {
   @IsString()
   @MaxLength(1000)
   reason!: string;
+}
+
+export class UpdateTrainingCertificationPolicyDto {
+  @IsBoolean() isEnabled!: boolean;
+  @IsBoolean() autoIssue!: boolean;
+  @IsBoolean() requireAssessment!: boolean;
+  @IsBoolean() requireAllRequiredLessons!: boolean;
+  @IsOptional() @IsInt() @Min(1) @Max(3650) validityDays?: number;
+  @IsInt() @Min(0) @Max(365) renewalWindowDays!: number;
+  @IsArray() @ArrayMaxSize(10) @ArrayUnique() @IsInt({ each: true }) @Min(0, { each: true }) @Max(365, { each: true }) reminderDays!: number[];
+  @IsOptional() @IsString() @MaxLength(180) certificateTitle?: string;
+  @IsOptional() @IsString() @MaxLength(1000) certificateDescription?: string;
+  @IsOptional() @IsString() @MaxLength(180) signatoryName?: string;
+  @IsOptional() @IsString() @MaxLength(180) signatoryTitle?: string;
+  @IsOptional() @IsUrl({ require_tld: false }) @MaxLength(2048) badgeImageUrl?: string;
+}
+
+export class RenewTrainingCertificateDto {
+  @IsOptional() @IsString() @MaxLength(1000) reason?: string;
 }
 
 export class ListTrainingAssessmentResultsDto {

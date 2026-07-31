@@ -249,9 +249,63 @@ enum TrainingAssignmentType {
 
 enum TrainingAssignmentSourceType {
   MANUAL
+  CAMPAIGN
   RULE
   SUBSCRIPTION
   ONBOARDING
+}
+
+enum TrainingLaunchStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum TrainingLaunchAudience {
+  USERS
+  ROLES
+  BRANCHES
+  TENANT
+}
+
+enum TrainingImprovementStatus {
+  OPEN
+  PLANNED
+  IN_PROGRESS
+  VALIDATING
+  COMPLETED
+  DISMISSED
+}
+
+enum TrainingImprovementPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TrainingImprovementSource {
+  ANALYTICS
+  PILOT
+  QUALITY
+  MANUAL
+}
+
+enum TrainingOperationKind {
+  PROCESS_DUE_COURSES
+  PROCESS_DUE_LAUNCHES
+  RECOVER_WEBHOOKS
+  RETRY_FAILED_WEBHOOKS
+  CLEAR_STALE_LAUNCH_LOCKS
+}
+
+enum TrainingOperationStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
 }
 
 enum TrainingProgressStatus {
@@ -259,6 +313,25 @@ enum TrainingProgressStatus {
   IN_PROGRESS
   COMPLETED
   OVERDUE
+}
+
+enum TrainingCompetencyLevel {
+  AWARENESS
+  WORKING
+  PROFICIENT
+  EXPERT
+}
+
+enum TrainingAudienceRuleType {
+  ROLE
+  JOB_TITLE
+  BRANCH
+  GROUP
+}
+
+enum TrainingAudienceOperator {
+  EQUALS
+  CONTAINS
 }
 
 enum TrainingEventModality {
@@ -287,6 +360,38 @@ enum TrainingQuizAttemptStatus {
   SUBMITTED
   PENDING_REVIEW
   GRADED
+}
+
+enum TrainingQuestionDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum TrainingQuizFeedbackMode {
+  AFTER_SUBMISSION
+  AFTER_PASSING
+  NEVER
+}
+
+enum TrainingQualityReviewType {
+  CONTENT
+  PEDAGOGY
+  ACCESSIBILITY
+  COMPLIANCE
+}
+
+enum TrainingQualityReviewStatus {
+  PENDING
+  APPROVED
+  CHANGES_REQUESTED
+}
+
+enum TrainingPilotStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
 }
 
 enum TrainingFavoriteEntityType {
@@ -614,12 +719,12 @@ enum OperationalEventType {
 }
 
 model Tenant {
-  id                            String                       @id @default(uuid())
+  id                            String                        @id @default(uuid())
   name                          String
-  slug                          String                       @unique
-  status                        TenantStatus                 @default(ACTIVE)
-  createdAt                     DateTime                     @default(now())
-  updatedAt                     DateTime                     @updatedAt
+  slug                          String                        @unique
+  status                        TenantStatus                  @default(ACTIVE)
+  createdAt                     DateTime                      @default(now())
+  updatedAt                     DateTime                      @updatedAt
   users                         User[]
   roles                         Role[]
   subscription                  Subscription?
@@ -647,13 +752,20 @@ model Tenant {
   trainingOnboardingRules       TrainingOnboardingRule[]
   trainingCourses               TrainingCourse[]
   trainingAssignments           TrainingAssignment[]
+  trainingLaunches              TrainingLaunch[]
+  trainingImprovements          TrainingCourseImprovement[]
+  trainingOperationRuns         TrainingOperationRun[]
   trainingProgressRecords       TrainingProgress[]
   trainingStepProgressRecords   TrainingStepProgress[]
   trainingLessonProgressRecords TrainingLessonProgress[]
   trainingEvents                TrainingEvent[]
   trainingLibraryResources      TrainingLibraryResource[]
   trainingQuizAttempts          TrainingQuizAttempt[]
+  trainingQuestionBankItems     TrainingQuestionBankItem[]
   trainingCertificates          TrainingCertificate[]
+  trainingCertificationPolicies TrainingCertificationPolicy[]
+  trainingCourseQualityReviews  TrainingCourseQualityReview[]
+  trainingCoursePilots          TrainingCoursePilot[]
   trainingCompliancePolicies    TrainingCompliancePolicy[]
   trainingScormPackages         TrainingScormPackage[]
   trainingFavorites             TrainingFavorite[]
@@ -723,6 +835,10 @@ model User {
   createdVacancies              Vacancy[]                   @relation("VacancyCreatedBy")
   assignedTrainingAssignments   TrainingAssignment[]        @relation("TrainingAssignmentsUser")
   createdTrainingAssignments    TrainingAssignment[]        @relation("TrainingAssignmentsAssignedBy")
+  createdTrainingLaunches       TrainingLaunch[]            @relation("TrainingLaunchCreatedBy")
+  ownedTrainingImprovements     TrainingCourseImprovement[] @relation("TrainingImprovementOwner")
+  createdTrainingImprovements   TrainingCourseImprovement[] @relation("TrainingImprovementCreatedBy")
+  triggeredTrainingOperations   TrainingOperationRun[]      @relation("TrainingOperationActor")
   trainingProgressRecords       TrainingProgress[]
   trainingStepProgressRecords   TrainingStepProgress[]
   trainingLessonProgressRecords TrainingLessonProgress[]
@@ -1443,37 +1559,37 @@ model OnboardingTemplateTask {
 }
 
 model EmployeeDocument {
-  id               String          @id @default(uuid())
-  tenantId         String
-  branchId         String
-  employeeId       String
-  onboardingFlowId String?
-  taskId           String?
-  category         String
-  originalName     String
-  storageKey       String
-  mimeType         String
-  sizeBytes        Int
-  checksum         String
-  scanStatus       String
-  status           String          @default("PENDING_REVIEW")
-  version          Int             @default(1)
-  replacesDocumentId String?
-  rejectionReason String?
-  deletedAt        DateTime?
-  uploadedById     String
-  expiresAt        DateTime?
-  reviewedAt       DateTime?
-  reviewedById     String?
-  metadata         Json?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  employee         Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  onboardingFlow   OnboardingFlow? @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
-  task             OnboardingTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  replacesDocument EmployeeDocument? @relation("EmployeeDocumentVersions", fields: [replacesDocumentId], references: [id], onDelete: SetNull)
+  id                   String             @id @default(uuid())
+  tenantId             String
+  branchId             String
+  employeeId           String
+  onboardingFlowId     String?
+  taskId               String?
+  category             String
+  originalName         String
+  storageKey           String
+  mimeType             String
+  sizeBytes            Int
+  checksum             String
+  scanStatus           String
+  status               String             @default("PENDING_REVIEW")
+  version              Int                @default(1)
+  replacesDocumentId   String?
+  rejectionReason      String?
+  deletedAt            DateTime?
+  uploadedById         String
+  expiresAt            DateTime?
+  reviewedAt           DateTime?
+  reviewedById         String?
+  metadata             Json?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  tenant               Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch               Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  employee             Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  onboardingFlow       OnboardingFlow?    @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
+  task                 OnboardingTask?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  replacesDocument     EmployeeDocument?  @relation("EmployeeDocumentVersions", fields: [replacesDocumentId], references: [id], onDelete: SetNull)
   replacementDocuments EmployeeDocument[] @relation("EmployeeDocumentVersions")
 
   @@unique([tenantId, storageKey])
@@ -2496,7 +2612,7 @@ model TrainingCurriculum {
 }
 
 model TrainingCourse {
-  id                          String                       @id @default(uuid())
+  id                          String                        @id @default(uuid())
   tenantId                    String?
   curriculumId                String?
   categoryId                  String?
@@ -2508,33 +2624,35 @@ model TrainingCourse {
   type                        TrainingCourseType
   resourceType                TrainingResourceType
   resourceUrl                 String?
-  estimatedMinutes            Int                          @default(0)
-  difficulty                  TrainingDifficulty           @default(BEGINNER)
+  estimatedMinutes            Int                           @default(0)
+  difficulty                  TrainingDifficulty            @default(BEGINNER)
   points                      Int?
-  isRequired                  Boolean                      @default(false)
-  isPublished                 Boolean                      @default(false)
-  status                      TrainingCourseStatus         @default(DRAFT)
-  language                    String                       @default("es")
+  isRequired                  Boolean                       @default(false)
+  isPublished                 Boolean                       @default(false)
+  status                      TrainingCourseStatus          @default(DRAFT)
+  language                    String                        @default("es")
   introVideoUrl               String?
   scheduledPublishAt          DateTime?
   scheduledRetireAt           DateTime?
   publishedAt                 DateTime?
   retiredAt                   DateTime?
-  version                     Int                          @default(1)
+  version                     Int                           @default(1)
   sourceCourseId              String?
   createdById                 String?
   updatedById                 String?
   tags                        String[]
-  createdAt                   DateTime                     @default(now())
-  updatedAt                   DateTime                     @updatedAt
-  tenant                      Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  curriculum                  TrainingCurriculum?          @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
-  category                    TrainingCategory?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdAt                   DateTime                      @default(now())
+  updatedAt                   DateTime                      @updatedAt
+  tenant                      Tenant?                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  curriculum                  TrainingCurriculum?           @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+  category                    TrainingCategory?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   steps                       TrainingCourseStep[]
   modules                     TrainingCourseModule[]
   versions                    TrainingCourseVersion[]
   transitions                 TrainingCourseTransition[]
   assignments                 TrainingAssignment[]
+  launches                    TrainingLaunch[]
+  improvements                TrainingCourseImprovement[]
   progressRecords             TrainingProgress[]
   events                      TrainingEvent[]
   quizzes                     TrainingQuiz[]
@@ -2544,9 +2662,16 @@ model TrainingCourse {
   favorites                   TrainingFavorite[]
   workflowTrainingAssignments WorkflowTrainingAssignment[]
   TrainingActivation          TrainingActivation[]
-  pathEntries                 TrainingPathCourse[]         @relation("TrainingPathCourse")
-  prerequisiteEntries         TrainingPathCourse[]         @relation("TrainingPathPrerequisite")
+  pathEntries                 TrainingPathCourse[]          @relation("TrainingPathCourse")
+  prerequisiteEntries         TrainingPathCourse[]          @relation("TrainingPathPrerequisite")
   onboardingRules             TrainingOnboardingRule[]
+  brief                       TrainingCourseBrief?
+  courseCompetencies          TrainingCourseCompetency[]
+  learningObjectives          TrainingLearningObjective[]
+  audienceRules               TrainingAudienceRule[]
+  certificationPolicy         TrainingCertificationPolicy?
+  qualityReviews              TrainingCourseQualityReview[]
+  pilots                      TrainingCoursePilot[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, isPublished])
@@ -2557,6 +2682,98 @@ model TrainingCourse {
   @@index([curriculumId])
   @@index([categoryId])
   @@index([type])
+}
+
+model TrainingCourseBrief {
+  id                    String         @id @default(uuid())
+  courseId              String         @unique
+  businessNeed          String
+  targetOutcome         String
+  successKpi            String
+  audienceDescription   String?
+  baselineMetric        String?
+  targetMetric          String?
+  riskIfNotCompleted    String?
+  contentOwnerId        String?
+  subjectMatterExpertId String?
+  targetDate            DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  course                TrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([contentOwnerId])
+  @@index([subjectMatterExpertId])
+}
+
+model TrainingCompetency {
+  id                 String                      @id @default(uuid())
+  tenantId           String?
+  code               String
+  name               String
+  description        String?
+  framework          String?
+  isActive           Boolean                     @default(true)
+  createdById        String?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  courseCompetencies TrainingCourseCompetency[]
+  learningObjectives TrainingLearningObjective[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@index([name])
+}
+
+model TrainingCourseCompetency {
+  id           String                  @id @default(uuid())
+  courseId     String
+  competencyId String
+  targetLevel  TrainingCompetencyLevel @default(WORKING)
+  isRequired   Boolean                 @default(true)
+  sortOrder    Int                     @default(0)
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  course       TrainingCourse          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  competency   TrainingCompetency      @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, competencyId])
+  @@index([courseId, sortOrder])
+  @@index([competencyId])
+}
+
+model TrainingLearningObjective {
+  id               String                  @id @default(uuid())
+  courseId         String
+  competencyId     String?
+  statement        String
+  successCriteria  String
+  assessmentMethod String
+  targetLevel      TrainingCompetencyLevel @default(WORKING)
+  isRequired       Boolean                 @default(true)
+  sortOrder        Int                     @default(0)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  course           TrainingCourse          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  competency       TrainingCompetency?     @relation(fields: [competencyId], references: [id], onDelete: SetNull)
+
+  @@index([courseId, sortOrder])
+  @@index([competencyId])
+}
+
+model TrainingAudienceRule {
+  id          String                   @id @default(uuid())
+  courseId    String
+  ruleType    TrainingAudienceRuleType
+  operator    TrainingAudienceOperator @default(EQUALS)
+  value       String
+  description String?
+  sortOrder   Int                      @default(0)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  course      TrainingCourse           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, sortOrder])
+  @@index([ruleType, value])
 }
 
 model TrainingCompliancePolicy {
@@ -2575,6 +2792,97 @@ model TrainingCompliancePolicy {
 
   @@unique([tenantId, courseId])
   @@index([tenantId, isActive])
+}
+
+model TrainingCertificationPolicy {
+  id                        String                @id @default(uuid())
+  tenantId                  String
+  courseId                  String                @unique
+  isEnabled                 Boolean               @default(true)
+  autoIssue                 Boolean               @default(true)
+  requireAssessment         Boolean               @default(true)
+  requireAllRequiredLessons Boolean               @default(true)
+  validityDays              Int?
+  renewalWindowDays         Int                   @default(30)
+  reminderDays              Int[]                 @default([30, 7, 1])
+  certificateTitle          String?
+  certificateDescription    String?
+  signatoryName             String?
+  signatoryTitle            String?
+  badgeImageUrl             String?
+  version                   Int                   @default(1)
+  createdById               String?
+  updatedById               String?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  tenant                    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course                    TrainingCourse        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  certificates              TrainingCertificate[]
+
+  @@index([tenantId, isEnabled])
+}
+
+model TrainingCourseQualityReview {
+  id            String                      @id @default(uuid())
+  tenantId      String?
+  courseId      String
+  courseVersion Int
+  reviewType    TrainingQualityReviewType
+  status        TrainingQualityReviewStatus @default(PENDING)
+  reviewerId    String?
+  requestedById String?
+  checklist     Json
+  summary       String?
+  decidedAt     DateTime?
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+  tenant        Tenant?                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course        TrainingCourse              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, courseVersion, reviewType])
+  @@index([tenantId, status, updatedAt])
+  @@index([reviewerId, status])
+}
+
+model TrainingCoursePilot {
+  id              String                  @id @default(uuid())
+  tenantId        String
+  courseId        String
+  courseVersion   Int
+  name            String
+  status          TrainingPilotStatus     @default(DRAFT)
+  participantIds  String[]
+  successCriteria Json
+  startsAt        DateTime?
+  endsAt          DateTime?
+  activatedAt     DateTime?
+  completedAt     DateTime?
+  createdById     String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course          TrainingCourse          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  feedback        TrainingPilotFeedback[]
+
+  @@index([tenantId, status, updatedAt])
+  @@index([courseId, courseVersion])
+}
+
+model TrainingPilotFeedback {
+  id              String              @id @default(uuid())
+  pilotId         String
+  userId          String
+  rating          Int
+  clarityRating   Int
+  relevanceRating Int
+  comment         String?
+  blockingIssue   Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  pilot           TrainingCoursePilot @relation(fields: [pilotId], references: [id], onDelete: Cascade)
+
+  @@unique([pilotId, userId])
+  @@index([pilotId, blockingIssue])
 }
 
 model TrainingPathCourse {
@@ -2748,6 +3056,7 @@ model TrainingAssignment {
   curriculumId    String?
   courseId        String?
   assignedById    String?
+  launchId        String?
   assignmentType  TrainingAssignmentType
   sourceType      TrainingAssignmentSourceType
   isRequired      Boolean                      @default(true)
@@ -2763,12 +3072,94 @@ model TrainingAssignment {
   curriculum      TrainingCurriculum?          @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
   course          TrainingCourse?              @relation(fields: [courseId], references: [id], onDelete: Cascade)
   assignedBy      User?                        @relation("TrainingAssignmentsAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  launch          TrainingLaunch?              @relation(fields: [launchId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, userId, curriculumId])
   @@unique([tenantId, userId, courseId])
   @@index([tenantId, userId, status])
   @@index([tenantId, dueAt])
   @@index([tenantId, startAt])
+  @@index([launchId])
+}
+
+model TrainingLaunch {
+  id                   String                 @id @default(uuid())
+  tenantId             String
+  courseId             String
+  createdById          String?
+  name                 String
+  status               TrainingLaunchStatus   @default(DRAFT)
+  audience             TrainingLaunchAudience
+  targetIds            String[]
+  resolvedUserIds      String[]
+  nextAudienceIndex    Int                    @default(0)
+  batchSize            Int                    @default(100)
+  rolloutIntervalHours Int                    @default(0)
+  isRequired           Boolean                @default(true)
+  startAt              DateTime?
+  dueAt                DateTime?
+  nextBatchAt          DateTime?
+  processingAt         DateTime?
+  launchedAt           DateTime?
+  completedAt          DateTime?
+  cancelledAt          DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  tenant               Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course               TrainingCourse         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdBy            User?                  @relation("TrainingLaunchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  assignments          TrainingAssignment[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([status, nextBatchAt])
+  @@index([courseId])
+}
+
+model TrainingCourseImprovement {
+  id           String                      @id @default(uuid())
+  tenantId     String
+  courseId     String
+  ownerId      String?
+  createdById  String?
+  title        String
+  description  String?
+  status       TrainingImprovementStatus   @default(OPEN)
+  priority     TrainingImprovementPriority @default(MEDIUM)
+  source       TrainingImprovementSource   @default(MANUAL)
+  signalCode   String?
+  evidence     Json?
+  dueAt        DateTime?
+  outcomeNotes String?
+  completedAt  DateTime?
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  tenant       Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course       TrainingCourse              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  owner        User?                       @relation("TrainingImprovementOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy    User?                       @relation("TrainingImprovementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, priority])
+  @@index([courseId, status])
+  @@index([ownerId, status])
+}
+
+model TrainingOperationRun {
+  id          String                  @id @default(uuid())
+  tenantId    String
+  actorId     String?
+  kind        TrainingOperationKind
+  status      TrainingOperationStatus @default(RUNNING)
+  result      Json?
+  error       String?
+  startedAt   DateTime                @default(now())
+  completedAt DateTime?
+  durationMs  Int?
+  createdAt   DateTime                @default(now())
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor       User?                   @relation("TrainingOperationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, kind, status])
 }
 
 model TrainingProgress {
@@ -2999,39 +3390,78 @@ model TrainingLibraryResource {
 }
 
 model TrainingQuiz {
-  id               String                 @id @default(uuid())
-  courseId         String
-  title            String
-  description      String?
-  passingScore     Int
-  maxAttempts      Int?
-  timeLimitMinutes Int?
-  shuffleQuestions Boolean                @default(false)
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-  course           TrainingCourse         @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  questions        TrainingQuizQuestion[]
-  attempts         TrainingQuizAttempt[]
+  id                  String                   @id @default(uuid())
+  courseId            String
+  title               String
+  description         String?
+  passingScore        Int
+  maxAttempts         Int?
+  timeLimitMinutes    Int?
+  shuffleQuestions    Boolean                  @default(false)
+  shuffleOptions      Boolean                  @default(false)
+  randomQuestionCount Int?
+  cooldownMinutes     Int?
+  availableFrom       DateTime?
+  availableUntil      DateTime?
+  requireAllQuestions Boolean                  @default(true)
+  feedbackMode        TrainingQuizFeedbackMode @default(AFTER_SUBMISSION)
+  rubric              Json?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  course              TrainingCourse           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questions           TrainingQuizQuestion[]
+  attempts            TrainingQuizAttempt[]
 
   @@index([courseId])
 }
 
 model TrainingQuizQuestion {
-  id                    String                   @id @default(uuid())
+  id                    String                     @id @default(uuid())
   quizId                String
   prompt                String
   questionType          TrainingQuizQuestionType
-  sortOrder             Int                      @default(0)
+  sortOrder             Int                        @default(0)
   explanation           String?
-  points                Int                      @default(1)
-  requiresManualGrading Boolean                  @default(false)
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
-  quiz                  TrainingQuiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  points                Int                        @default(1)
+  requiresManualGrading Boolean                    @default(false)
+  bankItemId            String?
+  category              String?
+  difficulty            TrainingQuestionDifficulty @default(MEDIUM)
+  tags                  String[]
+  rubric                Json?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  quiz                  TrainingQuiz               @relation(fields: [quizId], references: [id], onDelete: Cascade)
   options               TrainingQuizOption[]
   answers               TrainingQuizAnswer[]
+  bankItem              TrainingQuestionBankItem?  @relation(fields: [bankItemId], references: [id], onDelete: SetNull)
 
   @@index([quizId, sortOrder])
+  @@index([bankItemId])
+}
+
+model TrainingQuestionBankItem {
+  id                    String                     @id @default(uuid())
+  tenantId              String
+  prompt                String
+  questionType          TrainingQuizQuestionType
+  explanation           String?
+  points                Int                        @default(1)
+  requiresManualGrading Boolean                    @default(false)
+  category              String?
+  difficulty            TrainingQuestionDifficulty @default(MEDIUM)
+  tags                  String[]
+  rubric                Json?
+  options               Json
+  isActive              Boolean                    @default(true)
+  createdById           String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  quizQuestions         TrainingQuizQuestion[]
+
+  @@index([tenantId, isActive])
+  @@index([tenantId, category, difficulty])
 }
 
 model TrainingQuizOption {
@@ -3061,6 +3491,7 @@ model TrainingQuizAttempt {
   gradedAt    DateTime?
   gradedById  String?
   feedback    String?
+  questionIds String[]
   status      TrainingQuizAttemptStatus @default(IN_PROGRESS)
   createdAt   DateTime                  @default(now())
   updatedAt   DateTime                  @updatedAt
@@ -3094,28 +3525,40 @@ model TrainingQuizAnswer {
 }
 
 model TrainingCertificate {
-  id               String              @id @default(uuid())
-  tenantId         String
-  userId           String
-  curriculumId     String?
-  courseId         String?
-  certificateUrl   String
-  verificationCode String              @unique
-  issuedAt         DateTime
-  expiresAt        DateTime?
-  revokedAt        DateTime?
-  revokedById      String?
-  revocationReason String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  tenant           Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  curriculum       TrainingCurriculum? @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
-  course           TrainingCourse?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  id                String                       @id @default(uuid())
+  tenantId          String
+  userId            String
+  curriculumId      String?
+  courseId          String?
+  certificateUrl    String
+  verificationCode  String                       @unique
+  certificateNumber String                       @unique
+  policyId          String?
+  policyVersion     Int?
+  evidenceSnapshot  Json?
+  issuedById        String?
+  issuedReason      String                       @default("COMPLETION")
+  renewedFromId     String?
+  supersededAt      DateTime?
+  issuedAt          DateTime
+  expiresAt         DateTime?
+  revokedAt         DateTime?
+  revokedById       String?
+  revocationReason  String?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  tenant            Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user              User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  curriculum        TrainingCurriculum?          @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+  course            TrainingCourse?              @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  policy            TrainingCertificationPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  renewedFrom       TrainingCertificate?         @relation("TrainingCertificateRenewals", fields: [renewedFromId], references: [id], onDelete: SetNull)
+  renewals          TrainingCertificate[]        @relation("TrainingCertificateRenewals")
 
-  @@unique([tenantId, userId, curriculumId])
-  @@unique([tenantId, userId, courseId])
   @@index([tenantId, userId, issuedAt])
+  @@index([tenantId, courseId, userId, supersededAt])
+  @@index([expiresAt, supersededAt, revokedAt])
+  @@index([renewedFromId])
 }
 
 model TrainingFavorite {

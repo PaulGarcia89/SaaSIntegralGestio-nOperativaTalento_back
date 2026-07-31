@@ -63,9 +63,10 @@ export class TrainingWebhookDeliveryService implements OnModuleInit, OnModuleDes
     if (!queued) await this.deliver(deliveryId);
   }
 
-  async recoverPending(now = new Date()) {
+  async recoverPending(now = new Date(), tenantId?: string) {
     const pending = await this.prisma.trainingWebhookDelivery.findMany({
       where: {
+        tenantId,
         status: { in: ['PENDING', 'RETRYING', 'PROCESSING'] },
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
       },

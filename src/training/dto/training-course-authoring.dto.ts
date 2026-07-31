@@ -1,12 +1,19 @@
 import { PartialType } from '@nestjs/mapped-types';
 import {
+  TrainingAudienceOperator,
+  TrainingAudienceRuleType,
+  TrainingCompetencyLevel,
   TrainingContentBlockType,
   TrainingCourseStatus,
   TrainingDifficulty,
+  TrainingPilotStatus,
+  TrainingQualityReviewStatus,
+  TrainingQualityReviewType,
 } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayUnique,
   IsBoolean,
   IsDate,
   IsEnum,
@@ -272,9 +279,110 @@ export class CreateTrainingCategoryDto {
 
 export class UpdateTrainingCategoryDto extends PartialType(CreateTrainingCategoryDto) {}
 
+export class CreateTrainingCompetencyDto {
+  @IsString() @IsNotEmpty() @MaxLength(80) code!: string;
+  @IsString() @IsNotEmpty() @MaxLength(180) name!: string;
+  @IsOptional() @IsString() @MaxLength(2000) description?: string;
+  @IsOptional() @IsString() @MaxLength(180) framework?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsEnum(TrainingCourseScope) scope?: TrainingCourseScope;
+}
+
+export class UpdateTrainingCompetencyDto extends PartialType(CreateTrainingCompetencyDto) {}
+
+export class TrainingCourseBriefDto {
+  @IsString() @MaxLength(4000) businessNeed!: string;
+  @IsString() @MaxLength(4000) targetOutcome!: string;
+  @IsString() @MaxLength(1000) successKpi!: string;
+  @IsOptional() @IsString() @MaxLength(2000) audienceDescription?: string;
+  @IsOptional() @IsString() @MaxLength(500) baselineMetric?: string;
+  @IsOptional() @IsString() @MaxLength(500) targetMetric?: string;
+  @IsOptional() @IsString() @MaxLength(2000) riskIfNotCompleted?: string;
+  @IsOptional() @IsUUID() contentOwnerId?: string;
+  @IsOptional() @IsUUID() subjectMatterExpertId?: string;
+  @IsOptional() @Type(() => Date) @IsDate() targetDate?: Date;
+}
+
+export class TrainingCourseCompetencyInputDto {
+  @IsUUID() competencyId!: string;
+  @IsOptional() @IsEnum(TrainingCompetencyLevel) targetLevel?: TrainingCompetencyLevel;
+  @IsOptional() @IsBoolean() isRequired?: boolean;
+  @IsOptional() @IsInt() @Min(0) sortOrder?: number;
+}
+
+export class TrainingLearningObjectiveInputDto {
+  @IsOptional() @IsUUID() competencyId?: string;
+  @IsString() @IsNotEmpty() @MaxLength(1000) statement!: string;
+  @IsString() @IsNotEmpty() @MaxLength(1000) successCriteria!: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) assessmentMethod!: string;
+  @IsOptional() @IsEnum(TrainingCompetencyLevel) targetLevel?: TrainingCompetencyLevel;
+  @IsOptional() @IsBoolean() isRequired?: boolean;
+  @IsOptional() @IsInt() @Min(0) sortOrder?: number;
+}
+
+export class TrainingAudienceRuleInputDto {
+  @IsEnum(TrainingAudienceRuleType) ruleType!: TrainingAudienceRuleType;
+  @IsOptional() @IsEnum(TrainingAudienceOperator) operator?: TrainingAudienceOperator;
+  @IsString() @IsNotEmpty() @MaxLength(500) value!: string;
+  @IsOptional() @IsString() @MaxLength(1000) description?: string;
+  @IsOptional() @IsInt() @Min(0) sortOrder?: number;
+}
+
+export class UpdateTrainingCourseDesignDto {
+  @ValidateNested() @Type(() => TrainingCourseBriefDto) brief!: TrainingCourseBriefDto;
+  @IsArray() @ValidateNested({ each: true }) @Type(() => TrainingCourseCompetencyInputDto)
+  competencies!: TrainingCourseCompetencyInputDto[];
+  @IsArray() @ValidateNested({ each: true }) @Type(() => TrainingLearningObjectiveInputDto)
+  objectives!: TrainingLearningObjectiveInputDto[];
+  @IsArray() @ValidateNested({ each: true }) @Type(() => TrainingAudienceRuleInputDto)
+  audienceRules!: TrainingAudienceRuleInputDto[];
+}
+
 export class ReorderTrainingEntityDto {
   @IsInt()
   @Transform(({ value }) => Number(value))
   @Min(0)
   sortOrder!: number;
+}
+
+export class ReorderTrainingEntitiesDto {
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  entityIds!: string[];
+}
+
+export class RequestTrainingQualityReviewsDto {
+  @IsArray()
+  @ArrayUnique()
+  @IsEnum(TrainingQualityReviewType, { each: true })
+  reviewTypes!: TrainingQualityReviewType[];
+
+  @IsOptional() @IsUUID() reviewerId?: string;
+}
+
+export class DecideTrainingQualityReviewDto {
+  @IsEnum(TrainingQualityReviewStatus) status!: TrainingQualityReviewStatus;
+  @IsObject() checklist!: Record<string, unknown>;
+  @IsOptional() @IsString() @MaxLength(2000) summary?: string;
+}
+
+export class CreateTrainingCoursePilotDto {
+  @IsString() @IsNotEmpty() @MaxLength(180) name!: string;
+  @IsArray() @ArrayUnique() @IsUUID('4', { each: true }) participantIds!: string[];
+  @IsObject() successCriteria!: Record<string, unknown>;
+  @IsOptional() @IsDate() @Type(() => Date) startsAt?: Date;
+  @IsOptional() @IsDate() @Type(() => Date) endsAt?: Date;
+}
+
+export class UpdateTrainingCoursePilotStatusDto {
+  @IsEnum(TrainingPilotStatus) status!: TrainingPilotStatus;
+}
+
+export class SubmitTrainingPilotFeedbackDto {
+  @IsInt() @Min(1) @Max(5) rating!: number;
+  @IsInt() @Min(1) @Max(5) clarityRating!: number;
+  @IsInt() @Min(1) @Max(5) relevanceRating!: number;
+  @IsOptional() @IsString() @MaxLength(2000) comment?: string;
+  @IsOptional() @IsBoolean() blockingIssue?: boolean;
 }

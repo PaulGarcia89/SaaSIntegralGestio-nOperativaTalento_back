@@ -24,6 +24,10 @@ import { TrainingObjectStorageService } from './training-object-storage.service'
 import { TrainingAntivirusService } from './training-antivirus.service';
 import { TrainingLearningPathController } from './training-learning-path.controller';
 import { TrainingLearningPathService } from './training-learning-path.service';
+import { TrainingLaunchController } from './training-launch.controller';
+import { TrainingLaunchService } from './training-launch.service';
+import { TrainingOperationsController } from './training-operations.controller';
+import { TrainingOperationsService } from './training-operations.service';
 
 @Module({
   imports: [PrismaModule],
@@ -37,6 +41,8 @@ import { TrainingLearningPathService } from './training-learning-path.service';
     TrainingIntegrationsController,
     PublicTrainingScormController,
     TrainingLearningPathController,
+    TrainingLaunchController,
+    TrainingOperationsController,
   ],
   providers: [
     TrainingService,
@@ -53,6 +59,8 @@ import { TrainingLearningPathService } from './training-learning-path.service';
     TrainingAntivirusService,
     TrainingAccessGuard,
     TrainingLearningPathService,
+    TrainingLaunchService,
+    TrainingOperationsService,
   ],
   exports: [TrainingService, TrainingAntivirusService, TrainingLearningPathService],
 })

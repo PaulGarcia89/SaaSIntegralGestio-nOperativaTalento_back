@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -22,12 +23,19 @@ import { RequestWithUser } from '../common/types/request-with-user.type';
 import {
   CreateTrainingQuizDto,
   CreateTrainingQuizQuestionDto,
+  CreateTrainingQuestionBankItemDto,
   GradeTrainingAttemptDto,
   IssueTrainingCertificateDto,
   ListTrainingAssessmentResultsDto,
+  ListTrainingQuestionBankDto,
+  ImportTrainingQuestionBankItemsDto,
   RevokeTrainingCertificateDto,
+  RenewTrainingCertificateDto,
   UpdateTrainingQuizDto,
+  UpdateTrainingQuestionBankItemDto,
+  UpdateTrainingCertificationPolicyDto,
 } from './dto/training-assessment-admin.dto';
+import { ReorderTrainingEntitiesDto } from './dto/training-course-authoring.dto';
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingAssessmentAdminService } from './training-assessment-admin.service';
 
@@ -114,6 +122,57 @@ export class TrainingAssessmentAdminController {
     return this.service.deleteQuestion(this.tenantId(request), questionId);
   }
 
+  @Post('assessments/:quizId/questions/import')
+  @RequirePermissions('training.assessment.manage')
+  importQuestions(
+    @Req() request: RequestWithUser,
+    @Param('quizId') quizId: string,
+    @Body() dto: ImportTrainingQuestionBankItemsDto,
+  ) {
+    return this.service.importBankItems(this.tenantId(request), quizId, dto);
+  }
+
+  @Put('assessments/:quizId/questions/order')
+  @RequirePermissions('training.assessment.manage')
+  reorderQuestions(
+    @Req() request: RequestWithUser,
+    @Param('quizId') quizId: string,
+    @Body() dto: ReorderTrainingEntitiesDto,
+  ) {
+    return this.service.reorderQuestions(this.tenantId(request), quizId, dto);
+  }
+
+  @Get('assessment-question-bank')
+  @RequirePermissions('training.assessment.manage')
+  listQuestionBank(@Req() request: RequestWithUser, @Query() query: ListTrainingQuestionBankDto) {
+    return this.service.listQuestionBank(this.tenantId(request), query);
+  }
+
+  @Post('assessment-question-bank')
+  @RequirePermissions('training.assessment.manage')
+  createQuestionBankItem(
+    @Req() request: RequestWithUser,
+    @Body() dto: CreateTrainingQuestionBankItemDto,
+  ) {
+    return this.service.createQuestionBankItem(this.tenantId(request), request.user.sub, dto);
+  }
+
+  @Patch('assessment-question-bank/:itemId')
+  @RequirePermissions('training.assessment.manage')
+  updateQuestionBankItem(
+    @Req() request: RequestWithUser,
+    @Param('itemId') itemId: string,
+    @Body() dto: UpdateTrainingQuestionBankItemDto,
+  ) {
+    return this.service.updateQuestionBankItem(this.tenantId(request), itemId, dto);
+  }
+
+  @Delete('assessment-question-bank/:itemId')
+  @RequirePermissions('training.assessment.manage')
+  archiveQuestionBankItem(@Req() request: RequestWithUser, @Param('itemId') itemId: string) {
+    return this.service.archiveQuestionBankItem(this.tenantId(request), itemId);
+  }
+
   @Get('assessment-results')
   @RequirePermissions('training.progress.read')
   results(
@@ -140,6 +199,28 @@ export class TrainingAssessmentAdminController {
     return this.service.listCertificates(this.tenantId(request));
   }
 
+  @Get('courses/:courseId/certification-policy')
+  @RequirePermissions('training.course.read')
+  certificationPolicy(@Req() request: RequestWithUser, @Param('courseId') courseId: string) {
+    return this.service.getCertificationPolicy(this.tenantId(request), courseId);
+  }
+
+  @Put('courses/:courseId/certification-policy')
+  @RequirePermissions('training.course.update')
+  updateCertificationPolicy(
+    @Req() request: RequestWithUser,
+    @Param('courseId') courseId: string,
+    @Body() dto: UpdateTrainingCertificationPolicyDto,
+  ) {
+    request.auditAction = 'TRAINING_CERTIFICATION_POLICY_UPDATED';
+    return this.service.updateCertificationPolicy(
+      this.tenantId(request),
+      request.user.sub,
+      courseId,
+      dto,
+    );
+  }
+
   @Post('certificates')
   @RequirePermissions('training.certificate.issue')
   issueCertificate(
@@ -159,6 +240,22 @@ export class TrainingAssessmentAdminController {
   ) {
     request.auditAction = 'TRAINING_CERTIFICATE_REVOKED';
     return this.service.revokeCertificate(
+      this.tenantId(request),
+      request.user.sub,
+      certificateId,
+      dto,
+    );
+  }
+
+  @Post('certificates/:certificateId/renew')
+  @RequirePermissions('training.certificate.issue')
+  renewCertificate(
+    @Req() request: RequestWithUser,
+    @Param('certificateId') certificateId: string,
+    @Body() dto: RenewTrainingCertificateDto,
+  ) {
+    request.auditAction = 'TRAINING_CERTIFICATE_RENEWED';
+    return this.service.renewCertificate(
       this.tenantId(request),
       request.user.sub,
       certificateId,

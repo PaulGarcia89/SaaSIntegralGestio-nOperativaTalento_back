@@ -1502,27 +1502,31 @@ async function main() {
     skipDuplicates: true,
   });
 
-  await prisma.trainingCertificate.upsert({
-    where: {
-      tenantId_userId_courseId: {
-        tenantId: tenant.id,
-        userId: user.id,
-        courseId: introCourseId,
-      },
-    },
-    update: {
+  const demoCertificate = await prisma.trainingCertificate.findFirst({
+    where: { tenantId: tenant.id, userId: user.id, courseId: introCourseId },
+  });
+  const demoCertificateData = {
+    certificateUrl: `https://cdn.saasintegral.local/certificates/${user.id}/${introCourseId}.pdf`,
+    issuedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+  };
+  if (demoCertificate) {
+    await prisma.trainingCertificate.update({
+      where: { id: demoCertificate.id },
+      data: {
       certificateUrl: `https://cdn.saasintegral.local/certificates/${user.id}/${introCourseId}.pdf`,
       issuedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    },
-    create: {
+      },
+    });
+  } else {
+    await prisma.trainingCertificate.create({ data: {
       tenantId: tenant.id,
       userId: user.id,
       courseId: introCourseId,
       verificationCode: `DEMO${introCourseId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
-      certificateUrl: `https://cdn.saasintegral.local/certificates/${user.id}/${introCourseId}.pdf`,
-      issuedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    },
-  });
+      certificateNumber: `CERT-DEMO-${introCourseId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
+      ...demoCertificateData,
+    } });
+  }
 
   await prisma.trainingAnalyticsSnapshot.create({
     data: {

@@ -6,6 +6,7 @@ import {
   TrainingEventAttendanceStatus,
   TrainingFavoriteEntityType,
   TrainingProgressStatus,
+  TrainingPilotStatus,
   TrainingQuizAttemptStatus,
   TrainingQuizQuestionType,
 } from '@prisma/client';
@@ -22,6 +23,7 @@ import { TrainingFavoriteDto } from './dto/training-favorite.dto';
 import { UpdateTrainingCourseProgressDto } from './dto/update-training-course-progress.dto';
 import { UpdateTrainingStepProgressDto } from './dto/update-training-step-progress.dto';
 import { UpdateTrainingLessonProgressDto } from './dto/training-assignment-admin.dto';
+import { SubmitTrainingPilotFeedbackDto } from './dto/training-course-authoring.dto';
 import { randomBytes } from 'node:crypto';
 import { TrainingWebhookDeliveryService } from './training-webhook-delivery.service';
 
@@ -312,8 +314,23 @@ export class TrainingService {
     const course = await this.prisma.trainingCourse.findFirst({
       where: {
         id: courseId,
-        isPublished: true,
-        OR: [{ tenantId: null }, { tenantId }],
+        AND: [
+          { OR: [{ tenantId: null }, { tenantId }] },
+          {
+            OR: [
+              { isPublished: true },
+              {
+                pilots: {
+                  some: {
+                    tenantId,
+                    status: TrainingPilotStatus.ACTIVE,
+                    participantIds: { has: userId },
+                  },
+                },
+              },
+            ],
+          },
+        ],
       },
       include: {
         category: true,
@@ -828,8 +845,40 @@ export class TrainingService {
       throw new NotFoundException('Training quiz not found');
     }
 
+    const now = new Date();
+    if (quiz.availableFrom && quiz.availableFrom > now) {
+      throw new ForbiddenException('This assessment is not available yet');
+    }
+    if (quiz.availableUntil && quiz.availableUntil < now) {
+      throw new ForbiddenException('This assessment is no longer available');
+    }
+    if (quiz.attempts.some((item) => item.status === TrainingQuizAttemptStatus.IN_PROGRESS)) {
+      throw new ForbiddenException('An assessment attempt is already in progress');
+    }
+
     if (quiz.maxAttempts !== null && quiz.attempts.length >= quiz.maxAttempts) {
       throw new ForbiddenException('Max attempts reached for this quiz');
+    }
+
+    const latestAttempt = [...quiz.attempts].sort(
+      (a, b) => b.startedAt.getTime() - a.startedAt.getTime(),
+    )[0];
+    if (
+      quiz.cooldownMinutes &&
+      latestAttempt &&
+      (latestAttempt.submittedAt ?? latestAttempt.startedAt).getTime() + quiz.cooldownMinutes * 60_000 > now.getTime()
+    ) {
+      throw new ForbiddenException('The retry cooldown for this assessment is still active');
+    }
+
+    const orderedQuestions = quiz.shuffleQuestions
+      ? [...quiz.questions].sort(() => Math.random() - 0.5)
+      : quiz.questions;
+    const questions = quiz.randomQuestionCount
+      ? orderedQuestions.slice(0, quiz.randomQuestionCount)
+      : orderedQuestions;
+    if (questions.length === 0) {
+      throw new ForbiddenException('This assessment has no available questions');
     }
 
     const attempt = await this.prisma.trainingQuizAttempt.create({
@@ -841,11 +890,9 @@ export class TrainingService {
         expiresAt: quiz.timeLimitMinutes
           ? new Date(Date.now() + quiz.timeLimitMinutes * 60_000)
           : null,
+        questionIds: questions.map((question) => question.id),
       },
     });
-    const questions = quiz.shuffleQuestions
-      ? [...quiz.questions].sort(() => Math.random() - 0.5)
-      : quiz.questions;
     return {
       ...attempt,
       quiz: {
@@ -856,13 +903,15 @@ export class TrainingService {
         passingScore: quiz.passingScore,
         maxAttempts: quiz.maxAttempts,
         timeLimitMinutes: quiz.timeLimitMinutes,
-        shuffleQuestions: quiz.shuffleQuestions,
-        questions: questions.map((question) => ({
+          shuffleQuestions: quiz.shuffleQuestions,
+          shuffleOptions: quiz.shuffleOptions,
+          requireAllQuestions: quiz.requireAllQuestions,
+          questions: questions.map((question) => ({
           id: question.id,
           prompt: question.prompt,
           questionType: question.questionType,
           points: question.points,
-          options: question.options.map((option) => ({
+          options: (quiz.shuffleOptions ? [...question.options].sort(() => Math.random() - 0.5) : question.options).map((option) => ({
             id: option.id,
             label: option.label,
           })),
@@ -896,7 +945,7 @@ export class TrainingService {
     }
 
     const question = attempt.quiz.questions.find((item) => item.id === dto.questionId);
-    if (!question) {
+    if (!question || (attempt.questionIds.length > 0 && !attempt.questionIds.includes(question.id))) {
       throw new NotFoundException('Training quiz question not found');
     }
 
@@ -980,16 +1029,22 @@ export class TrainingService {
     if (attempt.status !== TrainingQuizAttemptStatus.IN_PROGRESS) {
       throw new ForbiddenException('This assessment attempt was already submitted');
     }
-    const unanswered = attempt.quiz.questions.filter(
+    const selectedQuestions = attempt.questionIds.length
+      ? attempt.quiz.questions.filter((question) => attempt.questionIds.includes(question.id))
+      : attempt.quiz.questions;
+    const unanswered = selectedQuestions.filter(
       (question) => !attempt.answers.some((answer) => answer.questionId === question.id),
     );
-    if (unanswered.length > 0) {
+    if (attempt.quiz.requireAllQuestions && unanswered.length > 0) {
       throw new ForbiddenException('Answer every question before submitting the assessment');
     }
-    const requiresManualReview = attempt.quiz.questions.some(
+    if (attempt.answers.length === 0) {
+      throw new ForbiddenException('Answer at least one question before submitting the assessment');
+    }
+    const requiresManualReview = selectedQuestions.some(
       (question) => question.requiresManualGrading,
     );
-    const totalPoints = attempt.quiz.questions.reduce((sum, question) => sum + question.points, 0);
+    const totalPoints = selectedQuestions.reduce((sum, question) => sum + question.points, 0);
     const earnedPoints = attempt.answers.reduce(
       (sum, answer) => sum + (answer.awardedPoints ?? 0),
       0,
@@ -1045,6 +1100,7 @@ export class TrainingService {
       include: {
         course: true,
         curriculum: true,
+        renewedFrom: { select: { id: true, certificateNumber: true } },
       },
       orderBy: { issuedAt: 'desc' },
     });
@@ -1052,12 +1108,20 @@ export class TrainingService {
     return {
       items: items.map((item) => ({
         id: item.id,
+        certificateNumber: item.certificateNumber,
         certificateUrl: item.certificateUrl,
         issuedAt: item.issuedAt,
         expiresAt: item.expiresAt,
         verificationCode: item.verificationCode,
+        issuedReason: item.issuedReason,
+        policyVersion: item.policyVersion,
+        evidenceSnapshot: item.evidenceSnapshot,
+        supersededAt: item.supersededAt,
+        renewedFrom: item.renewedFrom,
         status: item.revokedAt
           ? 'REVOKED'
+          : item.supersededAt
+            ? 'RENEWED'
           : item.expiresAt && item.expiresAt < new Date()
             ? 'EXPIRED'
             : 'VALID',
@@ -1065,6 +1129,44 @@ export class TrainingService {
         curriculum: item.curriculum ? { id: item.curriculum.id, title: item.curriculum.title } : null,
       })),
     };
+  }
+
+  async listMyPilots(tenantId: string, userId: string) {
+    const items = await this.prisma.trainingCoursePilot.findMany({
+      where: {
+        tenantId,
+        participantIds: { has: userId },
+        status: TrainingPilotStatus.ACTIVE,
+      },
+      include: {
+        course: { select: { id: true, title: true, summary: true, coverImageUrl: true } },
+        feedback: { where: { userId }, select: { id: true, rating: true, comment: true } },
+      },
+      orderBy: { activatedAt: 'desc' },
+    });
+    return { items };
+  }
+
+  async submitPilotFeedback(
+    tenantId: string,
+    userId: string,
+    pilotId: string,
+    dto: SubmitTrainingPilotFeedbackDto,
+  ) {
+    const pilot = await this.prisma.trainingCoursePilot.findFirst({
+      where: {
+        id: pilotId,
+        tenantId,
+        status: TrainingPilotStatus.ACTIVE,
+        participantIds: { has: userId },
+      },
+    });
+    if (!pilot) throw new NotFoundException('Active course pilot not found');
+    return this.prisma.trainingPilotFeedback.upsert({
+      where: { pilotId_userId: { pilotId, userId } },
+      update: dto,
+      create: { pilotId, userId, ...dto },
+    });
   }
 
   private async findAssignments(
@@ -1441,12 +1543,74 @@ export class TrainingService {
     userId: string,
     target: { courseId?: string; curriculumId?: string },
   ) {
+    let policy: any = null;
+    let evidence: Prisma.InputJsonValue = { source: 'CURRICULUM_COMPLETION' };
+    if (target.courseId) {
+      const course = await this.prisma.trainingCourse.findFirst({
+        where: { id: target.courseId, OR: [{ tenantId }, { tenantId: null }] },
+        include: {
+          certificationPolicy: true,
+          quizzes: { select: { id: true } },
+          modules: {
+            include: {
+              lessons: {
+                include: { progressRecords: { where: { tenantId, userId } } },
+              },
+            },
+          },
+        },
+      });
+      policy = course?.certificationPolicy;
+      if (!course || !policy?.isEnabled || !policy.autoIssue) return;
+
+      const requiredLessons = course.modules
+        .filter((module) => module.isRequired)
+        .flatMap((module) => module.lessons.filter((lesson) => lesson.isRequired));
+      const incompleteLessons = requiredLessons.filter(
+        (lesson) => !lesson.progressRecords[0]?.isCompleted,
+      );
+      if (policy.requireAllRequiredLessons && incompleteLessons.length > 0) return;
+
+      const attempts = course.quizzes.length
+        ? await this.prisma.trainingQuizAttempt.findMany({
+            where: {
+              tenantId,
+              userId,
+              quizId: { in: course.quizzes.map((quiz) => quiz.id) },
+              status: TrainingQuizAttemptStatus.GRADED,
+              passed: true,
+            },
+            orderBy: { gradedAt: 'desc' },
+          })
+        : [];
+      const passedQuizIds = new Set(attempts.map((attempt) => attempt.quizId));
+      if (
+        policy.requireAssessment &&
+        (course.quizzes.length === 0 || course.quizzes.some((quiz) => !passedQuizIds.has(quiz.id)))
+      ) return;
+
+      evidence = {
+        source: 'COURSE_COMPLETION',
+        courseId: course.id,
+        policyVersion: policy.version,
+        completedLessonIds: requiredLessons.map((lesson) => lesson.id),
+        assessmentAttempts: attempts.map((attempt) => ({
+          id: attempt.id,
+          quizId: attempt.quizId,
+          score: attempt.score,
+          gradedAt: attempt.gradedAt?.toISOString(),
+        })),
+      } as Prisma.InputJsonValue;
+    }
+
     const existing = await this.prisma.trainingCertificate.findFirst({
       where: {
         tenantId,
         userId,
         ...(target.courseId ? { courseId: target.courseId } : {}),
         ...(target.curriculumId ? { curriculumId: target.curriculumId } : {}),
+        revokedAt: null,
+        supersededAt: null,
       },
       select: { id: true },
     });
@@ -1455,17 +1619,34 @@ export class TrainingService {
       return;
     }
 
-    await this.prisma.trainingCertificate.create({
+    const now = new Date();
+    const verificationCode = randomBytes(6).toString('hex').toUpperCase();
+    const certificate = await this.prisma.trainingCertificate.create({
       data: {
         tenantId,
         userId,
         courseId: target.courseId,
         curriculumId: target.curriculumId,
-        verificationCode: randomBytes(6).toString('hex').toUpperCase(),
-        certificateUrl: `/certificates/verify/${target.courseId ?? target.curriculumId}`,
-        issuedAt: new Date(),
+        policyId: policy?.id,
+        policyVersion: policy?.version,
+        verificationCode,
+        certificateNumber: `CERT-${now.getUTCFullYear()}-${randomBytes(5).toString('hex').toUpperCase()}`,
+        certificateUrl: `/certificates/verify/${verificationCode}`,
+        issuedAt: now,
+        expiresAt: policy?.validityDays
+          ? new Date(now.getTime() + policy.validityDays * 86_400_000)
+          : null,
+        issuedReason: 'COMPLETION',
+        evidenceSnapshot: evidence,
       },
     });
+    await this.webhooks.publish(tenantId, 'certificate.issued', {
+      certificateId: certificate.id,
+      userId,
+      courseId: target.courseId,
+      curriculumId: target.curriculumId,
+      verificationCode,
+    }, `certificate-issued-${certificate.id}`);
   }
 
   private mapAssignmentRecord(assignment: any, course?: any, curriculum?: any) {

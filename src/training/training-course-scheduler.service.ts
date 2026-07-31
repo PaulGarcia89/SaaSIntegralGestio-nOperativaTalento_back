@@ -26,13 +26,14 @@ export class TrainingCourseSchedulerService implements OnModuleInit, OnModuleDes
     this.timer = null;
   }
 
-  async processDueCourses(now = new Date()) {
-    if (this.running) return;
+  async processDueCourses(now = new Date(), tenantId?: string) {
+    if (this.running) return { skipped: true, published: 0, retired: 0 };
     this.running = true;
     try {
       const [coursesToPublish, coursesToRetire] = await Promise.all([
         this.prisma.trainingCourse.findMany({
           where: {
+            tenantId,
             status: TrainingCourseStatus.SCHEDULED,
             scheduledPublishAt: { lte: now },
           },
@@ -40,6 +41,7 @@ export class TrainingCourseSchedulerService implements OnModuleInit, OnModuleDes
         }),
         this.prisma.trainingCourse.findMany({
           where: {
+            tenantId,
             status: {
               in: [TrainingCourseStatus.PUBLISHED, TrainingCourseStatus.PAUSED],
             },
@@ -104,8 +106,11 @@ export class TrainingCourseSchedulerService implements OnModuleInit, OnModuleDes
           `Processed scheduled courses: ${publishedCount} published, ${retiredCount} retired`,
         );
       }
+      return { skipped: false, published: publishedCount, retired: retiredCount };
     } catch (error) {
       this.logger.error('Unable to process scheduled courses', error);
+      if (tenantId) throw error;
+      return { skipped: false, published: 0, retired: 0, failed: true };
     } finally {
       this.running = false;
     }

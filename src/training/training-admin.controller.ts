@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -24,15 +25,23 @@ import {
   CreateTrainingContentBlockDto,
   CreateTrainingCourseDto,
   CreateTrainingCourseModuleDto,
+  CreateTrainingCompetencyDto,
+  CreateTrainingCoursePilotDto,
   CreateTrainingLessonDto,
   DuplicateTrainingCourseDto,
   ListTrainingAdminCoursesDto,
+  ReorderTrainingEntitiesDto,
+  RequestTrainingQualityReviewsDto,
   TrainingCourseTransitionOptionsDto,
   UpdateTrainingCategoryDto,
   UpdateTrainingContentBlockDto,
   UpdateTrainingCourseDto,
   UpdateTrainingCourseModuleDto,
+  UpdateTrainingCompetencyDto,
+  UpdateTrainingCourseDesignDto,
   UpdateTrainingLessonDto,
+  UpdateTrainingCoursePilotStatusDto,
+  DecideTrainingQualityReviewDto,
 } from './dto/training-course-authoring.dto';
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingAdminService } from './training-admin.service';
@@ -95,6 +104,39 @@ export class TrainingAdminController {
   ) {
     request.auditAction = 'TRAINING_COURSE_DUPLICATED';
     return this.service.duplicateCourse(this.tenantId(request), request.user, courseId, dto);
+  }
+
+  @Get('courses/:courseId/design')
+  @RequirePermissions('training.course.read')
+  getCourseDesign(@Req() request: RequestWithUser, @Param('courseId') courseId: string) {
+    return this.service.getCourseDesign(this.tenantId(request), request.user, courseId);
+  }
+
+  @Put('courses/:courseId/design')
+  @RequirePermissions('training.course.update')
+  updateCourseDesign(@Req() request: RequestWithUser, @Param('courseId') courseId: string, @Body() dto: UpdateTrainingCourseDesignDto) {
+    request.auditAction = 'TRAINING_COURSE_DESIGN_UPDATED';
+    return this.service.updateCourseDesign(this.tenantId(request), request.user, courseId, dto);
+  }
+
+  @Get('competencies')
+  @RequirePermissions('training.course.read')
+  listCompetencies(@Req() request: RequestWithUser) {
+    return this.service.listCompetencies(this.tenantId(request), request.user);
+  }
+
+  @Post('competencies')
+  @RequirePermissions('training.course.create')
+  createCompetency(@Req() request: RequestWithUser, @Body() dto: CreateTrainingCompetencyDto) {
+    request.auditAction = 'TRAINING_COMPETENCY_CREATED';
+    return this.service.createCompetency(this.tenantId(request), request.user, dto);
+  }
+
+  @Patch('competencies/:competencyId')
+  @RequirePermissions('training.course.update')
+  updateCompetency(@Req() request: RequestWithUser, @Param('competencyId') competencyId: string, @Body() dto: UpdateTrainingCompetencyDto) {
+    request.auditAction = 'TRAINING_COMPETENCY_UPDATED';
+    return this.service.updateCompetency(this.tenantId(request), request.user, competencyId, dto);
   }
 
   @Post('courses/:courseId/submit-review')
@@ -184,6 +226,52 @@ export class TrainingAdminController {
     return this.service.deleteCourse(this.tenantId(request), request.user, courseId);
   }
 
+  @Get('courses/:courseId/quality')
+  @RequirePermissions('training.course.read')
+  getCourseQuality(@Req() request: RequestWithUser, @Param('courseId') courseId: string) {
+    return this.service.getCourseQuality(this.tenantId(request), request.user, courseId);
+  }
+
+  @Post('courses/:courseId/quality/reviews')
+  @RequirePermissions('training.course.review')
+  requestQualityReviews(
+    @Req() request: RequestWithUser,
+    @Param('courseId') courseId: string,
+    @Body() dto: RequestTrainingQualityReviewsDto,
+  ) {
+    return this.service.requestQualityReviews(this.tenantId(request), request.user, courseId, dto);
+  }
+
+  @Patch('quality-reviews/:reviewId/decision')
+  @RequirePermissions('training.course.approve')
+  decideQualityReview(
+    @Req() request: RequestWithUser,
+    @Param('reviewId') reviewId: string,
+    @Body() dto: DecideTrainingQualityReviewDto,
+  ) {
+    return this.service.decideQualityReview(this.tenantId(request), request.user, reviewId, dto);
+  }
+
+  @Post('courses/:courseId/pilots')
+  @RequirePermissions('training.course.review')
+  createCoursePilot(
+    @Req() request: RequestWithUser,
+    @Param('courseId') courseId: string,
+    @Body() dto: CreateTrainingCoursePilotDto,
+  ) {
+    return this.service.createCoursePilot(this.tenantId(request), request.user, courseId, dto);
+  }
+
+  @Patch('course-pilots/:pilotId/status')
+  @RequirePermissions('training.course.review')
+  updateCoursePilotStatus(
+    @Req() request: RequestWithUser,
+    @Param('pilotId') pilotId: string,
+    @Body() dto: UpdateTrainingCoursePilotStatusDto,
+  ) {
+    return this.service.updateCoursePilotStatus(this.tenantId(request), request.user, pilotId, dto);
+  }
+
   @Post('courses/:courseId/modules')
   @RequirePermissions('training.course.update')
   createModule(
@@ -209,6 +297,22 @@ export class TrainingAdminController {
   @RequirePermissions('training.course.update')
   deleteModule(@Req() request: RequestWithUser, @Param('moduleId') moduleId: string) {
     return this.service.deleteModule(this.tenantId(request), request.user, moduleId);
+  }
+
+  @Post('modules/:moduleId/duplicate')
+  @RequirePermissions('training.course.update')
+  duplicateModule(@Req() request: RequestWithUser, @Param('moduleId') moduleId: string) {
+    return this.service.duplicateModule(this.tenantId(request), request.user, moduleId);
+  }
+
+  @Put('courses/:courseId/modules/order')
+  @RequirePermissions('training.course.update')
+  reorderModules(
+    @Req() request: RequestWithUser,
+    @Param('courseId') courseId: string,
+    @Body() dto: ReorderTrainingEntitiesDto,
+  ) {
+    return this.service.reorderModules(this.tenantId(request), request.user, courseId, dto);
   }
 
   @Post('modules/:moduleId/lessons')
@@ -237,6 +341,22 @@ export class TrainingAdminController {
     return this.service.deleteLesson(this.tenantId(request), request.user, lessonId);
   }
 
+  @Post('lessons/:lessonId/duplicate')
+  @RequirePermissions('training.course.update')
+  duplicateLesson(@Req() request: RequestWithUser, @Param('lessonId') lessonId: string) {
+    return this.service.duplicateLesson(this.tenantId(request), request.user, lessonId);
+  }
+
+  @Put('modules/:moduleId/lessons/order')
+  @RequirePermissions('training.course.update')
+  reorderLessons(
+    @Req() request: RequestWithUser,
+    @Param('moduleId') moduleId: string,
+    @Body() dto: ReorderTrainingEntitiesDto,
+  ) {
+    return this.service.reorderLessons(this.tenantId(request), request.user, moduleId, dto);
+  }
+
   @Post('lessons/:lessonId/blocks')
   @RequirePermissions('training.course.update')
   createBlock(
@@ -261,6 +381,22 @@ export class TrainingAdminController {
   @RequirePermissions('training.course.update')
   deleteBlock(@Req() request: RequestWithUser, @Param('blockId') blockId: string) {
     return this.service.deleteBlock(this.tenantId(request), request.user, blockId);
+  }
+
+  @Post('blocks/:blockId/duplicate')
+  @RequirePermissions('training.course.update')
+  duplicateBlock(@Req() request: RequestWithUser, @Param('blockId') blockId: string) {
+    return this.service.duplicateBlock(this.tenantId(request), request.user, blockId);
+  }
+
+  @Put('lessons/:lessonId/blocks/order')
+  @RequirePermissions('training.course.update')
+  reorderBlocks(
+    @Req() request: RequestWithUser,
+    @Param('lessonId') lessonId: string,
+    @Body() dto: ReorderTrainingEntitiesDto,
+  ) {
+    return this.service.reorderBlocks(this.tenantId(request), request.user, lessonId, dto);
   }
 
   @Get('categories')

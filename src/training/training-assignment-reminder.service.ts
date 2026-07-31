@@ -91,11 +91,76 @@ export class TrainingAssignmentReminderService
         sent += 1;
       }
       await this.processRenewals(now, policies);
+      await this.processCertificateReminders(now, since);
       if (sent) this.logger.log(`Sent ${sent} training due-date reminders`);
     } catch (error) {
       this.logger.error('Unable to process training reminders', error);
     } finally {
       this.running = false;
+    }
+  }
+
+  private async processCertificateReminders(now: Date, since: Date) {
+    const policies = await this.prisma.trainingCertificationPolicy.findMany({
+      where: { isEnabled: true, validityDays: { not: null } },
+    });
+    if (!policies.length) return;
+    const maximumReminderDays = Math.max(
+      1,
+      ...policies.flatMap((policy) => policy.reminderDays),
+    );
+    const certificates = await this.prisma.trainingCertificate.findMany({
+      where: {
+        policyId: { in: policies.map((policy) => policy.id) },
+        expiresAt: {
+          gt: now,
+          lte: new Date(now.getTime() + maximumReminderDays * 86_400_000),
+        },
+        revokedAt: null,
+        supersededAt: null,
+      },
+      include: { course: { select: { title: true } } },
+      take: 500,
+    });
+    const policyById = new Map(policies.map((policy) => [policy.id, policy]));
+    for (const certificate of certificates) {
+      const policy = certificate.policyId ? policyById.get(certificate.policyId) : null;
+      const daysRemaining = certificate.expiresAt
+        ? Math.ceil((certificate.expiresAt.getTime() - now.getTime()) / 86_400_000)
+        : null;
+      if (!policy || daysRemaining === null || !policy.reminderDays.includes(daysRemaining)) continue;
+      const duplicate = await this.prisma.notification.findFirst({
+        where: {
+          tenantId: certificate.tenantId,
+          userId: certificate.userId,
+          createdAt: { gte: since },
+          payload: { path: ['certificateId'], equals: certificate.id },
+        },
+        select: { id: true },
+      });
+      if (duplicate) continue;
+      await this.prisma.notification.create({
+        data: {
+          tenantId: certificate.tenantId,
+          userId: certificate.userId,
+          type: NotificationType.WARNING,
+          title: 'Certificado próximo a vencer',
+          message: `Tu certificado de “${certificate.course?.title ?? 'capacitación'}” vence en ${daysRemaining} días.`,
+          payload: {
+            kind: 'TRAINING_CERTIFICATE_EXPIRY_REMINDER',
+            certificateId: certificate.id,
+            courseId: certificate.courseId,
+            expiresAt: certificate.expiresAt?.toISOString(),
+            renewalEligible: daysRemaining <= policy.renewalWindowDays,
+          },
+        },
+      });
+      await this.webhooks.publish(certificate.tenantId, 'certificate.expiry_reminder', {
+        certificateId: certificate.id,
+        userId: certificate.userId,
+        courseId: certificate.courseId,
+        daysRemaining,
+      }, `certificate-expiry-${certificate.id}-${daysRemaining}`);
     }
   }
 
