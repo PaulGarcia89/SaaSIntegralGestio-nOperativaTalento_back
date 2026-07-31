@@ -61,11 +61,12 @@ export class BranchesService {
   }
 
   async findOne(id: string, tenantId: string, actor?: JwtPayload) {
+    const actorScope = actor ? this.branchScope(actor) : {};
     const branch = await this.prisma.branch.findFirst({
       where: {
         id,
         tenantId,
-        ...(actor ? this.branchScope(actor) : {}),
+        ...(Object.keys(actorScope).length > 0 ? { AND: [actorScope] } : {}),
       },
     });
 
@@ -76,18 +77,18 @@ export class BranchesService {
     return branch;
   }
 
-  async update(id: string, tenantId: string, dto: UpdateBranchDto) {
-    await this.findOne(id, tenantId);
+  async update(id: string, tenantId: string, actor: JwtPayload, dto: UpdateBranchDto) {
+    await this.findOne(id, tenantId, actor);
 
     return this.prisma.branch.update({
-      where: { id },
+      where: { id, tenantId },
       data: dto,
     });
   }
 
-  async remove(id: string, tenantId: string) {
-    await this.findOne(id, tenantId);
-    return this.prisma.branch.delete({ where: { id } });
+  async remove(id: string, tenantId: string, actor: JwtPayload) {
+    await this.findOne(id, tenantId, actor);
+    return this.prisma.branch.delete({ where: { id, tenantId } });
   }
 
   private branchScope(actor: JwtPayload): Prisma.BranchWhereInput {

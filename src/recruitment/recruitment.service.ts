@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InterviewStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { AccessScope } from '../common/enums/access-scope.enum';
 import {
   ListInterviewsDto,
   ReplaceVacancyResponsiblesDto,
@@ -25,8 +26,8 @@ const interviewInclude = {
 export class RecruitmentService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getVacancySetup(tenantId: string, vacancyId: string) {
-    await this.assertVacancy(tenantId, vacancyId);
+  async getVacancySetup(tenantId: string, actor: JwtPayload, vacancyId: string) {
+    await this.assertVacancy(tenantId, actor, vacancyId);
     return this.prisma.vacancy.findFirst({
       where: { id: vacancyId, tenantId },
       include: {
@@ -39,8 +40,8 @@ export class RecruitmentService {
     });
   }
 
-  async replaceStages(tenantId: string, vacancyId: string, dto: ReplaceVacancyStagesDto) {
-    await this.assertVacancy(tenantId, vacancyId);
+  async replaceStages(tenantId: string, actor: JwtPayload, vacancyId: string, dto: ReplaceVacancyStagesDto) {
+    await this.assertVacancy(tenantId, actor, vacancyId);
     const codes = dto.stages.map((stage) => stage.code.trim().toUpperCase());
     const positions = dto.stages.map((stage) => stage.position);
     if (new Set(codes).size !== codes.length || new Set(positions).size !== positions.length) {
@@ -69,13 +70,28 @@ export class RecruitmentService {
         });
       }
     });
-    return this.getVacancySetup(tenantId, vacancyId);
+    return this.getVacancySetup(tenantId, actor, vacancyId);
   }
 
-  async replaceResponsibles(tenantId: string, vacancyId: string, dto: ReplaceVacancyResponsiblesDto) {
-    await this.assertVacancy(tenantId, vacancyId);
+  async replaceResponsibles(tenantId: string, actor: JwtPayload, vacancyId: string, dto: ReplaceVacancyResponsiblesDto) {
+    const vacancy = await this.assertVacancy(tenantId, actor, vacancyId);
     const userIds = [...new Set(dto.responsibles.map((item) => item.userId))];
-    const count = await this.prisma.user.count({ where: { tenantId, id: { in: userIds } } });
+    const count = await this.prisma.user.count({
+      where: {
+        tenantId,
+        id: { in: userIds },
+        status: 'ACTIVE',
+        OR: [
+          { isSuperAdmin: true },
+          {
+            userRoles: {
+              some: { role: { code: { in: ['TENANT_ADMIN', 'ADMIN', 'PLATFORM_ADMIN'] } } },
+            },
+          },
+          { branchAccesses: { some: { branchId: vacancy.branchId } } },
+        ],
+      },
+    });
     if (count !== userIds.length) throw new BadRequestException('Every responsible must belong to the tenant');
     await this.prisma.$transaction([
       this.prisma.vacancyResponsible.deleteMany({ where: { vacancyId } }),
@@ -84,7 +100,7 @@ export class RecruitmentService {
         skipDuplicates: true,
       }),
     ]);
-    return this.getVacancySetup(tenantId, vacancyId);
+    return this.getVacancySetup(tenantId, actor, vacancyId);
   }
 
   async listInterviews(tenantId: string, actor: JwtPayload, query: ListInterviewsDto) {
@@ -96,6 +112,7 @@ export class RecruitmentService {
         application: query.vacancyId ? { vacancyId: query.vacancyId } : undefined,
         interviewerUserId: interviewerOnly ? actor.sub : query.interviewerUserId,
         status: query.status,
+        ...this.interviewBranchScope(actor),
       },
       include: interviewInclude,
       orderBy: { startsAt: 'asc' },
@@ -108,50 +125,77 @@ export class RecruitmentService {
     if (endsAt <= startsAt) throw new BadRequestException('endsAt must be after startsAt');
     const application = await this.prisma.vacancyApplication.findFirst({
       where: { id: dto.applicationId, tenantId },
-      select: { id: true, vacancyId: true },
+      select: { id: true, vacancyId: true, vacancy: { select: { branchId: true } } },
     });
     if (!application) throw new NotFoundException('Application not found');
-    const interviewer = await this.prisma.user.findFirst({ where: { id: dto.interviewerUserId, tenantId } });
+    this.assertActorCanAccessBranch(actor, application.vacancy.branchId);
+    const interviewer = await this.prisma.user.findFirst({
+      where: {
+        id: dto.interviewerUserId,
+        tenantId,
+        status: 'ACTIVE',
+        OR: [
+          { isSuperAdmin: true },
+          {
+            userRoles: {
+              some: { role: { code: { in: ['TENANT_ADMIN', 'ADMIN', 'PLATFORM_ADMIN'] } } },
+            },
+          },
+          { branchAccesses: { some: { branchId: application.vacancy.branchId } } },
+        ],
+      },
+    });
     if (!interviewer) throw new BadRequestException('Interviewer must belong to the tenant');
     if (dto.stageId) {
       const stage = await this.prisma.vacancyStage.findFirst({ where: { id: dto.stageId, vacancyId: application.vacancyId, tenantId } });
       if (!stage) throw new BadRequestException('Stage does not belong to the vacancy');
     }
-    const interview = await this.prisma.applicationInterview.create({
-      data: {
-        tenantId,
-        applicationId: dto.applicationId,
-        stageId: dto.stageId,
-        interviewerUserId: dto.interviewerUserId,
-        createdByUserId: actor.sub,
-        title: dto.title.trim(),
-        type: dto.type,
-        timezone: dto.timezone,
-        startsAt,
-        endsAt,
-        location: dto.location,
-        meetingUrl: dto.meetingUrl,
-        notes: dto.notes,
-      },
-      include: interviewInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const interview = await tx.applicationInterview.create({
+        data: {
+          tenantId,
+          applicationId: dto.applicationId,
+          stageId: dto.stageId,
+          interviewerUserId: dto.interviewerUserId,
+          createdByUserId: actor.sub,
+          title: dto.title.trim(),
+          type: dto.type,
+          timezone: dto.timezone,
+          startsAt,
+          endsAt,
+          location: dto.location,
+          meetingUrl: dto.meetingUrl,
+          notes: dto.notes,
+        },
+        include: interviewInclude,
+      });
+      await tx.vacancyApplication.update({
+        where: { id: dto.applicationId },
+        data: {
+          status: 'INTERVIEW',
+          interviewType: dto.type,
+          interviewScheduledAt: startsAt,
+          interviewerUserId: dto.interviewerUserId,
+          timelineEvents: {
+            create: {
+              type: 'INTERVIEW_SCHEDULED',
+              occurredAt: startsAt,
+              note: dto.title.trim(),
+            },
+          },
+        },
+      });
+      return interview;
     });
-    await this.prisma.vacancyApplication.update({
-      where: { id: dto.applicationId },
-      data: {
-        status: 'INTERVIEW',
-        interviewType: dto.type,
-        interviewScheduledAt: startsAt,
-        interviewerUserId: dto.interviewerUserId,
-      },
-    });
-    return interview;
   }
 
-  async updateInterview(tenantId: string, id: string, dto: UpdateInterviewDto) {
-    await this.assertInterview(tenantId, id);
+  async updateInterview(tenantId: string, actor: JwtPayload, id: string, dto: UpdateInterviewDto) {
+    const interview = await this.assertInterview(tenantId, actor, id);
     const startsAt = dto.startsAt ? this.parseDate(dto.startsAt, 'startsAt') : undefined;
     const endsAt = dto.endsAt ? this.parseDate(dto.endsAt, 'endsAt') : undefined;
-    if (startsAt && endsAt && endsAt <= startsAt) throw new BadRequestException('endsAt must be after startsAt');
+    const effectiveStartsAt = startsAt ?? interview.startsAt;
+    const effectiveEndsAt = endsAt ?? interview.endsAt;
+    if (effectiveEndsAt <= effectiveStartsAt) throw new BadRequestException('endsAt must be after startsAt');
     return this.prisma.applicationInterview.update({
       where: { id },
       data: { ...dto, startsAt, endsAt },
@@ -160,7 +204,7 @@ export class RecruitmentService {
   }
 
   async submitScorecard(tenantId: string, actor: JwtPayload, interviewId: string, dto: SubmitScorecardDto) {
-    const interview = await this.assertInterview(tenantId, interviewId);
+    const interview = await this.assertInterview(tenantId, actor, interviewId);
     const interviewerOnly = actor.roles.includes('INTERVIEWER') || actor.role === 'INTERVIEWER';
     if (interviewerOnly && interview.interviewerUserId !== actor.sub) {
       throw new NotFoundException('Interview not found');
@@ -184,16 +228,52 @@ export class RecruitmentService {
     return scorecard;
   }
 
-  private async assertVacancy(tenantId: string, id: string) {
-    const vacancy = await this.prisma.vacancy.findFirst({ where: { id, tenantId }, select: { id: true } });
+  private async assertVacancy(tenantId: string, actor: JwtPayload, id: string) {
+    const vacancy = await this.prisma.vacancy.findFirst({
+      where: { id, tenantId, ...this.vacancyBranchScope(actor) },
+      select: { id: true, branchId: true },
+    });
     if (!vacancy) throw new NotFoundException('Vacancy not found');
     return vacancy;
   }
 
-  private async assertInterview(tenantId: string, id: string) {
-    const interview = await this.prisma.applicationInterview.findFirst({ where: { id, tenantId } });
+  private async assertInterview(tenantId: string, actor: JwtPayload, id: string) {
+    const interview = await this.prisma.applicationInterview.findFirst({
+      where: { id, tenantId, ...this.interviewBranchScope(actor) },
+    });
     if (!interview) throw new NotFoundException('Interview not found');
     return interview;
+  }
+
+  private vacancyBranchScope(actor: JwtPayload): Prisma.VacancyWhereInput {
+    if (actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH) return {};
+    return { branchId: { in: actor.allowedBranchIds } };
+  }
+
+  private interviewBranchScope(actor: JwtPayload): Prisma.ApplicationInterviewWhereInput {
+    const branchScope =
+      actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH
+        ? {}
+        : {
+            AND: [
+              { application: { vacancy: { branchId: { in: actor.allowedBranchIds } } } },
+            ],
+          };
+    const interviewerScope =
+      actor.roles.includes('INTERVIEWER') || actor.role === 'INTERVIEWER'
+        ? { interviewerUserId: actor.sub }
+        : {};
+    return { ...branchScope, ...interviewerScope };
+  }
+
+  private assertActorCanAccessBranch(actor: JwtPayload, branchId: string) {
+    if (
+      !actor.isSuperAdmin &&
+      actor.scope === AccessScope.BRANCH &&
+      !actor.allowedBranchIds.includes(branchId)
+    ) {
+      throw new ForbiddenException('Branch is outside the actor access scope');
+    }
   }
 
   private parseDate(value: string, field: string) {

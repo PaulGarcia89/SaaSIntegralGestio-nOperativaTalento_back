@@ -213,6 +213,7 @@ export class ApplicationsService {
     tenantId: string,
     dto: BulkUpdateApplicationsDto,
   ) {
+    this.assertStatusCanBeChangedDirectly(dto.status);
     const ids = [...new Set(dto.ids)];
     const where: Prisma.VacancyApplicationWhereInput = {
       id: { in: ids },
@@ -323,6 +324,7 @@ export class ApplicationsService {
   }
 
   async updateStatus(id: string, actor: JwtPayload, tenantId: string, dto: UpdateApplicationStatusDto) {
+    this.assertStatusCanBeChangedDirectly(dto.status);
     await this.assertBelongsToTenant(id, actor, tenantId);
     await this.assertInterviewerBelongsToTenant(dto.interview?.interviewerUserId, tenantId);
 
@@ -363,6 +365,7 @@ export class ApplicationsService {
     branchId: string,
     dto: UpdateApplicationStatusDto,
   ) {
+    this.assertStatusCanBeChangedDirectly(dto.status);
     await this.assertBelongsToBranch(id, tenantId, branchId);
 
     await this.prisma.vacancyApplication.update({
@@ -450,6 +453,14 @@ export class ApplicationsService {
     }
 
     return data;
+  }
+
+  private assertStatusCanBeChangedDirectly(status: ApplicationStatus) {
+    if (status === ApplicationStatus.HIRED) {
+      throw new BadRequestException(
+        'Use the hiring workflow to mark an application as hired and create the employee',
+      );
+    }
   }
 
   private async replaceTimelineEvents(

@@ -8,10 +8,7 @@ import { UpdateRoleDto } from './dto/update-role.dto';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 
 const PROTECTED_ROLE_CODES = new Set(['SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN']);
-const PLATFORM_PERMISSION_CODES = new Set([
-  'platform.tenant.switch',
-  'platform.tenant.impersonate',
-]);
+const PLATFORM_PERMISSION_PREFIXES = ['platform.'];
 
 @Injectable()
 export class RolesService {
@@ -178,7 +175,7 @@ export class RolesService {
         })
       : [];
     const includesPlatformPermission = permissions.some((permission) =>
-      PLATFORM_PERMISSION_CODES.has(permission.code),
+      PLATFORM_PERMISSION_PREFIXES.some((prefix) => permission.code.startsWith(prefix)),
     );
 
     if (includesPlatformPermission && !actor.isSuperAdmin) {
@@ -187,6 +184,21 @@ export class RolesService {
         ErrorCode.PERMISSION_DENIED,
         HttpStatus.FORBIDDEN,
       );
+    }
+
+    if (!actor.isSuperAdmin) {
+      const actorPermissions = new Set(actor.permissions);
+      const unownedPermission = permissions.find(
+        (permission) => !actorPermissions.has(permission.code),
+      );
+
+      if (unownedPermission) {
+        throw new AppException(
+          `Actor cannot grant permission ${unownedPermission.code}`,
+          ErrorCode.PERMISSION_DENIED,
+          HttpStatus.FORBIDDEN,
+        );
+      }
     }
 
     if (normalizedRoleCode === 'TENANT_ADMIN' && includesPlatformPermission) {

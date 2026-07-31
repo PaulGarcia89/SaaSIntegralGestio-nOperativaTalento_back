@@ -19,6 +19,13 @@ import { JwtStrategy } from '../../src/auth/strategies/jwt.strategy';
 import { ApplicationsService } from '../../src/applications/applications.service';
 import { VacanciesService } from '../../src/vacancies/vacancies.service';
 import { EmployeesService } from '../../src/employees/employees.service';
+import { BranchesService } from '../../src/branches/branches.service';
+import { RolesService } from '../../src/roles/roles.service';
+import { deriveAccessScope, deriveRoleScope } from '../../src/common/auth/role-scope.util';
+import { AccessScope } from '../../src/common/enums/access-scope.enum';
+import { RoleScope } from '../../src/common/enums/role-scope.enum';
+import { RecruitmentService } from '../../src/recruitment/recruitment.service';
+import { WorkflowsService } from '../../src/workflows/workflows.service';
 import { actorFixture, actorsByRole, rbacFixtures } from './rbac.fixtures';
 
 type AsyncTest = { name: string; run: () => void | Promise<void> };
@@ -54,6 +61,14 @@ test('fixtures include every required role and synthetic resource family', () =>
   assert.notEqual(rbacFixtures.candidates.a.tenantId, rbacFixtures.candidates.b.tenantId);
   assert.equal(rbacFixtures.interviews.unassigned.interviewerId, null);
   assert.equal(rbacFixtures.subscriptions.expired.state, SubscriptionAccessState.PAST_DUE);
+});
+
+test('business branch administrators resolve to branch scope consistently', () => {
+  for (const role of ['HR_MANAGER', 'SUPERVISOR']) {
+    const roleScope = deriveRoleScope([role], false);
+    assert.equal(roleScope, RoleScope.BRANCH_ADMIN);
+    assert.equal(deriveAccessScope(roleScope, false), AccessScope.BRANCH);
+  }
 });
 
 test('401 when tenant guard has no authenticated actor', async () => {
@@ -142,6 +157,23 @@ test('blocks a module that is not contracted', async () => {
       guard.canActivate(
         context({
           user: actorFixture('INVENTORY_MANAGER', {
+            enabledModules: [ModuleCode.ATS],
+          }),
+        }),
+      ),
+    403,
+  );
+});
+
+test('requires every module declared by a composite business flow', async () => {
+  const guard = new ModuleAccessGuard(
+    reflector({ [ACCESS_MODULE_KEY]: [ModuleCode.ATS, ModuleCode.ONBOARDING] }),
+  );
+  await expectStatus(
+    () =>
+      guard.canActivate(
+        context({
+          user: actorFixture('HR_MANAGER', {
             enabledModules: [ModuleCode.ATS],
           }),
         }),
@@ -289,6 +321,183 @@ test('vacancy reads bind resource id, tenant id and assigned branch in one query
   assert.deepEqual(capturedWhere.branchId, { in: [rbacFixtures.branches.a1.id] });
 });
 
+test('recruitment vacancy setup is restricted to assigned branches', async () => {
+  let capturedWhere: any;
+  const service = new RecruitmentService({
+    vacancy: {
+      findFirst: async ({ where }: any) => {
+        capturedWhere = where;
+        return null;
+      },
+    },
+  } as any);
+
+  await expectStatus(
+    () =>
+      service.getVacancySetup(
+        rbacFixtures.tenants.a.id,
+        actorFixture('HR_MANAGER'),
+        rbacFixtures.vacancies.a.id,
+      ),
+    404,
+  );
+  assert.equal(capturedWhere.id, rbacFixtures.vacancies.a.id);
+  assert.equal(capturedWhere.tenantId, rbacFixtures.tenants.a.id);
+  assert.deepEqual(capturedWhere.branchId, {
+    in: [rbacFixtures.branches.a1.id],
+  });
+});
+
+test('interview scheduling rejects applications outside the actor branch scope', async () => {
+  let interviewerQueries = 0;
+  const service = new RecruitmentService({
+    vacancyApplication: {
+      findFirst: async () => ({
+        id: 'application-a2',
+        vacancyId: 'vacancy-a2',
+        vacancy: { branchId: rbacFixtures.branches.a2.id },
+      }),
+    },
+    user: {
+      findFirst: async () => {
+        interviewerQueries += 1;
+        return { id: 'interviewer-a2' };
+      },
+    },
+  } as any);
+
+  await expectStatus(
+    () =>
+      service.scheduleInterview(
+        rbacFixtures.tenants.a.id,
+        actorFixture('HR_MANAGER'),
+        {
+          applicationId: '00000000-0000-4000-8000-000000000001',
+          interviewerUserId: '00000000-0000-4000-8000-000000000002',
+          title: 'Interview',
+          type: 'VIRTUAL',
+          timezone: 'America/New_York',
+          startsAt: '2026-08-01T14:00:00.000Z',
+          endsAt: '2026-08-01T15:00:00.000Z',
+        } as any,
+      ),
+    403,
+  );
+  assert.equal(interviewerQueries, 0);
+});
+
+test('candidate conversion cannot move an application to another branch', async () => {
+  let employeeWrites = 0;
+  const tx = {
+    branch: {
+      findFirst: async () => rbacFixtures.branches.a1,
+    },
+    vacancyApplication: {
+      findFirst: async () => ({
+        id: 'application-approved',
+        tenantId: rbacFixtures.tenants.a.id,
+        status: 'APPROVED',
+        vacancyId: 'vacancy-a2',
+        candidate: {
+          id: 'candidate-a',
+          fullName: 'Candidate A',
+          email: 'candidate@example.test',
+        },
+        vacancy: {
+          id: 'vacancy-a2',
+          branchId: rbacFixtures.branches.a2.id,
+        },
+      }),
+    },
+    employee: {
+      create: async () => {
+        employeeWrites += 1;
+      },
+    },
+  };
+  const service = new WorkflowsService({
+    $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
+  } as any);
+
+  await expectStatus(
+    () =>
+      service.createHiringWorkflow(
+        rbacFixtures.tenants.a.id,
+        actorFixture('HR_MANAGER'),
+        {
+          applicationId: '00000000-0000-4000-8000-000000000003',
+          branchId: rbacFixtures.branches.a1.id,
+          jobTitle: 'Analyst',
+        },
+      ),
+    400,
+  );
+  assert.equal(employeeWrites, 0);
+});
+
+test('branch update binds id, tenant and actor branch assignment before write', async () => {
+  let capturedReadWhere: any;
+  let writes = 0;
+  const service = new BranchesService({
+    branch: {
+      findFirst: async ({ where }: any) => {
+        capturedReadWhere = where;
+        return null;
+      },
+      update: async () => {
+        writes += 1;
+      },
+    },
+  } as any);
+
+  await expectStatus(
+    () =>
+      service.update(
+        rbacFixtures.branches.a2.id,
+        rbacFixtures.tenants.a.id,
+        actorFixture('HR_MANAGER'),
+        { name: 'Blocked' },
+      ),
+    404,
+  );
+
+  assert.equal(capturedReadWhere.id, rbacFixtures.branches.a2.id);
+  assert.equal(capturedReadWhere.tenantId, rbacFixtures.tenants.a.id);
+  assert.deepEqual(capturedReadWhere.AND, [
+    { id: { in: [rbacFixtures.branches.a1.id] } },
+  ]);
+  assert.equal(writes, 0);
+});
+
+test('tenant role administrators cannot grant permissions they do not own', async () => {
+  const service = new RolesService(
+    {
+      permission: {
+        count: async () => 1,
+        findMany: async () => [{ code: 'subscriptions.delete' }],
+      },
+    } as any,
+    new AccessControlService(),
+  );
+  const actor = actorFixture('TENANT_ADMIN', {
+    permissions: ['roles.create'],
+  });
+
+  await expectStatus(
+    () =>
+      service.create(
+        {
+          code: 'CUSTOM_OPERATIONS',
+          name: 'Custom operations',
+          permissionIds: ['permission-subscriptions-delete'],
+        },
+        actor,
+        rbacFixtures.tenants.a.id,
+      ),
+    403,
+  );
+});
+
 test('candidate portal queries only applications owned by the authenticated candidate account', async () => {
   let capturedWhere: any;
   const service = new ApplicationsService({
@@ -397,6 +606,35 @@ test('bulk application changes are all-or-nothing across tenant boundaries', asy
       } as any),
     404,
   );
+  assert.equal(writes, 0);
+});
+
+test('an application cannot be marked hired without creating its employee workflow', async () => {
+  let reads = 0;
+  let writes = 0;
+  const service = new ApplicationsService({
+    vacancyApplication: {
+      findFirst: async () => {
+        reads += 1;
+        return { id: 'application-approved' };
+      },
+      update: async () => {
+        writes += 1;
+      },
+    },
+  } as any);
+
+  await expectStatus(
+    () =>
+      service.updateStatus(
+        'application-approved',
+        actorFixture('HR_MANAGER'),
+        rbacFixtures.tenants.a.id,
+        { status: 'HIRED' } as any,
+      ),
+    400,
+  );
+  assert.equal(reads, 0);
   assert.equal(writes, 0);
 });
 

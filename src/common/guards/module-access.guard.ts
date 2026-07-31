@@ -11,7 +11,7 @@ export class ModuleAccessGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredModule = this.reflector.getAllAndOverride<ModuleCode>(ACCESS_MODULE_KEY, [
+    const requiredModule = this.reflector.getAllAndOverride<ModuleCode | ModuleCode[]>(ACCESS_MODULE_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
@@ -27,9 +27,12 @@ export class ModuleAccessGuard implements CanActivate {
 
     const enabledModules = request.subscription?.modules ?? request.user?.enabledModules ?? [];
 
-    if (!enabledModules.includes(requiredModule)) {
+    const requiredModules = Array.isArray(requiredModule) ? requiredModule : [requiredModule];
+    const missingModule = requiredModules.find((moduleCode) => !enabledModules.includes(moduleCode));
+
+    if (missingModule) {
       throw new AppException(
-        `Module ${requiredModule} is not enabled for this tenant plan`,
+        `Module ${missingModule} is not enabled for this tenant plan`,
         ErrorCode.MODULE_NOT_ENABLED,
         HttpStatus.FORBIDDEN,
       );

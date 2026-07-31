@@ -16,7 +16,7 @@ import { WorkflowsService } from './workflows.service';
 import { WorkflowStageKey } from '@prisma/client';
 import { ModuleCode } from '@prisma/client';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
-import { RequireModule } from '../common/decorators/module-access.decorator';
+import { RequireModule, RequireModules } from '../common/decorators/module-access.decorator';
 
 @Controller('workflows')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, PermissionGuard)
@@ -25,10 +25,24 @@ export class WorkflowsController {
   constructor(private readonly workflowsService: WorkflowsService) {}
 
   @Post('hiring')
-  @RequireModule(ModuleCode.ATS)
+  @RequireModules(ModuleCode.ATS, ModuleCode.ONBOARDING)
   @RequirePermissions('applications.update')
   createHiring(@Req() request: RequestWithUser, @Body() dto: CreateHiringWorkflowDto) {
     return this.workflowsService.createHiringWorkflow(request.tenant!.id, request.user, dto);
+  }
+
+  @Get('hiring/context/:applicationId')
+  @RequireModules(ModuleCode.ATS, ModuleCode.ONBOARDING)
+  @RequirePermissions('applications.update')
+  getHiringContext(
+    @Req() request: RequestWithUser,
+    @Param('applicationId') applicationId: string,
+  ) {
+    return this.workflowsService.getHiringContext(
+      request.tenant!.id,
+      request.user,
+      applicationId,
+    );
   }
 
   @Post('branch-transfer')

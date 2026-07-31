@@ -1380,6 +1380,8 @@ model OnboardingTask {
   ownerType        WorkflowOwnerType  @default(SYSTEM)
   ownerId          String?
   blockingReason   String?
+  required         Boolean            @default(true)
+  sortOrder        Int                @default(0)
   metadata         Json?
   dependsOnKeys    Json?
   createdAt        DateTime           @default(now())
@@ -1455,6 +1457,10 @@ model EmployeeDocument {
   checksum         String
   scanStatus       String
   status           String          @default("PENDING_REVIEW")
+  version          Int             @default(1)
+  replacesDocumentId String?
+  rejectionReason String?
+  deletedAt        DateTime?
   uploadedById     String
   expiresAt        DateTime?
   reviewedAt       DateTime?
@@ -1467,10 +1473,13 @@ model EmployeeDocument {
   employee         Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   onboardingFlow   OnboardingFlow? @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
   task             OnboardingTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  replacesDocument EmployeeDocument? @relation("EmployeeDocumentVersions", fields: [replacesDocumentId], references: [id], onDelete: SetNull)
+  replacementDocuments EmployeeDocument[] @relation("EmployeeDocumentVersions")
 
   @@unique([tenantId, storageKey])
   @@index([tenantId, employeeId, status])
   @@index([onboardingFlowId, createdAt])
+  @@index([replacesDocumentId])
 }
 
 model SignaturePackage {

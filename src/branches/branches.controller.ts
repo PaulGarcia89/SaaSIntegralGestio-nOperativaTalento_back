@@ -39,12 +39,12 @@ export class BranchesController {
   @Patch(':id')
   @RequirePermissions('branches.update')
   update(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: UpdateBranchDto) {
-    return this.branchesService.update(id, request.tenant!.id, dto);
+    return this.branchesService.update(id, request.tenant!.id, request.user, dto);
   }
 
   @Delete(':id')
   @RequirePermissions('branches.delete')
   remove(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.branchesService.remove(id, request.tenant!.id);
+    return this.branchesService.remove(id, request.tenant!.id, request.user);
   }
 }

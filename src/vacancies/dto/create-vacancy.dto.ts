@@ -1,5 +1,13 @@
-import { VacancyEmploymentType, VacancyStatus, VacancyWorkMode } from '@prisma/client';
 import {
+  VacancyEmploymentType,
+  VacancyResponsibleRole,
+  VacancyStatus,
+  VacancyWorkMode,
+} from '@prisma/client';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -13,6 +21,40 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { VacancyApplicationFormSchemaDto } from './vacancy-form-schema.dto';
+
+export class CreateVacancyStageDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(60)
+  code!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name!: string;
+
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  position!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  color?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isTerminal?: boolean;
+}
+
+export class CreateVacancyResponsibleDto {
+  @IsUUID()
+  userId!: string;
+
+  @IsEnum(VacancyResponsibleRole)
+  role!: VacancyResponsibleRole;
+}
 
 export class CreateVacancyDto {
   @IsUUID()
@@ -110,4 +152,18 @@ export class CreateVacancyDto {
   @IsOptional()
   @IsEnum(VacancyStatus)
   status?: VacancyStatus;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CreateVacancyStageDto)
+  stages?: CreateVacancyStageDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreateVacancyResponsibleDto)
+  responsibles?: CreateVacancyResponsibleDto[];
 }

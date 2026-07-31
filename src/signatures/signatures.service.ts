@@ -136,7 +136,14 @@ export class SignaturesService {
           const flowId = participant.signaturePackage.onboardingFlowId;
           await tx.onboardingTask.updateMany({ where: { onboardingFlowId: flowId, taskKey: 'electronic-signature' }, data: { status: WorkflowTaskStatus.COMPLETED, progressPercent: 100, completedAt: now } });
           const incompleteTasks = await tx.onboardingTask.count({ where: { onboardingFlowId: flowId, status: { not: WorkflowTaskStatus.COMPLETED } } });
-          await tx.onboardingFlow.update({ where: { id: flowId }, data: { status: incompleteTasks === 0 ? WorkflowTaskStatus.COMPLETED : WorkflowTaskStatus.IN_PROGRESS, readinessStatus: incompleteTasks === 0 ? 'READY' : 'IN_PROGRESS', completedAt: incompleteTasks === 0 ? now : null } });
+          await tx.onboardingFlow.update({
+            where: { id: flowId },
+            data: {
+              status: WorkflowTaskStatus.IN_PROGRESS,
+              readinessStatus: incompleteTasks === 0 ? 'READY_FOR_REVIEW' : 'IN_PROGRESS',
+              completedAt: null,
+            },
+          });
         }
         await tx.signatureAuditEvent.create({ data: { tenantId: participant.tenantId, packageId: participant.packageId, action: 'PACKAGE_COMPLETED', outcome: 'SUCCESS', evidence: { completedAt: now.toISOString() } } });
       } else {

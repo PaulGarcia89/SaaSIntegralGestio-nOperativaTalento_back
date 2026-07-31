@@ -1,5 +1,15 @@
 import { WorkflowSourceModule } from '@prisma/client';
-import { IsEmail, IsEnum, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import {
+  IsDateString,
+  IsEmail,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateHiringWorkflowDto {
   @IsOptional()
@@ -30,6 +40,14 @@ export class CreateHiringWorkflowDto {
   @IsOptional()
   @IsUUID()
   supervisorUserId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  onboardingTemplateId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  employmentStartDate?: string;
 
   @IsOptional()
   @IsEnum(WorkflowSourceModule)

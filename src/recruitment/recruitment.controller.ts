@@ -30,19 +30,19 @@ export class RecruitmentController {
   @Get('vacancies/:id/setup')
   @RequirePermissions('vacancies.read')
   getSetup(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.service.getVacancySetup(request.tenant!.id, id);
+    return this.service.getVacancySetup(request.tenant!.id, request.user, id);
   }
 
   @Put('vacancies/:id/stages')
   @RequirePermissions('vacancies.update')
   replaceStages(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ReplaceVacancyStagesDto) {
-    return this.service.replaceStages(request.tenant!.id, id, dto);
+    return this.service.replaceStages(request.tenant!.id, request.user, id, dto);
   }
 
   @Put('vacancies/:id/responsibles')
   @RequirePermissions('vacancies.update')
   replaceResponsibles(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ReplaceVacancyResponsiblesDto) {
-    return this.service.replaceResponsibles(request.tenant!.id, id, dto);
+    return this.service.replaceResponsibles(request.tenant!.id, request.user, id, dto);
   }
 
   @Get('interviews')
@@ -59,8 +59,8 @@ export class RecruitmentController {
 
   @Patch('interviews/:id')
   @RequirePermissions('applications.update')
-  update(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: UpdateInterviewDto) {
-    return this.service.updateInterview(request.tenant!.id, id, dto);
+  update(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Body() dto: UpdateInterviewDto) {
+    return this.service.updateInterview(request.tenant!.id, actor, id, dto);
   }
 
   @Put('interviews/:id/scorecard')

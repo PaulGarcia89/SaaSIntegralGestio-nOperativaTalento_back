@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
@@ -19,45 +24,92 @@ export class VacanciesService {
     await this.planLimits?.assertCapacity(tenantId, 'maxActiveVacancies');
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
     this.assertActorCanAccessBranch(actor, dto.branchId);
+    this.assertUniqueStages(dto.stages ?? []);
+    await this.assertResponsiblesCanAccessBranch(
+      tenantId,
+      dto.branchId,
+      dto.responsibles ?? [],
+    );
 
     const applicationFormSchema = this.normalizeApplicationFormSchema(dto.applicationFormSchema);
 
-    return this.prisma.vacancy.create({
-      data: {
-        tenantId,
-        branchId: dto.branchId,
-        createdByUserId: actor.sub,
-        title: dto.title,
-        summary: dto.summary,
-        description: dto.description,
-        requirements: dto.requirements,
-        responsibilities: dto.responsibilities,
-        benefits: dto.benefits,
-        city: dto.city,
-        country: dto.country,
-        department: dto.department,
-        seniority: dto.seniority,
-        workMode: dto.workMode,
-        employmentType: dto.employmentType,
-        openings: dto.openings,
-        salaryMin: dto.salaryMin,
-        salaryMax: dto.salaryMax,
-        currency: dto.currency,
-        imageUrl: dto.imageUrl,
-        applicationFormSchema,
-        status: dto.status,
-      },
-      include: {
-        branch: true,
-        createdByUser: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
+    return this.prisma.$transaction(async (tx) => {
+      const vacancy = await tx.vacancy.create({
+        data: {
+          tenantId,
+          branchId: dto.branchId,
+          createdByUserId: actor.sub,
+          title: dto.title,
+          summary: dto.summary,
+          description: dto.description,
+          requirements: dto.requirements,
+          responsibilities: dto.responsibilities,
+          benefits: dto.benefits,
+          city: dto.city,
+          country: dto.country,
+          department: dto.department,
+          seniority: dto.seniority,
+          workMode: dto.workMode,
+          employmentType: dto.employmentType,
+          openings: dto.openings,
+          salaryMin: dto.salaryMin,
+          salaryMax: dto.salaryMax,
+          currency: dto.currency,
+          imageUrl: dto.imageUrl,
+          applicationFormSchema,
+          status: dto.status,
+        },
+      });
+
+      if (dto.stages?.length) {
+        await tx.vacancyStage.createMany({
+          data: dto.stages.map((stage) => ({
+            tenantId,
+            vacancyId: vacancy.id,
+            code: stage.code.trim().toUpperCase(),
+            name: stage.name.trim(),
+            position: stage.position,
+            color: stage.color,
+            isTerminal: stage.isTerminal ?? false,
+          })),
+        });
+      }
+
+      if (dto.responsibles?.length) {
+        await tx.vacancyResponsible.createMany({
+          data: dto.responsibles.map((responsible) => ({
+            tenantId,
+            vacancyId: vacancy.id,
+            userId: responsible.userId,
+            role: responsible.role,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return tx.vacancy.findUniqueOrThrow({
+        where: { id: vacancy.id },
+        include: {
+          branch: true,
+          createdByUser: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          stages: { orderBy: { position: 'asc' } },
+          responsibles: {
+            include: {
+              user: {
+                select: { id: true, email: true, firstName: true, lastName: true },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
           },
         },
-      },
+      });
     });
   }
 
@@ -346,6 +398,48 @@ export class VacanciesService {
       !actor.allowedBranchIds.includes(branchId)
     ) {
       throw new ForbiddenException('Branch is outside the actor access scope');
+    }
+  }
+
+  private assertUniqueStages(stages: NonNullable<CreateVacancyDto['stages']>) {
+    const codes = stages.map((stage) => stage.code.trim().toUpperCase());
+    const positions = stages.map((stage) => stage.position);
+    if (new Set(codes).size !== codes.length || new Set(positions).size !== positions.length) {
+      throw new BadRequestException('Stage codes and positions must be unique');
+    }
+  }
+
+  private async assertResponsiblesCanAccessBranch(
+    tenantId: string,
+    branchId: string,
+    responsibles: NonNullable<CreateVacancyDto['responsibles']>,
+  ) {
+    const userIds = [...new Set(responsibles.map((item) => item.userId))];
+    if (userIds.length === 0) {
+      return;
+    }
+
+    const count = await this.prisma.user.count({
+      where: {
+        tenantId,
+        id: { in: userIds },
+        status: 'ACTIVE',
+        OR: [
+          { isSuperAdmin: true },
+          {
+            userRoles: {
+              some: { role: { code: { in: ['TENANT_ADMIN', 'ADMIN', 'PLATFORM_ADMIN'] } } },
+            },
+          },
+          { branchAccesses: { some: { branchId } } },
+        ],
+      },
+    });
+
+    if (count !== userIds.length) {
+      throw new BadRequestException(
+        'Every responsible must be active and have access to the vacancy branch',
+      );
     }
   }
 

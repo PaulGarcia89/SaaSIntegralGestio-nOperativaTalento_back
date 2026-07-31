@@ -3,7 +3,10 @@ import { RoleScope } from '../enums/role-scope.enum';
 
 const PLATFORM_ADMIN_CODES = new Set(['SUPERADMIN', 'PLATFORM_ADMIN']);
 const TENANT_ADMIN_CODES = new Set(['TENANT_ADMIN', 'ADMIN']);
-const BRANCH_ADMIN_CODES = new Set(['BRANCH_ADMIN']);
+// These business roles administer operational data for one or more explicitly
+// assigned branches. Keeping the mapping here makes the authorization context
+// consistent for guards, navigation and service-level filters.
+const BRANCH_ADMIN_CODES = new Set(['BRANCH_ADMIN', 'HR_MANAGER', 'SUPERVISOR']);
 const BRANCH_USER_CODES = new Set(['BRANCH_USER']);
 
 export function deriveRoleScope(roleCodes: string[], isSuperAdmin: boolean): RoleScope {

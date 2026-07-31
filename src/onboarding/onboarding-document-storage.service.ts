@@ -1,7 +1,7 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 @Injectable()
@@ -49,5 +49,19 @@ export class OnboardingDocumentStorageService {
     const absolute = path.resolve(root, key);
     if (!absolute.startsWith(`${root}${path.sep}`)) throw new ServiceUnavailableException('Unsafe document storage path');
     return readFile(absolute);
+  }
+
+  async delete(key: string) {
+    if (this.driver === 's3') {
+      if (!this.client) throw new ServiceUnavailableException('Document storage is not configured');
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+      return;
+    }
+    const root = path.resolve(process.env.DOCUMENT_STORAGE_ROOT ?? path.join(process.cwd(), 'storage', 'documents'));
+    const absolute = path.resolve(root, key);
+    if (!absolute.startsWith(`${root}${path.sep}`)) throw new ServiceUnavailableException('Unsafe document storage path');
+    await unlink(absolute).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
   }
 }
