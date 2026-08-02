@@ -311,6 +311,42 @@ enum HiringManagerApprovalStatus {
   CHANGES_REQUESTED
 }
 
+enum JobOfferStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  COUNTERED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum JobOfferVersionSource {
+  EMPLOYER
+  CANDIDATE
+}
+
+enum JobOfferApprovalType {
+  FINANCIAL
+  MANAGERIAL
+}
+
+enum JobOfferApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CompensationPeriodicity {
+  HOURLY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  ANNUAL
+}
+
 enum BiasValidationStatus {
   INSUFFICIENT_DATA
   EXPLORATORY
@@ -336,6 +372,13 @@ enum ApplicationTimelineEventType {
   SLA_ESCALATED
   SLA_REASSIGNED
   RECRUITER_ASSIGNED
+  OFFER_CREATED
+  OFFER_APPROVED
+  OFFER_SENT
+  OFFER_COUNTERED
+  OFFER_ACCEPTED
+  OFFER_REJECTED
+  OFFER_EXPIRED
 }
 
 enum RoleScope {
@@ -1927,10 +1970,11 @@ model SignaturePackage {
   id                String                 @id @default(uuid())
   tenantId          String
   branchId          String
-  workflowId        String
+  workflowId        String?
   employeeId        String?
   onboardingFlowId  String?
   templateId        String?
+  offerVersionId    String?                @unique
   status            SignaturePackageStatus @default(PENDING)
   title             String
   externalProvider  String?
@@ -1944,10 +1988,11 @@ model SignaturePackage {
   updatedAt         DateTime               @updatedAt
   tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch            Branch                 @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  workflow          MasterWorkflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow          MasterWorkflow?        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   employee          Employee?              @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   onboardingFlow    OnboardingFlow?        @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
   template          SignatureTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  offerVersion      JobOfferVersion?       @relation(fields: [offerVersionId], references: [id], onDelete: SetNull)
   participants      SignatureParticipant[]
   auditEvents       SignatureAuditEvent[]
 
@@ -3105,6 +3150,7 @@ model VacancyApplication {
   hiringManagerApproval       HiringManagerApproval?
   interviewSequences          InterviewSequence[]
   interviewSchedulingRequests InterviewSchedulingRequest[]
+  jobOffers                   JobOffer[]
 
   @@unique([vacancyId, candidateId])
   @@index([tenantId, status])
@@ -3115,6 +3161,79 @@ model VacancyApplication {
   @@index([tenantId, interviewerUserId, interviewScheduledAt])
   @@index([tenantId, assignedRecruiterId, stageEnteredAt])
   @@index([tenantId, rejectionReasonId, status])
+}
+
+model JobOffer {
+  id                   String             @id @default(uuid())
+  tenantId             String
+  branchId             String
+  applicationId        String
+  status               JobOfferStatus     @default(DRAFT)
+  currentVersion       Int                @default(1)
+  createdById          String
+  financialApproverId  String?
+  managerialApproverId String?
+  acceptedAt           DateTime?
+  rejectedAt           DateTime?
+  expiredAt            DateTime?
+  cancelledAt          DateTime?
+  conversionWorkflowId String?
+  conversionError      String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  application          VacancyApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  versions             JobOfferVersion[]
+  approvals            JobOfferApproval[]
+
+  @@index([tenantId, branchId, status])
+  @@index([applicationId, createdAt])
+  @@index([tenantId, createdById])
+}
+
+model JobOfferVersion {
+  id                    String                  @id @default(uuid())
+  tenantId              String
+  offerId               String
+  version               Int
+  source                JobOfferVersionSource   @default(EMPLOYER)
+  salaryAmount          Decimal                 @db.Decimal(14, 2)
+  currency              String                  @db.VarChar(3)
+  periodicity           CompensationPeriodicity
+  benefits              Json?
+  jobTitle              String
+  employmentStartDate   DateTime
+  validUntil            DateTime
+  message               String?
+  counterproposalReason String?
+  pdfSha256             String?
+  pdfGeneratedAt        DateTime?
+  createdById           String?
+  createdAt             DateTime                @default(now())
+  offer                 JobOffer                @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  signaturePackage      SignaturePackage?
+
+  @@unique([offerId, version])
+  @@index([tenantId, validUntil])
+}
+
+model JobOfferApproval {
+  id          String                 @id @default(uuid())
+  tenantId    String
+  offerId     String
+  version     Int
+  type        JobOfferApprovalType
+  status      JobOfferApprovalStatus @default(PENDING)
+  approverId  String?
+  decidedById String?
+  notes       String?
+  decidedAt   DateTime?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  offer       JobOffer               @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, version, type])
+  @@index([tenantId, status, createdAt])
+  @@index([approverId, status])
 }
 
 model ApplicationStageTransitionRequest {

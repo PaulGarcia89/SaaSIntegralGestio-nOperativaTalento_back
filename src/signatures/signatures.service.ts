@@ -4,10 +4,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateSignaturePackageDto, CreateSignatureTemplateDto, SubmitSignatureConsentDto } from './dto/signatures.dto';
 import { SignatureProviderService } from './signature-provider.service';
+import { JobOffersService } from '../job-offers/job-offers.service';
 
 @Injectable()
 export class SignaturesService {
-  constructor(private readonly prisma: PrismaService, private readonly providers: SignatureProviderService) {}
+  constructor(private readonly prisma: PrismaService, private readonly providers: SignatureProviderService, private readonly offers: JobOffersService) {}
 
   providersOverview() { return this.providers.describe(); }
 
@@ -150,6 +151,9 @@ export class SignaturesService {
         await tx.signaturePackage.update({ where: { id: participant.packageId }, data: { status: SignaturePackageStatus.PARTIALLY_SIGNED } });
       }
     });
+    if (participant.signaturePackage.offerVersionId) {
+      await this.offers.completeSignedOffer(participant.signaturePackage.offerVersionId);
+    }
     return { signed: true, packageId: participant.packageId, signedAt: now.toISOString() };
   }
 

@@ -43,6 +43,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { PlanLimitsModule } from './plan-limits/plan-limits.module';
+import { JobOffersModule } from './job-offers/job-offers.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { PlanLimitsModule } from './plan-limits/plan-limits.module';
     EmployeesModule,
     VacanciesModule,
     ApplicationsModule,
+    JobOffersModule,
     RecruitmentModule,
     OnboardingModule,
     SignaturesModule,
