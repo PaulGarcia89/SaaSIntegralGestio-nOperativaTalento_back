@@ -189,7 +189,10 @@ export class InterviewCalendarService {
     const conflict = await this.prisma.applicationInterview.findFirst({
       where: {
         tenantId,
-        interviewerUserId,
+        OR: [
+          { interviewerUserId },
+          { participants: { some: { userId: interviewerUserId, status: { notIn: ["DECLINED", "SUBSTITUTED"] } } } },
+        ],
         id: excludeInterviewId ? { not: excludeInterviewId } : undefined,
         status: { in: [InterviewStatus.SCHEDULED, InterviewStatus.CONFIRMED] },
         startsAt: { lt: endsAt },
@@ -223,6 +226,26 @@ export class InterviewCalendarService {
     query: AvailabilityQueryDto,
   ) {
     await this.assertUserAccess(tenantId, actor, interviewerUserId);
+    return this.calculateAvailability(tenantId, interviewerUserId, query);
+  }
+
+  async getCommonAvailability(
+    tenantId: string,
+    interviewerUserIds: string[],
+    query: AvailabilityQueryDto,
+  ) {
+    const uniqueIds = [...new Set(interviewerUserIds)];
+    if (!uniqueIds.length) throw new BadRequestException("At least one interviewer is required");
+    const calendars = await Promise.all(uniqueIds.map((userId) => this.calculateAvailability(tenantId, userId, query)));
+    const common = calendars[0].slots.filter((slot) => calendars.every((calendar) => calendar.slots.some((candidate) => candidate.startsAt === slot.startsAt && candidate.endsAt === slot.endsAt)));
+    return { interviewerUserIds: uniqueIds, timezone: calendars[0].timezone, slots: common, calendars };
+  }
+
+  private async calculateAvailability(
+    tenantId: string,
+    interviewerUserId: string,
+    query: AvailabilityQueryDto,
+  ) {
     const startsAt = this.parseDate(query.startsAt, "startsAt");
     const endsAt = this.parseDate(query.endsAt, "endsAt");
     if (endsAt <= startsAt)
@@ -703,7 +726,10 @@ export class InterviewCalendarService {
       .findMany({
         where: {
           tenantId,
-          interviewerUserId: userId,
+          OR: [
+            { interviewerUserId: userId },
+            { participants: { some: { userId, status: { notIn: ["DECLINED", "SUBSTITUTED"] } } } },
+          ],
           status: {
             in: [InterviewStatus.SCHEDULED, InterviewStatus.CONFIRMED],
           },

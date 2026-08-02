@@ -311,7 +311,8 @@ export class WorkflowsService {
         application.status === 'APPROVED' &&
         !existingHiring &&
         application.vacancy.status !== 'FILLED' &&
-        application.vacancy.status !== 'CLOSED',
+        application.vacancy.status !== 'CLOSED' &&
+        application.vacancy.status !== 'ARCHIVED',
     };
   }
 
@@ -385,6 +386,7 @@ export class WorkflowsService {
         if (
           application.vacancy.status === 'FILLED' ||
           application.vacancy.status === 'CLOSED' ||
+          application.vacancy.status === 'ARCHIVED' ||
           hiredCount >= application.vacancy.openings
         ) {
           throw new ConflictException(

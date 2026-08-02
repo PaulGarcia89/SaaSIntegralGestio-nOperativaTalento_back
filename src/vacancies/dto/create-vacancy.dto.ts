@@ -81,6 +81,24 @@ export class CreateVacancyStageDto {
   slaHours?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(8760)
+  slaWarningHoursBefore?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(8760)
+  slaEscalationHours?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(8760)
+  autoReassignAfterHours?: number;
+
+  @IsOptional()
   @IsBoolean()
   isTerminal?: boolean;
 }
@@ -96,6 +114,16 @@ export class CreateVacancyResponsibleDto {
 export class CreateVacancyDto {
   @IsUUID()
   branchId!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsUUID('4', { each: true })
+  locationBranchIds?: string[];
+
+  @IsOptional()
+  @IsUUID()
+  requisitionId?: string;
 
   @IsString()
   @IsNotEmpty()

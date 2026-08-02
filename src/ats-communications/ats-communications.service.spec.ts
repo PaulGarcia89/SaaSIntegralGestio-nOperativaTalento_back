@@ -41,6 +41,7 @@ describe('AtsCommunicationsService', () => {
           .mockResolvedValueOnce({ id: 'responsible-notification', correlationId: 'responsible-correlation' }),
       },
       notificationPreference: { findUnique: jest.fn().mockResolvedValue(null) },
+      candidateAccount: { findUnique: jest.fn().mockResolvedValue({ statusUpdates: true, interviewReminders: true, offerNotifications: true }) },
       notificationDelivery: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     const notifications = { retryDelivery: jest.fn() };
@@ -50,7 +51,7 @@ describe('AtsCommunicationsService', () => {
     };
   }
 
-  it('records candidate email safely and queues the responsible delivery', async () => {
+  it('queues candidate and responsible email through the controlled delivery transport', async () => {
     const { prisma, service } = setup();
 
     await service.enqueueEvent(prisma as never, {
@@ -70,8 +71,8 @@ describe('AtsCommunicationsService', () => {
         data: [
           expect.objectContaining({
             recipientEmail: 'ana@example.com',
-            status: NotificationDeliveryStatus.SKIPPED,
-            lastError: expect.stringContaining('proveedor autorizado'),
+            status: NotificationDeliveryStatus.PENDING,
+            lastError: null,
           }),
         ],
       }),

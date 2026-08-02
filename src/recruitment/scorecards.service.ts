@@ -11,7 +11,11 @@ import {
   InterviewRecommendation,
   Prisma,
   ScorecardCriterionType,
+  ScorecardFeedbackVisibility,
+  ScorecardTemplateScope,
   ScorecardStatus,
+  HiringManagerApprovalStatus,
+  BiasValidationStatus,
 } from '@prisma/client';
 import { createHmac } from 'node:crypto';
 import { AccessScope } from '../common/enums/access-scope.enum';
@@ -20,6 +24,15 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import {
   CreateDecisionCommitteeDto,
   CreateScorecardTemplateDto,
+  UpdateScorecardTemplateAdminDto,
+  DuplicateScorecardTemplateDto,
+  ScorecardCompetencyDto,
+  ReplaceScorecardAssignmentsDto,
+  CreateExternalAssessmentDto,
+  UpdateExternalAssessmentResultDto,
+  AssignHiringManagerDto,
+  DecideHiringManagerApprovalDto,
+  RunBiasValidationDto,
   FinalizeDecisionCommitteeDto,
   SubmitScorecardDto,
   VoteDecisionCommitteeDto,
@@ -44,14 +57,14 @@ export class ScorecardsService {
   async listTemplates(
     tenantId: string,
     actor: JwtPayload,
-    vacancyId: string,
+    vacancyId?: string,
     stageId?: string,
   ) {
-    await this.assertVacancyAccess(tenantId, actor, vacancyId);
+    if (vacancyId) await this.assertVacancyAccess(tenantId, actor, vacancyId);
     return this.prisma.scorecardTemplate.findMany({
       where: {
         tenantId,
-        vacancyId,
+        ...(vacancyId ? { OR: [{ vacancyId }, { scope: ScorecardTemplateScope.TENANT }] } : { scope: ScorecardTemplateScope.TENANT }),
         ...(stageId ? { stageId } : {}),
       },
       include: templateInclude,
@@ -64,12 +77,19 @@ export class ScorecardsService {
     actor: JwtPayload,
     dto: CreateScorecardTemplateDto,
   ) {
-    await this.assertVacancyAccess(tenantId, actor, dto.vacancyId);
+    const scope = dto.scope ?? ScorecardTemplateScope.VACANCY;
+    if (scope === ScorecardTemplateScope.VACANCY && !dto.vacancyId) {
+      throw new BadRequestException('A vacancy is required for vacancy templates');
+    }
+    if (dto.vacancyId) await this.assertVacancyAccess(tenantId, actor, dto.vacancyId);
+    if (scope === ScorecardTemplateScope.TENANT && dto.stageId) {
+      throw new BadRequestException('Shared templates cannot target a vacancy stage');
+    }
     if (dto.stageId) {
       const stage = await this.prisma.vacancyStage.findFirst({
         where: {
           id: dto.stageId,
-          vacancyId: dto.vacancyId,
+          vacancyId: dto.vacancyId!,
           tenantId,
         },
         select: { id: true },
@@ -98,8 +118,9 @@ export class ScorecardsService {
     const latest = await this.prisma.scorecardTemplate.aggregate({
       where: {
         tenantId,
-        vacancyId: dto.vacancyId,
+        vacancyId: dto.vacancyId ?? null,
         stageId: dto.stageId ?? null,
+        name: dto.name.trim(),
       },
       _max: { version: true },
     });
@@ -107,8 +128,9 @@ export class ScorecardsService {
       await tx.scorecardTemplate.updateMany({
         where: {
           tenantId,
-          vacancyId: dto.vacancyId,
+          vacancyId: dto.vacancyId ?? null,
           stageId: dto.stageId ?? null,
+          name: dto.name.trim(),
           isActive: true,
         },
         data: { isActive: false },
@@ -120,6 +142,8 @@ export class ScorecardsService {
           stageId: dto.stageId,
           name: dto.name.trim(),
           instructions: dto.instructions?.trim() || null,
+          scope,
+          feedbackVisibility: dto.feedbackVisibility ?? ScorecardFeedbackVisibility.AFTER_ALL_SUBMITTED,
           version: (latest._max.version ?? 0) + 1,
           createdByUserId: actor.sub,
           criteria: {
@@ -130,6 +154,7 @@ export class ScorecardsService {
               description: item.description?.trim() || null,
               competencyCode: item.competencyCode?.trim().toUpperCase() || null,
               competencyName: item.competencyName?.trim() || null,
+              competencyId: item.competencyId,
               type: item.type,
               weight: item.weight,
               isRequired: item.isRequired ?? true,
@@ -165,11 +190,15 @@ export class ScorecardsService {
       },
       include: scorecardInclude,
     });
+    const assignment = await this.prisma.scorecardEvaluatorAssignment.findUnique({ where: { interviewId_evaluatorUserId: { interviewId, evaluatorUserId: actor.sub } } });
+    const assignedIds = assignment ? new Set(assignment.criterionIds as string[]) : null;
+    const visibleTemplate = template && assignedIds ? { ...template, criteria: template.criteria.filter((criterion) => assignedIds.has(criterion.id)) } : template;
     return {
-      template,
+      template: visibleTemplate,
       scorecard,
       canEdit: scorecard?.status !== ScorecardStatus.SIGNED,
-      comparisons: await this.comparison(tenantId, interviewId),
+      assignment,
+      comparisons: await this.comparison(tenantId, interviewId, actor, template?.feedbackVisibility),
     };
   }
 
@@ -182,7 +211,17 @@ export class ScorecardsService {
     const interview = await this.assertInterviewAccess(tenantId, actor, interviewId);
     const interviewerOnly =
       actor.roles.includes('INTERVIEWER') || actor.role === 'INTERVIEWER';
-    if (interviewerOnly && interview.interviewerUserId !== actor.sub) {
+    if (
+      interviewerOnly &&
+      interview.interviewerUserId !== actor.sub &&
+      !interview.participants.some(
+        (item) =>
+          item.userId === actor.sub &&
+          item.role !== 'SHADOW' &&
+          item.status !== 'DECLINED' &&
+          item.status !== 'SUBSTITUTED',
+      )
+    ) {
       throw new NotFoundException('Interview not found');
     }
     const existing = await this.prisma.interviewScorecard.findUnique({
@@ -205,17 +244,22 @@ export class ScorecardsService {
     if (!template) {
       return this.submitLegacy(tenantId, actor, interviewId, dto);
     }
+    const assignment = await this.prisma.scorecardEvaluatorAssignment.findUnique({ where: { interviewId_evaluatorUserId: { interviewId, evaluatorUserId: actor.sub } } });
+    const assignedIds = assignment ? new Set(assignment.criterionIds as string[]) : null;
+    const criteria = assignedIds ? template.criteria.filter((criterion) => assignedIds.has(criterion.id)) : template.criteria;
     const responseByCriterion = new Map(
       (dto.responses ?? []).map((item) => [item.criterionId, item]),
     );
     const unknown = [...responseByCriterion.keys()].find(
-      (id) => !template.criteria.some((criterion) => criterion.id === id),
+      (id) => !criteria.some((criterion) => criterion.id === id),
     );
     if (unknown) throw new BadRequestException('A response criterion is outside the template');
     if (dto.sign ?? true) {
-      this.assertRequiredResponses(template.criteria, responseByCriterion);
+      this.assertRequiredResponses(criteria, responseByCriterion);
     }
-    const weighted = this.calculateWeightedScore(template.criteria, responseByCriterion);
+    const assignedWeight = criteria.filter((item) => item.type === ScorecardCriterionType.RATING).reduce((sum, item) => sum + item.weight, 0);
+    const weightedRaw = this.calculateWeightedScore(criteria, responseByCriterion);
+    const weighted = assignedWeight && assignedWeight !== 100 ? Number((weightedRaw * 100 / assignedWeight).toFixed(2)) : weightedRaw;
     const overallRating = Math.max(1, Math.min(5, Math.round(weighted / 20)));
     const shouldSign = dto.sign ?? true;
     const canonical = {
@@ -223,7 +267,7 @@ export class ScorecardsService {
       reviewerUserId: actor.sub,
       templateId: template.id,
       templateVersion: template.version,
-      responses: template.criteria.map((criterion) => ({
+      responses: criteria.map((criterion) => ({
         criterionId: criterion.id,
         value: responseByCriterion.get(criterion.id) ?? null,
       })),
@@ -283,7 +327,7 @@ export class ScorecardsService {
           where: { scorecardId: scorecard.id },
         });
       }
-      const responses = template.criteria.flatMap((criterion) => {
+      const responses = criteria.flatMap((criterion) => {
         const value = responseByCriterion.get(criterion.id);
         if (!value) return [];
         return [{
@@ -336,7 +380,8 @@ export class ScorecardsService {
     interviewId: string,
   ) {
     await this.assertInterviewAccess(tenantId, actor, interviewId);
-    return this.comparison(tenantId, interviewId);
+    const interview = await this.prisma.applicationInterview.findFirst({ where: { id: interviewId, tenantId }, include: { scorecardTemplate: true } });
+    return this.comparison(tenantId, interviewId, actor, interview?.scorecardTemplate?.feedbackVisibility);
   }
 
   async createCommittee(
@@ -442,7 +487,7 @@ export class ScorecardsService {
       select: { id: true },
     });
     const comparisons = await Promise.all(
-      interviews.map((item) => this.comparison(tenantId, item.id)),
+      interviews.map((item) => this.comparison(tenantId, item.id, actor)),
     );
     return { ...committee, comparisons };
   }
@@ -543,7 +588,143 @@ export class ScorecardsService {
     });
   }
 
-  private async comparison(tenantId: string, interviewId: string) {
+  async updateTemplateAdmin(tenantId: string, actor: JwtPayload, id: string, dto: UpdateScorecardTemplateAdminDto) {
+    const template = await this.prisma.scorecardTemplate.findFirst({ where: { id, tenantId } });
+    if (!template) throw new NotFoundException('Scorecard template not found');
+    if (template.vacancyId) await this.assertVacancyAccess(tenantId, actor, template.vacancyId);
+    return this.prisma.scorecardTemplate.update({ where: { id: template.id }, data: dto, include: templateInclude });
+  }
+
+  async duplicateTemplate(tenantId: string, actor: JwtPayload, id: string, dto: DuplicateScorecardTemplateDto) {
+    const source = await this.prisma.scorecardTemplate.findFirst({ where: { id, tenantId }, include: { criteria: { orderBy: { sortOrder: 'asc' } } } });
+    if (!source) throw new NotFoundException('Scorecard template not found');
+    const scope = dto.scope ?? (dto.vacancyId ? ScorecardTemplateScope.VACANCY : source.scope);
+    const vacancyId = scope === ScorecardTemplateScope.TENANT ? null : (dto.vacancyId ?? source.vacancyId);
+    if (scope === ScorecardTemplateScope.VACANCY && !vacancyId) throw new BadRequestException('A vacancy is required');
+    if (vacancyId) await this.assertVacancyAccess(tenantId, actor, vacancyId);
+    const name = dto.name?.trim() || `${source.name} (copia)`;
+    const latest = await this.prisma.scorecardTemplate.aggregate({ where: { tenantId, vacancyId, stageId: null, name }, _max: { version: true } });
+    return this.prisma.scorecardTemplate.create({
+      data: { tenantId, vacancyId, stageId: null, name, instructions: source.instructions, scope, feedbackVisibility: source.feedbackVisibility, version: (latest._max.version ?? 0) + 1, createdByUserId: actor.sub, criteria: { create: source.criteria.map((item) => ({ tenantId, key: item.key, label: item.label, description: item.description, competencyId: item.competencyId, competencyCode: item.competencyCode, competencyName: item.competencyName, type: item.type, weight: item.weight, isRequired: item.isRequired, requiresEvidence: item.requiresEvidence, ratingAnchors: item.ratingAnchors ?? undefined, sortOrder: item.sortOrder })) } },
+      include: templateInclude,
+    });
+  }
+
+  listCompetencies(tenantId: string, includeInactive = false) {
+    return this.prisma.scorecardCompetency.findMany({ where: { tenantId, ...(includeInactive ? {} : { isActive: true }) }, orderBy: [{ category: 'asc' }, { name: 'asc' }] });
+  }
+
+  async upsertCompetency(tenantId: string, id: string | undefined, dto: ScorecardCompetencyDto) {
+    const data = { code: dto.code.trim().toUpperCase(), name: dto.name.trim(), description: dto.description?.trim() || null, category: dto.category?.trim() || null, behavioralAnchors: dto.behavioralAnchors as Prisma.InputJsonValue | undefined, isActive: dto.isActive ?? true };
+    if (id) {
+      const existing = await this.prisma.scorecardCompetency.findFirst({ where: { id, tenantId }, select: { id: true } });
+      if (!existing) throw new NotFoundException('Competency not found');
+      return this.prisma.scorecardCompetency.update({ where: { id: existing.id }, data });
+    }
+    return this.prisma.scorecardCompetency.create({ data: { tenantId, ...data } });
+  }
+
+  async replaceAssignments(tenantId: string, actor: JwtPayload, interviewId: string, dto: ReplaceScorecardAssignmentsDto) {
+    const interview = await this.assertInterviewAccess(tenantId, actor, interviewId);
+    const template = await this.resolveTemplate(tenantId, interview.application.vacancyId, interview.stageId, interview.scorecardTemplateId);
+    if (!template) throw new BadRequestException('Assign a scorecard template first');
+    const validCriteria = new Set(template.criteria.map((item) => item.id));
+    if (dto.assignments.some((item) => item.criterionIds.some((id) => !validCriteria.has(id)))) throw new BadRequestException('Assignment contains criteria outside the template');
+    const userIds = [...new Set(dto.assignments.map((item) => item.evaluatorUserId))];
+    const users = await this.prisma.user.count({ where: { tenantId, id: { in: userIds }, status: 'ACTIVE' } });
+    if (users !== userIds.length) throw new BadRequestException('Every evaluator must be an active tenant user');
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of dto.assignments) {
+        await tx.scorecardEvaluatorAssignment.upsert({
+          where: { interviewId_evaluatorUserId: { interviewId, evaluatorUserId: item.evaluatorUserId } },
+          create: { tenantId, interviewId, evaluatorUserId: item.evaluatorUserId, criterionIds: item.criterionIds, anonymousReview: item.anonymousReview ?? false },
+          update: { criterionIds: item.criterionIds, anonymousReview: item.anonymousReview ?? false },
+        });
+      }
+    });
+    return this.prisma.scorecardEvaluatorAssignment.findMany({ where: { tenantId, interviewId }, include: { evaluator: { select: { id: true, firstName: true, lastName: true } } } });
+  }
+
+  async createExternalAssessment(tenantId: string, actor: JwtPayload, dto: CreateExternalAssessmentDto) {
+    await this.assertApplicationAccess(tenantId, actor, dto.applicationId);
+    if (!dto.consentRecorded) throw new BadRequestException('Candidate consent must be recorded before an external assessment');
+    return this.prisma.externalCandidateAssessment.create({ data: { tenantId, applicationId: dto.applicationId, provider: dto.provider.trim(), assessmentType: dto.assessmentType.trim(), externalAssessmentId: dto.externalAssessmentId?.trim(), launchUrl: dto.launchUrl, status: dto.launchUrl ? 'INVITED' : 'DRAFT', consentRecordedAt: new Date(), invitedAt: dto.launchUrl ? new Date() : null, expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null } });
+  }
+
+  async updateExternalAssessment(tenantId: string, id: string, dto: UpdateExternalAssessmentResultDto) {
+    const assessment = await this.prisma.externalCandidateAssessment.findFirst({ where: { id, tenantId }, select: { id: true } });
+    if (!assessment) throw new NotFoundException('Assessment not found');
+    return this.prisma.externalCandidateAssessment.update({ where: { id: assessment.id }, data: { status: dto.status, score: dto.score, percentile: dto.percentile, reportUrl: dto.reportUrl, result: dto.result as Prisma.InputJsonValue | undefined, completedAt: dto.status === 'COMPLETED' ? new Date() : undefined } });
+  }
+
+  async listExternalAssessments(tenantId: string, actor: JwtPayload, applicationId: string) {
+    await this.assertApplicationAccess(tenantId, actor, applicationId);
+    return this.prisma.externalCandidateAssessment.findMany({ where: { tenantId, applicationId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  async assignHiringManager(tenantId: string, actor: JwtPayload, applicationId: string, dto: AssignHiringManagerDto) {
+    await this.assertApplicationAccess(tenantId, actor, applicationId);
+    const manager = await this.prisma.user.findFirst({ where: { id: dto.managerUserId, tenantId, status: 'ACTIVE' }, select: { id: true } });
+    if (!manager) throw new BadRequestException('Hiring manager must be an active tenant user');
+    return this.prisma.hiringManagerApproval.upsert({ where: { applicationId }, create: { tenantId, applicationId, managerUserId: manager.id }, update: { managerUserId: manager.id, status: HiringManagerApprovalStatus.PENDING, recommendation: null, rationale: null, decidedAt: null, decidedByUserId: null }, include: { manager: { select: { id: true, firstName: true, lastName: true } } } });
+  }
+
+  async decideHiringManager(tenantId: string, actor: JwtPayload, applicationId: string, dto: DecideHiringManagerApprovalDto) {
+    const approval = await this.prisma.hiringManagerApproval.findFirst({ where: { tenantId, applicationId } });
+    if (!approval) throw new NotFoundException('Hiring manager approval not found');
+    if (approval.managerUserId !== actor.sub && !actor.roles.some((role) => ['TENANT_ADMIN', 'ADMIN', 'PLATFORM_ADMIN'].includes(role))) throw new ForbiddenException('Only the assigned hiring manager can decide');
+    return this.prisma.hiringManagerApproval.update({ where: { id: approval.id }, data: { status: dto.status, recommendation: dto.recommendation, rationale: dto.rationale.trim(), decidedByUserId: actor.sub, decidedAt: new Date() }, include: { manager: { select: { id: true, firstName: true, lastName: true } } } });
+  }
+
+  async getHiringManagerApproval(tenantId: string, actor: JwtPayload, applicationId: string) {
+    await this.assertApplicationAccess(tenantId, actor, applicationId);
+    return this.prisma.hiringManagerApproval.findFirst({ where: { tenantId, applicationId }, include: { manager: { select: { id: true, firstName: true, lastName: true } } } });
+  }
+
+  async calculateCalibration(tenantId: string, periodStartsAt: Date, periodEndsAt: Date) {
+    const scorecards = await this.prisma.interviewScorecard.findMany({ where: { tenantId, status: ScorecardStatus.SIGNED, signedAt: { gte: periodStartsAt, lte: periodEndsAt } }, include: { responses: true } });
+    const byInterview = new Map<string, number[]>();
+    for (const item of scorecards) byInterview.set(item.interviewId, [...(byInterview.get(item.interviewId) ?? []), Number(item.weightedScore ?? 0)]);
+    const byUser = new Map<string, typeof scorecards>();
+    for (const item of scorecards) byUser.set(item.reviewerUserId, [...(byUser.get(item.reviewerUserId) ?? []), item]);
+    const snapshots = [];
+    for (const [userId, items] of byUser) {
+      const scores = items.map((item) => Number(item.weightedScore ?? 0));
+      const panelMeans = items.map((item) => { const values = byInterview.get(item.interviewId) ?? [0]; return values.reduce((sum, value) => sum + value, 0) / values.length; });
+      const mean = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+      const panelMean = panelMeans.reduce((sum, value) => sum + value, 0) / panelMeans.length;
+      const meanDeviation = scores.reduce((sum, value, index) => sum + Math.abs(value - panelMeans[index]), 0) / scores.length;
+      const agreementRate = scores.filter((value, index) => Math.abs(value - panelMeans[index]) <= 10).length / scores.length * 100;
+      const responses = items.flatMap((item) => item.responses);
+      const evidenceRate = responses.length ? responses.filter((item) => Boolean(item.evidence?.trim())).length / responses.length * 100 : 0;
+      snapshots.push(await this.prisma.evaluatorCalibrationSnapshot.create({ data: { tenantId, evaluatorUserId: userId, sampleSize: items.length, meanScore: mean, panelMeanScore: panelMean, meanDeviation, strictnessIndex: (mean - panelMean) / 100, agreementRate, evidenceRate, periodStartsAt, periodEndsAt } }));
+    }
+    return snapshots;
+  }
+
+  listCalibration(tenantId: string) {
+    return this.prisma.evaluatorCalibrationSnapshot.findMany({ where: { tenantId }, include: { evaluator: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { calculatedAt: 'desc' }, take: 100 });
+  }
+
+  async runBiasValidation(tenantId: string, actor: JwtPayload, dto: RunBiasValidationDto) {
+    if (dto.referenceGroup.selected > dto.referenceGroup.total || dto.comparisonGroup.selected > dto.comparisonGroup.total) throw new BadRequestException('Selected count cannot exceed group total');
+    const referenceRate = dto.referenceGroup.selected / dto.referenceGroup.total;
+    const comparisonRate = dto.comparisonGroup.selected / dto.comparisonGroup.total;
+    const ratio = referenceRate ? comparisonRate / referenceRate : null;
+    const pooled = (dto.referenceGroup.selected + dto.comparisonGroup.selected) / (dto.referenceGroup.total + dto.comparisonGroup.total);
+    const standardError = Math.sqrt(pooled * (1 - pooled) * (1 / dto.referenceGroup.total + 1 / dto.comparisonGroup.total));
+    const z = standardError ? (comparisonRate - referenceRate) / standardError : 0;
+    const pValue = Math.min(1, 2 * (1 - this.normalCdf(Math.abs(z))));
+    const sampleSize = dto.referenceGroup.total + dto.comparisonGroup.total;
+    const status = sampleSize < 100 ? BiasValidationStatus.INSUFFICIENT_DATA : ratio != null && ratio < 0.8 && pValue < 0.05 ? BiasValidationStatus.REQUIRES_REVIEW : BiasValidationStatus.EXPLORATORY;
+    return this.prisma.biasValidationRun.create({ data: { tenantId, createdByUserId: actor.sub, methodologyVersion: 'selection-rate-v1.0', populationField: dto.populationField.trim(), outcomeField: 'selection', sampleSize, referenceGroup: dto.referenceGroup.name, comparisonGroup: dto.comparisonGroup.name, selectionRateRatio: ratio, effectSize: comparisonRate - referenceRate, pValue, status, findings: { referenceRate, comparisonRate, zScore: z, fourFifthsThreshold: 0.8 }, limitations: 'Análisis observacional agregado. No demuestra causalidad ni sustituye revisión legal, psicométrica o estadística independiente.' } });
+  }
+
+  listBiasValidations(tenantId: string) {
+    return this.prisma.biasValidationRun.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' }, take: 50 });
+  }
+
+  private async comparison(tenantId: string, interviewId: string, actor?: JwtPayload, visibility: ScorecardFeedbackVisibility = ScorecardFeedbackVisibility.IMMEDIATE) {
     const scorecards = await this.prisma.interviewScorecard.findMany({
       where: { tenantId, interviewId, status: ScorecardStatus.SIGNED },
       include: scorecardInclude,
@@ -558,8 +739,22 @@ export class ScorecardsService {
         disclaimer: this.biasDisclaimer(),
       };
     }
+    const assignmentCount = await this.prisma.scorecardEvaluatorAssignment.count({ where: { tenantId, interviewId } });
+    const ownSubmitted = actor ? scorecards.some((item) => item.reviewerUserId === actor.sub) : true;
+    const allSubmitted = assignmentCount ? scorecards.length >= assignmentCount : scorecards.length >= 2;
+    const managerApproval = actor && visibility === ScorecardFeedbackVisibility.HIRING_MANAGER_ONLY
+      ? await this.prisma.hiringManagerApproval.findFirst({ where: { tenantId, managerUserId: actor.sub, application: { interviews: { some: { id: interviewId } } } }, select: { id: true } })
+      : null;
+    const isAdmin = actor?.roles.some((role) => ['TENANT_ADMIN', 'ADMIN', 'PLATFORM_ADMIN'].includes(role)) ?? false;
+    const canReveal = visibility === ScorecardFeedbackVisibility.IMMEDIATE
+      || (visibility === ScorecardFeedbackVisibility.AFTER_OWN_SUBMISSION && ownSubmitted)
+      || (visibility === ScorecardFeedbackVisibility.AFTER_ALL_SUBMITTED && allSubmitted)
+      || (visibility === ScorecardFeedbackVisibility.HIRING_MANAGER_ONLY && Boolean(managerApproval || isAdmin));
+    if (!canReveal) return { evaluatorCount: scorecards.length, evaluatorScores: [], criteria: [], biasSignals: [], feedbackLocked: true, visibility, disclaimer: this.biasDisclaimer() };
+    const anonymousAssignments = await this.prisma.scorecardEvaluatorAssignment.findMany({ where: { tenantId, interviewId, anonymousReview: true }, select: { evaluatorUserId: true } });
+    const anonymousIds = new Set(anonymousAssignments.map((item) => item.evaluatorUserId));
     const evaluatorScores = scorecards.map((scorecard) => ({
-      reviewer: scorecard.reviewer,
+      reviewer: anonymousIds.has(scorecard.reviewerUserId) && !allSubmitted ? { id: `anonymous-${scorecard.id}`, firstName: 'Evaluador', lastName: 'anónimo' } : scorecard.reviewer,
       weightedScore: Number(scorecard.weightedScore ?? 0),
       overallRating: scorecard.overallRating,
       recommendation: scorecard.recommendation,
@@ -639,6 +834,7 @@ export class ScorecardsService {
             vacancy: { select: { branchId: true } },
           },
         },
+        participants: true,
       },
     });
     if (!interview) throw new NotFoundException('Interview not found');
@@ -677,10 +873,16 @@ export class ScorecardsService {
       });
       if (stageTemplate) return stageTemplate;
     }
-    return this.prisma.scorecardTemplate.findFirst({
+    const vacancyTemplate = await this.prisma.scorecardTemplate.findFirst({
       where: { tenantId, vacancyId, stageId: null, isActive: true },
       include: templateInclude,
       orderBy: { version: 'desc' },
+    });
+    if (vacancyTemplate) return vacancyTemplate;
+    return this.prisma.scorecardTemplate.findFirst({
+      where: { tenantId, scope: ScorecardTemplateScope.TENANT, isActive: true },
+      include: templateInclude,
+      orderBy: [{ updatedAt: 'desc' }, { version: 'desc' }],
     });
   }
 
@@ -921,5 +1123,13 @@ export class ScorecardsService {
 
   private biasDisclaimer() {
     return 'Estas señales apoyan la revisión humana: no prueban sesgo ni deben usarse para tomar decisiones automáticas.';
+  }
+
+  private normalCdf(value: number) {
+    const sign = value < 0 ? -1 : 1;
+    const x = Math.abs(value) / Math.sqrt(2);
+    const t = 1 / (1 + 0.3275911 * x);
+    const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+    return 0.5 * (1 + sign * erf);
   }
 }

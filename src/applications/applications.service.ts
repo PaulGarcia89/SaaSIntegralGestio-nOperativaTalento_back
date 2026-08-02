@@ -47,12 +47,17 @@ const applicationInclude = {
   vacancy: {
     include: {
       branch: true,
+      responsibles: {
+        include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      },
       stages: {
         orderBy: { position: "asc" },
       },
     },
   },
   currentStage: true,
+  assignedRecruiter: { select: { id: true, firstName: true, lastName: true, email: true } },
+  structuredRejectionReason: true,
   timelineEvents: {
     orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
   },
@@ -317,47 +322,21 @@ export class ApplicationsService {
     query: ListApplicationsDto,
   ) {
     const pagination = normalizeOffsetPagination(query);
-    const effectiveBranchFilter = this.resolveBranchFilter(
-      actor,
-      query.branchId,
-    );
-    const where: Prisma.VacancyApplicationWhereInput = {
-      tenantId,
-      ...(actor.role === "INTERVIEWER" || actor.roles.includes("INTERVIEWER")
-        ? { interviewerUserId: actor.sub }
-        : {}),
-      ...(effectiveBranchFilter
-        ? {
-            vacancy: {
-              branchId: effectiveBranchFilter,
-            },
-          }
-        : {}),
-      ...(query.vacancyId ? { vacancyId: query.vacancyId } : {}),
-      ...(query.currentStageId ? { currentStageId: query.currentStageId } : {}),
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.search
-        ? {
-            OR: [
-              {
-                candidate: {
-                  fullName: { contains: query.search, mode: "insensitive" },
-                },
-              },
-              {
-                candidate: {
-                  email: { contains: query.search, mode: "insensitive" },
-                },
-              },
-              {
-                vacancy: {
-                  title: { contains: query.search, mode: "insensitive" },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+    const where = this.buildListWhere(actor, tenantId, query);
+
+    if (query.overdueOnly) {
+      const all = await this.prisma.vacancyApplication.findMany({
+        where,
+        include: applicationInclude,
+        orderBy: { stageEnteredAt: "asc" },
+      });
+      const overdue = all.map((item) => this.serializeApplication(item)).filter((item) => item.isStageOverdue);
+      const start = pagination.skip;
+      return {
+        data: overdue.slice(start, start + pagination.pageSize),
+        meta: { total: overdue.length, page: pagination.page, pageSize: pagination.pageSize, totalPages: Math.ceil(overdue.length / pagination.pageSize) },
+      };
+    }
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.vacancyApplication.findMany({
@@ -386,16 +365,25 @@ export class ApplicationsService {
     tenantId: string,
     query: ListApplicationsDto,
   ) {
-    const result = await this.listForTenant(actor, tenantId, {
-      ...query,
-      page: 1,
-      pageSize: Math.min(query.pageSize ?? 100, 100),
-    });
+    const where = this.buildListWhere(actor, tenantId, query);
+    const data: ReturnType<ApplicationsService["serializeApplication"]>[] = [];
+    let cursor: string | undefined;
+    do {
+      const batch = await this.prisma.vacancyApplication.findMany({
+        where,
+        include: applicationInclude,
+        orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
+        take: 1000,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      data.push(...batch.map((item) => this.serializeApplication(item)).filter((item) => !query.overdueOnly || item.isStageOverdue));
+      cursor = batch.length === 1000 ? batch.at(-1)?.id : undefined;
+    } while (cursor);
     return {
       generatedAt: new Date().toISOString(),
       tenantId,
-      count: result.data.length,
-      data: result.data,
+      count: data.length,
+      data,
     };
   }
 
@@ -412,18 +400,89 @@ export class ApplicationsService {
     };
     const authorized = await this.prisma.vacancyApplication.findMany({
       where,
-      select: { id: true },
+      select: { id: true, assignedRecruiterId: true },
     });
     if (authorized.length !== ids.length) {
       throw new NotFoundException("One or more applications were not found");
     }
 
-    for (const application of authorized) {
-      await this.updateStatus(application.id, actor, tenantId, {
-        status: dto.status,
+    if (!dto.status && !dto.currentStageId && !dto.assignedRecruiterId) {
+      throw new BadRequestException("A stage, status or recruiter assignment is required");
+    }
+    if (dto.assignedRecruiterId) {
+      await this.assertRecruiterCanAccessApplications(dto.assignedRecruiterId, tenantId, ids);
+      await this.prisma.$transaction(async (tx) => {
+        for (const application of authorized) {
+          if (application.assignedRecruiterId === dto.assignedRecruiterId) continue;
+          await tx.vacancyApplication.update({ where: { id: application.id }, data: { assignedRecruiterId: dto.assignedRecruiterId } });
+          await this.createTimelineEvent(tx, {
+            tenantId,
+            applicationId: application.id,
+            type: PrismaApplicationTimelineEventType.RECRUITER_ASSIGNED,
+            actor,
+            previousValue: { assignedRecruiterId: application.assignedRecruiterId },
+            newValue: { assignedRecruiterId: dto.assignedRecruiterId },
+            note: 'Responsable de reclutamiento actualizado mediante acción masiva',
+            source: 'ATS_BULK',
+          });
+        }
       });
     }
+    if (dto.status || dto.currentStageId) {
+      for (const application of authorized) {
+        await this.updateStatus(application.id, actor, tenantId, {
+          status: dto.status,
+          currentStageId: dto.currentStageId,
+          reason: dto.reason,
+          rejectionReasonId: dto.rejectionReasonId,
+        });
+      }
+    }
     return { updated: authorized.length };
+  }
+
+  listSavedViews(actor: JwtPayload, tenantId: string) {
+    return this.prisma.applicationSavedView.findMany({ where: { tenantId, userId: actor.sub }, orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }] });
+  }
+
+  async createSavedView(actor: JwtPayload, tenantId: string, dto: { name: string; filters: Record<string, unknown>; isDefault?: boolean }) {
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault) await tx.applicationSavedView.updateMany({ where: { tenantId, userId: actor.sub }, data: { isDefault: false } });
+      return tx.applicationSavedView.create({ data: { tenantId, userId: actor.sub, name: dto.name.trim(), filters: dto.filters as Prisma.InputJsonValue, isDefault: dto.isDefault ?? false } });
+    });
+  }
+
+  async updateSavedView(id: string, actor: JwtPayload, tenantId: string, dto: { name: string; filters: Record<string, unknown>; isDefault?: boolean }) {
+    const view = await this.prisma.applicationSavedView.findFirst({ where: { id, tenantId, userId: actor.sub } });
+    if (!view) throw new NotFoundException("Saved view not found");
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault) await tx.applicationSavedView.updateMany({ where: { tenantId, userId: actor.sub, id: { not: id } }, data: { isDefault: false } });
+      return tx.applicationSavedView.update({ where: { id }, data: { name: dto.name.trim(), filters: dto.filters as Prisma.InputJsonValue, isDefault: dto.isDefault ?? false } });
+    });
+  }
+
+  async deleteSavedView(id: string, actor: JwtPayload, tenantId: string) {
+    const result = await this.prisma.applicationSavedView.deleteMany({ where: { id, tenantId, userId: actor.sub } });
+    if (!result.count) throw new NotFoundException("Saved view not found");
+    return { deleted: true };
+  }
+
+  async listRejectionReasons(tenantId: string) {
+    const count = await this.prisma.recruitmentRejectionReason.count({ where: { tenantId } });
+    if (!count) {
+      await this.prisma.recruitmentRejectionReason.createMany({ data: [
+        { tenantId, code: "QUALIFICATIONS_MISMATCH", label: "No cumple requisitos mínimos", category: "QUALIFICATIONS", position: 10 },
+        { tenantId, code: "INSUFFICIENT_EXPERIENCE", label: "Experiencia insuficiente", category: "EXPERIENCE", position: 20 },
+        { tenantId, code: "COMPENSATION_MISMATCH", label: "Expectativa salarial fuera de rango", category: "COMPENSATION", position: 30 },
+        { tenantId, code: "AVAILABILITY_MISMATCH", label: "Disponibilidad incompatible", category: "AVAILABILITY", position: 40 },
+        { tenantId, code: "LOCATION_MISMATCH", label: "Ubicación o modalidad incompatible", category: "LOCATION", position: 50 },
+        { tenantId, code: "CANDIDATE_WITHDREW", label: "Candidato desistió del proceso", category: "CANDIDATE_DECISION", position: 60 },
+        { tenantId, code: "POSITION_CLOSED", label: "Vacante cerrada o cancelada", category: "POSITION_CLOSED", position: 70 },
+        { tenantId, code: "DUPLICATE_APPLICATION", label: "Postulación duplicada", category: "DUPLICATE", position: 80 },
+        { tenantId, code: "OTHER", label: "Otro motivo", category: "OTHER", position: 90 },
+      ], skipDuplicates: true });
+    }
+    return this.prisma.recruitmentRejectionReason.findMany({ where: { tenantId, active: true }, orderBy: [{ position: "asc" }, { label: "asc" }] });
   }
 
   async getResumeFile(id: string, actor: JwtPayload, tenantId: string) {
@@ -678,6 +737,9 @@ export class ApplicationsService {
     const changesStage = Boolean(
       targetStage && targetStage.id !== application.currentStageId,
     );
+    if (targetStatus === ApplicationStatus.REJECTED) {
+      await this.assertRejectionReason(tenantId, dto.rejectionReasonId, dto.reason);
+    }
     if (changesStage && targetStage) {
       this.assertTransitionAllowed(application, targetStage, dto.reason);
       this.assertRequiredFields(application, targetStage);
@@ -697,6 +759,7 @@ export class ApplicationsService {
                 requestedByUserId: actor.sub,
                 requiredApprovals: Math.max(1, targetStage.requiredApprovals),
                 reason: dto.reason?.trim() || null,
+                rejectionReasonId: dto.rejectionReasonId,
               },
             });
           await this.createTimelineEvent(tx, {
@@ -747,10 +810,17 @@ export class ApplicationsService {
           ...(changesStage
             ? {
                 stageEnteredAt: new Date(),
+                slaWarningSentAt: null,
+                slaEscalatedAt: null,
+                slaReassignedAt: null,
                 rejectionReason:
                   targetStatus === ApplicationStatus.REJECTED
                     ? dto.reason?.trim()
                     : null,
+                structuredRejectionReason:
+                  targetStatus === ApplicationStatus.REJECTED && dto.rejectionReasonId
+                    ? { connect: { id: dto.rejectionReasonId } }
+                    : { disconnect: true },
               }
             : {}),
         },
@@ -954,10 +1024,17 @@ export class ApplicationsService {
             currentStage: { connect: { id: request.toStageId } },
             status: request.toStage.applicationStatus,
             stageEnteredAt: new Date(),
+            slaWarningSentAt: null,
+            slaEscalatedAt: null,
+            slaReassignedAt: null,
             rejectionReason:
               request.toStage.applicationStatus === "REJECTED"
                 ? request.reason
                 : null,
+            structuredRejectionReason:
+              request.toStage.applicationStatus === "REJECTED" && request.rejectionReasonId
+                ? { connect: { id: request.rejectionReasonId } }
+                : { disconnect: true },
             reviewedAt: new Date(),
           },
         });
@@ -1227,6 +1304,45 @@ export class ApplicationsService {
     return data;
   }
 
+  private buildListWhere(actor: JwtPayload, tenantId: string, query: ListApplicationsDto): Prisma.VacancyApplicationWhereInput {
+    const effectiveBranchFilter = this.resolveBranchFilter(actor, query.branchId);
+    return {
+      tenantId,
+      ...(actor.role === "INTERVIEWER" || actor.roles.includes("INTERVIEWER") ? { interviewerUserId: actor.sub } : {}),
+      ...(effectiveBranchFilter ? { vacancy: { branchId: effectiveBranchFilter } } : {}),
+      ...(query.vacancyId ? { vacancyId: query.vacancyId } : {}),
+      ...(query.currentStageId ? { currentStageId: query.currentStageId } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.assignedRecruiterId ? { assignedRecruiterId: query.assignedRecruiterId } : {}),
+      ...(query.rejectionReasonId ? { rejectionReasonId: query.rejectionReasonId } : {}),
+      ...(query.appliedFrom || query.appliedTo ? { appliedAt: { ...(query.appliedFrom ? { gte: new Date(query.appliedFrom) } : {}), ...(query.appliedTo ? { lte: new Date(query.appliedTo) } : {}) } } : {}),
+      ...(query.search ? { OR: [
+        { candidate: { fullName: { contains: query.search, mode: "insensitive" } } },
+        { candidate: { email: { contains: query.search, mode: "insensitive" } } },
+        { vacancy: { title: { contains: query.search, mode: "insensitive" } } },
+      ] } : {}),
+    };
+  }
+
+  private async assertRejectionReason(tenantId: string, rejectionReasonId?: string, detail?: string) {
+    if (!rejectionReasonId) throw new BadRequestException("A rejection reason is required and must use the structured catalog");
+    const reason = await this.prisma.recruitmentRejectionReason.findFirst({ where: { id: rejectionReasonId, tenantId, active: true } });
+    if (!reason) throw new BadRequestException("Invalid rejection reason");
+    if (reason.category === "OTHER" && !detail?.trim()) throw new BadRequestException("A rejection detail is required for OTHER");
+  }
+
+  private async assertRecruiterCanAccessApplications(userId: string, tenantId: string, applicationIds: string[]) {
+    const [user, applications] = await Promise.all([
+      this.prisma.user.findFirst({ where: { id: userId, tenantId, status: "ACTIVE" }, include: { branchAccesses: true } }),
+      this.prisma.vacancyApplication.findMany({ where: { id: { in: applicationIds }, tenantId }, select: { vacancy: { select: { branchId: true } } } }),
+    ]);
+    if (!user) throw new BadRequestException("Recruiter not found");
+    const allowed = new Set([user.activeBranchId, ...user.branchAccesses.map((item) => item.branchId)].filter(Boolean));
+    if (allowed.size && applications.some((item) => !allowed.has(item.vacancy.branchId))) {
+      throw new BadRequestException("Recruiter cannot access every selected branch");
+    }
+  }
+
   private assertStatusCanBeChangedDirectly(status: ApplicationStatus) {
     if (status === ApplicationStatus.HIRED) {
       throw new BadRequestException(
@@ -1418,6 +1534,13 @@ export class ApplicationsService {
             application.currentStage.slaHours * 3_600_000,
       ),
       rejectionReason: application.rejectionReason,
+      structuredRejectionReason: application.structuredRejectionReason,
+      assignedRecruiter: application.assignedRecruiter,
+      sla: {
+        warningSentAt: application.slaWarningSentAt,
+        escalatedAt: application.slaEscalatedAt,
+        reassignedAt: application.slaReassignedAt,
+      },
       pendingTransitions: application.transitionRequests,
       coverLetter: application.coverLetter,
       dynamicResponses: application.dynamicResponses,

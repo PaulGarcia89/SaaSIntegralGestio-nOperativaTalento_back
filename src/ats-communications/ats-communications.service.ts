@@ -203,6 +203,16 @@ export class AtsCommunicationsService {
             },
           },
         });
+        const candidatePreferences = recipient.userId
+          ? null
+          : await tx.candidateAccount.findUnique({
+              where: { email: recipient.email.toLowerCase() },
+              select: {
+                statusUpdates: true,
+                interviewReminders: true,
+                offerNotifications: true,
+              },
+            });
         const emailEnabled = recipient.userId
           ? ((
               await tx.notificationPreference.findUnique({
@@ -215,7 +225,16 @@ export class AtsCommunicationsService {
                 },
               })
             )?.emailEnabled ?? true)
-          : false;
+          : input.type === AtsCommunicationType.OFFER
+            ? (candidatePreferences?.offerNotifications ?? true)
+            : ([
+                AtsCommunicationType.INTERVIEW_SCHEDULED,
+                AtsCommunicationType.INTERVIEW_REMINDER,
+                AtsCommunicationType.INTERVIEW_RESCHEDULED,
+                AtsCommunicationType.INTERVIEW_CANCELLED,
+              ] as AtsCommunicationType[]).includes(input.type)
+              ? (candidatePreferences?.interviewReminders ?? true)
+              : (candidatePreferences?.statusUpdates ?? true);
         await tx.notificationDelivery.createMany({
           data: [
             ...(recipient.userId
@@ -247,7 +266,7 @@ export class AtsCommunicationsService {
                 ? null
                 : recipient.userId
                   ? "Canal de correo desactivado por el usuario"
-                  : "El envío externo a candidatos requiere un proveedor autorizado",
+                  : "El candidato desactivó esta categoría de comunicaciones",
             },
           ],
         });

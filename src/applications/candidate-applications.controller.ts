@@ -1,14 +1,55 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApplicationsService } from './applications.service';
 import { CandidateAuthGuard, CandidateRequest } from './candidate-auth.guard';
+import { CandidatePortalService } from './candidate-portal.service';
+import { CreateCandidatePrivacyRequestDto, WithdrawCandidateApplicationDto } from './dto/candidate-self-service.dto';
 
 @Controller('candidate/applications')
 @UseGuards(CandidateAuthGuard)
 export class CandidateApplicationsController {
-  constructor(private readonly applications: ApplicationsService) {}
+  constructor(
+    private readonly applications: ApplicationsService,
+    private readonly portal: CandidatePortalService,
+  ) {}
 
   @Get()
   findMine(@Req() request: CandidateRequest) {
     return this.applications.listForCandidate(request.candidate.sub);
+  }
+
+  @Get('portal')
+  portalOverview(@Req() request: CandidateRequest) {
+    return this.portal.overview(request.candidate.sub);
+  }
+
+  @Post(':id/withdraw')
+  withdraw(
+    @Req() request: CandidateRequest,
+    @Param('id') id: string,
+    @Body() dto: WithdrawCandidateApplicationDto,
+  ) {
+    return this.portal.withdraw(request.candidate.sub, id, dto.reason);
+  }
+
+  @Post('privacy-requests')
+  requestPrivacy(@Req() request: CandidateRequest, @Body() dto: CreateCandidatePrivacyRequestDto) {
+    return this.portal.requestPrivacy(request.candidate.sub, dto);
+  }
+
+  @Post('privacy-requests/:id/cancel')
+  cancelPrivacy(@Req() request: CandidateRequest, @Param('id') id: string) {
+    return this.portal.cancelPrivacy(request.candidate.sub, id);
+  }
+
+  @Post('resume/parse')
+  @UseInterceptors(FileInterceptor('resume', { limits: { fileSize: 15 * 1024 * 1024, files: 1 } }))
+  parseResume(@UploadedFile() file: Express.Multer.File) {
+    return this.portal.parseResume(file);
+  }
+
+  @Get('resume/:id/access')
+  resumeAccess(@Req() request: CandidateRequest, @Param('id') id: string) {
+    return this.portal.resumeAccess(request.candidate.sub, id);
   }
 }

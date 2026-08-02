@@ -13,9 +13,13 @@ import { AtsPrivateFileService } from '../common/files/ats-private-file.service'
 import { AtsFileAccessController } from '../common/files/ats-file-access.controller';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
 import { AtsCommunicationsModule } from '../ats-communications/ats-communications.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { CandidatePortalService } from './candidate-portal.service';
+import { ApplicationSlaService } from './application-sla.service';
+import { ApplicationSlaSchedulerService } from './application-sla-scheduler.service';
 
 @Module({
-  imports: [JwtModule.register({}), AtsCommunicationsModule],
+  imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule],
   controllers: [
     ApplicationsController,
     PublicApplicationsController,
@@ -29,8 +33,11 @@ import { AtsCommunicationsModule } from '../ats-communications/ats-communication
     ModuleAccessGuard,
     CandidateAuthService,
     CandidateAuthGuard,
+    CandidatePortalService,
     AtsPrivateFileService,
     TrainingAntivirusService,
+    ApplicationSlaService,
+    ApplicationSlaSchedulerService,
   ],
 })
 export class ApplicationsModule {}

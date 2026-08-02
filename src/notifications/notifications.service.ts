@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   NotificationCategory,
@@ -20,6 +21,7 @@ import { CreateNotificationDto } from './dto/create-notification.dto';
 import { ListNotificationDeliveriesDto } from './dto/list-notification-deliveries.dto';
 import { ListNotificationsDto } from './dto/list-notifications.dto';
 import { UpdateNotificationPreferenceDto } from './dto/update-notification-preference.dto';
+import { CommunicationDeliveryService } from './communication-delivery.service';
 
 const CATEGORIES = Object.values(NotificationCategory);
 const CRITICAL_CATEGORIES = new Set<NotificationCategory>([
@@ -38,7 +40,51 @@ type DomainNotificationDefinition = {
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, @Optional() private readonly deliveryProvider?: CommunicationDeliveryService) {}
+
+  async createExternalEmail(input: {
+    tenantId: string;
+    recipientEmail: string;
+    title: string;
+    message: string;
+    actionUrl?: string;
+    correlationId?: string;
+    deduplicationKey: string;
+  }) {
+    const existing = await this.prisma.notification.findFirst({
+      where: { tenantId: input.tenantId, userId: null, deduplicationKey: input.deduplicationKey },
+      include: { deliveries: true },
+    });
+    if (existing) return existing;
+    return this.prisma.$transaction(async (tx) => {
+      const notification = await tx.notification.create({
+        data: {
+          tenantId: input.tenantId,
+          userId: null,
+          type: NotificationType.INFO,
+          category: NotificationCategory.SECURITY,
+          title: input.title,
+          message: input.message,
+          sourceModule: 'candidate-portal',
+          actionUrl: input.actionUrl,
+          correlationId: input.correlationId,
+          deduplicationKey: input.deduplicationKey,
+        },
+      });
+      await tx.notificationDelivery.create({
+        data: {
+          tenantId: input.tenantId,
+          userId: null,
+          recipientEmail: input.recipientEmail.toLowerCase(),
+          notificationId: notification.id,
+          channel: NotificationChannel.EMAIL,
+          status: NotificationDeliveryStatus.PENDING,
+          correlationId: input.correlationId,
+        },
+      });
+      return tx.notification.findUniqueOrThrow({ where: { id: notification.id }, include: { deliveries: true } });
+    });
+  }
 
   async create(actor: JwtPayload, dto: CreateNotificationDto) {
     return this.createPersistent({
@@ -404,44 +450,14 @@ export class NotificationsService {
     if (!delivery || delivery.channel !== NotificationChannel.EMAIL) {
       throw new NotFoundException('Email delivery not found');
     }
-    const providerUrl = process.env.NOTIFICATION_EMAIL_WEBHOOK_URL?.trim();
-    if (!providerUrl) {
-      return this.prisma.notificationDelivery.update({
-        where: { id },
-        data: {
-          status: NotificationDeliveryStatus.SKIPPED,
-          lastError: 'Proveedor de correo no configurado',
-          lastAttemptAt: new Date(),
-        },
-      });
-    }
     const attempts = delivery.attempts + 1;
     await this.prisma.notificationDelivery.update({
       where: { id },
       data: { status: NotificationDeliveryStatus.PROCESSING, attempts, lastAttemptAt: new Date() },
     });
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-      const response = await fetch(providerUrl, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(process.env.NOTIFICATION_EMAIL_WEBHOOK_TOKEN
-            ? { authorization: `Bearer ${process.env.NOTIFICATION_EMAIL_WEBHOOK_TOKEN}` }
-            : {}),
-        },
-        body: JSON.stringify({
-          to: delivery.user?.email,
-          subject: delivery.notification.title,
-          text: delivery.notification.message,
-          actionUrl: delivery.notification.actionUrl,
-          correlationId: delivery.correlationId,
-        }),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timeout));
-      if (!response.ok) throw new Error(`Email provider responded ${response.status}`);
-      const result = (await response.json().catch(() => ({}))) as { id?: string };
+      if (!this.deliveryProvider) throw new Error('Email delivery provider is unavailable');
+      const result = await this.deliveryProvider.sendEmail(delivery);
       return this.prisma.notificationDelivery.update({
         where: { id },
         data: {

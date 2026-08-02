@@ -46,7 +46,7 @@ function isAllowedOrigin(origin: string) {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const port = Number(process.env.PORT ?? '3000');
   const host = process.env.HOST ?? '0.0.0.0';
 

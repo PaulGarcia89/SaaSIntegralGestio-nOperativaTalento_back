@@ -72,6 +72,7 @@ describe('ScorecardsService', () => {
     const prisma = {
       applicationInterview: { findFirst: jest.fn().mockResolvedValue(interview) },
       interviewScorecard: { findUnique: jest.fn().mockResolvedValue(null) },
+      scorecardEvaluatorAssignment: { findUnique: jest.fn().mockResolvedValue(null) },
       scorecardTemplate: {
         findFirst: jest.fn()
           .mockResolvedValueOnce(template),
@@ -103,6 +104,26 @@ describe('ScorecardsService', () => {
       responses: [{ criterionId: 'criterion-1', rating: 4, evidence: 'Example' }],
       sign: true,
     })).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('does not update a competency outside the active tenant', async () => {
+    const update = jest.fn();
+    const service = new ScorecardsService({ scorecardCompetency: { findFirst: jest.fn().mockResolvedValue(null), update } } as never);
+    await expect(service.upsertCompetency('tenant-1', 'competency-other-tenant', { code: 'TECH', name: 'Technical' })).rejects.toThrow('Competency not found');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('records an exploratory aggregate bias validation without claiming causality', async () => {
+    const create = jest.fn().mockImplementation(({ data }) => data);
+    const service = new ScorecardsService({ biasValidationRun: { create } } as never);
+    const result = await service.runBiasValidation('tenant-1', actor, {
+      populationField: 'aggregate_group',
+      referenceGroup: { name: 'Reference', total: 100, selected: 50 },
+      comparisonGroup: { name: 'Comparison', total: 100, selected: 35 },
+    });
+    expect(create).toHaveBeenCalled();
+    expect(result.limitations).toContain('No demuestra causalidad');
+    expect(Number(result.selectionRateRatio)).toBeCloseTo(0.7);
   });
 
   it('flags evaluator disagreement and potentially sensitive language', () => {

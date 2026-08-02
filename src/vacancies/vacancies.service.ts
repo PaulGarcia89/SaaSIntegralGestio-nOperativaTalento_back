@@ -34,6 +34,21 @@ export class VacanciesService {
     await this.planLimits?.assertCapacity(tenantId, 'maxActiveVacancies');
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
     this.assertActorCanAccessBranch(actor, dto.branchId);
+    const locationBranchIds = [...new Set([dto.branchId, ...(dto.locationBranchIds ?? [])])];
+    for (const branchId of locationBranchIds) {
+      await this.assertBranchBelongsToTenant(branchId, tenantId);
+      this.assertActorCanAccessBranch(actor, branchId);
+    }
+    if (dto.requisitionId) {
+      const requisition = await this.prisma.personnelRequisition.findFirst({
+        where: { id: dto.requisitionId, tenantId },
+        include: { locations: true },
+      });
+      if (!requisition) throw new NotFoundException('Personnel requisition not found');
+      if (requisition.status !== 'APPROVED') {
+        throw new BadRequestException('The personnel requisition must be approved before creating a vacancy');
+      }
+    }
     this.assertUniqueStages(dto.stages ?? []);
     await this.assertResponsiblesCanAccessBranch(
       tenantId,
@@ -49,6 +64,7 @@ export class VacanciesService {
           tenantId,
           branchId: dto.branchId,
           createdByUserId: actor.sub,
+          requisitionId: dto.requisitionId,
           title: dto.title,
           summary: dto.summary,
           description: dto.description,
@@ -70,6 +86,17 @@ export class VacanciesService {
         },
       });
 
+      await tx.vacancyLocation.createMany({
+        data: locationBranchIds.map((branchId) => ({
+          tenantId,
+          vacancyId: vacancy.id,
+          branchId,
+          city: dto.city,
+          country: dto.country,
+          isPrimary: branchId === dto.branchId,
+        })),
+      });
+
       if (dto.stages?.length) {
         await tx.vacancyStage.createMany({
           data: dto.stages.map((stage) => ({
@@ -86,6 +113,9 @@ export class VacanciesService {
             requiredApprovals: stage.requiresApproval ? Math.max(1, stage.requiredApprovals ?? 1) : 0,
             allowReopen: stage.allowReopen ?? false,
             slaHours: stage.slaHours,
+            slaWarningHoursBefore: stage.slaWarningHoursBefore ?? 4,
+            slaEscalationHours: stage.slaEscalationHours ?? 8,
+            autoReassignAfterHours: stage.autoReassignAfterHours,
             isTerminal: stage.isTerminal ?? false,
           })),
         });
@@ -103,10 +133,22 @@ export class VacanciesService {
         });
       }
 
+      await tx.vacancyChangeEvent.create({
+        data: {
+          tenantId,
+          vacancyId: vacancy.id,
+          actorUserId: actor.sub,
+          type: dto.requisitionId ? 'REQUISITION_LINKED' : 'CREATED',
+          newValue: this.toJson({ title: vacancy.title, status: vacancy.status, branchIds: locationBranchIds, requisitionId: dto.requisitionId }),
+        },
+      });
+
       return tx.vacancy.findUniqueOrThrow({
         where: { id: vacancy.id },
         include: {
           branch: true,
+          locations: { include: { branch: true }, orderBy: { isPrimary: 'desc' } },
+          requisition: true,
           createdByUser: {
             select: {
               id: true,
@@ -140,7 +182,7 @@ export class VacanciesService {
     const where: Prisma.VacancyWhereInput = {
       tenantId,
       ...this.vacancyScope(actor),
-      ...(query.branchId ? { branchId: query.branchId } : {}),
+      ...(query.branchId ? { locations: { some: { branchId: query.branchId } } } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.workMode ? { workMode: query.workMode } : {}),
       ...(query.employmentType ? { employmentType: query.employmentType } : {}),
@@ -162,6 +204,13 @@ export class VacanciesService {
         where,
         include: {
           branch: true,
+          locations: { include: { branch: true }, orderBy: { isPrimary: 'desc' } },
+          requisition: { select: { id: true, title: true, status: true } },
+          stages: { orderBy: { position: 'asc' } },
+          responsibles: {
+            include: { user: { select: { id: true, email: true, firstName: true, lastName: true } } },
+            orderBy: { createdAt: 'asc' },
+          },
           createdByUser: {
             select: {
               id: true,
@@ -199,6 +248,13 @@ export class VacanciesService {
       },
       include: {
         branch: true,
+        locations: { include: { branch: true }, orderBy: { isPrimary: 'desc' } },
+        requisition: { select: { id: true, title: true, status: true } },
+        stages: { orderBy: { position: 'asc' } },
+        responsibles: {
+          include: { user: { select: { id: true, email: true, firstName: true, lastName: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
         createdByUser: {
           select: {
             id: true,
@@ -219,10 +275,24 @@ export class VacanciesService {
   }
 
   async update(id: string, tenantId: string, actor: JwtPayload, dto: UpdateVacancyDto) {
-    await this.findOne(id, tenantId, actor);
+    const before = await this.findOne(id, tenantId, actor);
     if (dto.branchId) {
       await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
       this.assertActorCanAccessBranch(actor, dto.branchId);
+    }
+    const primaryBranchId = dto.branchId ?? before.branchId;
+    const locationBranchIds = dto.locationBranchIds
+      ? [...new Set([primaryBranchId, ...dto.locationBranchIds])]
+      : undefined;
+    if (locationBranchIds) {
+      for (const branchId of locationBranchIds) {
+        await this.assertBranchBelongsToTenant(branchId, tenantId);
+        this.assertActorCanAccessBranch(actor, branchId);
+      }
+    }
+    if (dto.stages) this.assertUniqueStages(dto.stages);
+    if (dto.responsibles) {
+      await this.assertResponsiblesCanAccessBranch(tenantId, primaryBranchId, dto.responsibles);
     }
 
     const data: Prisma.VacancyUncheckedUpdateInput = {
@@ -253,12 +323,196 @@ export class VacanciesService {
       ...(dto.status !== undefined ? { status: dto.status } : {}),
     };
 
-    await this.prisma.vacancy.update({
-      where: { id },
-      data,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vacancy.update({ where: { id }, data });
+      if (locationBranchIds) {
+        await tx.vacancyLocation.deleteMany({ where: { vacancyId: id } });
+        await tx.vacancyLocation.createMany({
+          data: locationBranchIds.map((branchId) => ({
+            tenantId,
+            vacancyId: id,
+            branchId,
+            city: dto.city ?? before.city,
+            country: dto.country ?? before.country,
+            isPrimary: branchId === primaryBranchId,
+          })),
+        });
+      }
+      if (dto.stages) {
+        const pipelineChanged = JSON.stringify(dto.stages.map((stage) => ({
+          code: stage.code.trim().toUpperCase(),
+          name: stage.name.trim(),
+          position: stage.position,
+          color: stage.color ?? null,
+          applicationStatus: stage.applicationStatus ?? 'REVIEWING',
+          allowedNextStageCodes: stage.allowedNextStageCodes ?? [],
+          requiredFields: stage.requiredFields ?? [],
+          requiresApproval: stage.requiresApproval ?? false,
+          requiredApprovals: stage.requiresApproval ? Math.max(1, stage.requiredApprovals ?? 1) : 0,
+          allowReopen: stage.allowReopen ?? false,
+          slaHours: stage.slaHours ?? null,
+          slaWarningHoursBefore: stage.slaWarningHoursBefore ?? 4,
+          slaEscalationHours: stage.slaEscalationHours ?? 8,
+          autoReassignAfterHours: stage.autoReassignAfterHours ?? null,
+          isTerminal: stage.isTerminal ?? false,
+        }))) !== JSON.stringify(before.stages.map((stage) => ({
+          code: stage.code,
+          name: stage.name,
+          position: stage.position,
+          color: stage.color,
+          applicationStatus: stage.applicationStatus,
+          allowedNextStageCodes: stage.allowedNextStageCodes,
+          requiredFields: stage.requiredFields,
+          requiresApproval: stage.requiresApproval,
+          requiredApprovals: stage.requiredApprovals,
+          allowReopen: stage.allowReopen,
+          slaHours: stage.slaHours,
+          slaWarningHoursBefore: stage.slaWarningHoursBefore,
+          slaEscalationHours: stage.slaEscalationHours,
+          autoReassignAfterHours: stage.autoReassignAfterHours,
+          isTerminal: stage.isTerminal,
+        })));
+        const applications = await tx.vacancyApplication.count({ where: { vacancyId: id } });
+        if (pipelineChanged && applications > 0) {
+          throw new BadRequestException('The pipeline cannot be replaced after applications exist');
+        }
+        if (pipelineChanged) {
+          await tx.vacancyStage.deleteMany({ where: { vacancyId: id } });
+          await tx.vacancyStage.createMany({
+            data: dto.stages.map((stage) => ({
+            tenantId,
+            vacancyId: id,
+            code: stage.code.trim().toUpperCase(),
+            name: stage.name.trim(),
+            position: stage.position,
+            color: stage.color,
+            applicationStatus: stage.applicationStatus,
+            allowedNextStageCodes: stage.allowedNextStageCodes?.map((code) => code.trim().toUpperCase()),
+            requiredFields: stage.requiredFields,
+            requiresApproval: stage.requiresApproval ?? false,
+            requiredApprovals: stage.requiresApproval ? Math.max(1, stage.requiredApprovals ?? 1) : 0,
+            allowReopen: stage.allowReopen ?? false,
+            slaHours: stage.slaHours,
+            slaWarningHoursBefore: stage.slaWarningHoursBefore ?? 4,
+            slaEscalationHours: stage.slaEscalationHours ?? 8,
+            autoReassignAfterHours: stage.autoReassignAfterHours,
+            isTerminal: stage.isTerminal ?? false,
+            })),
+          });
+        }
+      }
+      if (dto.responsibles) {
+        await tx.vacancyResponsible.deleteMany({ where: { vacancyId: id } });
+        if (dto.responsibles.length) {
+          await tx.vacancyResponsible.createMany({
+            data: dto.responsibles.map((item) => ({ tenantId, vacancyId: id, userId: item.userId, role: item.role })),
+            skipDuplicates: true,
+          });
+        }
+      }
+      await tx.vacancyChangeEvent.create({
+        data: {
+          tenantId,
+          vacancyId: id,
+          actorUserId: actor.sub,
+          type: dto.status !== undefined && dto.status !== before.status ? 'STATUS_CHANGED' : locationBranchIds ? 'LOCATION_CHANGED' : 'UPDATED',
+          previousValue: this.toJson(this.vacancySnapshot(before)),
+          newValue: this.toJson({ ...this.vacancySnapshot(before), ...dto, locationBranchIds }),
+        },
+      });
     });
 
     return this.findOne(id, tenantId, actor);
+  }
+
+  async clone(id: string, tenantId: string, actor: JwtPayload, reason?: string) {
+    const source = await this.prisma.vacancy.findFirst({
+      where: { id, tenantId, ...this.vacancyScope(actor) },
+      include: { locations: true, stages: { orderBy: { position: 'asc' } }, responsibles: true },
+    });
+    if (!source) throw new NotFoundException('Vacancy not found');
+    await this.planLimits?.assertCapacity(tenantId, 'maxActiveVacancies');
+    return this.prisma.$transaction(async (tx) => {
+      const clone = await tx.vacancy.create({
+        data: {
+          tenantId,
+          branchId: source.branchId,
+          createdByUserId: actor.sub,
+          clonedFromVacancyId: source.id,
+          title: `${source.title} (copia)`,
+          summary: source.summary,
+          description: source.description,
+          requirements: source.requirements,
+          responsibilities: source.responsibilities,
+          benefits: source.benefits,
+          city: source.city,
+          country: source.country,
+          department: source.department,
+          seniority: source.seniority,
+          workMode: source.workMode,
+          employmentType: source.employmentType,
+          openings: source.openings,
+          salaryMin: source.salaryMin,
+          salaryMax: source.salaryMax,
+          currency: source.currency,
+          applicationFormSchema: source.applicationFormSchema ?? Prisma.JsonNull,
+          status: 'PAUSED',
+        },
+      });
+      await tx.vacancyLocation.createMany({
+        data: source.locations.map((item) => ({ tenantId, vacancyId: clone.id, branchId: item.branchId, city: item.city, country: item.country, isPrimary: item.isPrimary })),
+      });
+      await tx.vacancyStage.createMany({
+        data: source.stages.map(({ id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...stage }) => ({ ...stage, vacancyId: clone.id })),
+      });
+      await tx.vacancyResponsible.createMany({
+        data: source.responsibles.map(({ id: _id, createdAt: _createdAt, ...item }) => ({ ...item, vacancyId: clone.id })),
+        skipDuplicates: true,
+      });
+      await tx.vacancyChangeEvent.create({
+        data: {
+          tenantId,
+          vacancyId: clone.id,
+          actorUserId: actor.sub,
+          type: 'CLONED',
+          reason: reason?.trim(),
+          previousValue: this.toJson({ sourceVacancyId: source.id }),
+          newValue: this.toJson({ title: clone.title, status: clone.status }),
+        },
+      });
+      return clone;
+    });
+  }
+
+  async archive(id: string, tenantId: string, actor: JwtPayload, reason?: string) {
+    if (!reason?.trim()) throw new BadRequestException('An archive reason is required');
+    const before = await this.findOne(id, tenantId, actor);
+    if (before.status === 'ARCHIVED') return before;
+    await this.prisma.$transaction([
+      this.prisma.vacancy.update({ where: { id }, data: { status: 'ARCHIVED' } }),
+      this.prisma.vacancyChangeEvent.create({
+        data: {
+          tenantId,
+          vacancyId: id,
+          actorUserId: actor.sub,
+          type: 'STATUS_CHANGED',
+          reason: reason.trim(),
+          previousValue: this.toJson({ status: before.status }),
+          newValue: this.toJson({ status: 'ARCHIVED' }),
+        },
+      }),
+    ]);
+    return this.findOne(id, tenantId, actor);
+  }
+
+  async history(id: string, tenantId: string, actor: JwtPayload) {
+    await this.findOne(id, tenantId, actor);
+    return this.prisma.vacancyChangeEvent.findMany({
+      where: { vacancyId: id, tenantId },
+      include: { actor: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
   }
 
   async findPublic(query: ListPublicVacanciesDto) {
@@ -301,6 +555,10 @@ export class VacanciesService {
               location: true,
             },
           },
+          locations: {
+            include: { branch: { select: { id: true, name: true, location: true } } },
+            orderBy: { isPrimary: 'desc' },
+          },
           imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 },
         },
         orderBy: { createdAt: 'desc' },
@@ -341,6 +599,10 @@ export class VacanciesService {
             name: true,
             location: true,
           },
+        },
+        locations: {
+          include: { branch: { select: { id: true, name: true, location: true } } },
+          orderBy: { isPrimary: 'desc' },
         },
         imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 },
       },
@@ -524,7 +786,55 @@ export class VacanciesService {
       return {};
     }
 
-    return { branchId: { in: actor.allowedBranchIds } };
+    return { locations: { some: { branchId: { in: actor.allowedBranchIds } } } };
+  }
+
+  private vacancySnapshot(vacancy: {
+    title: string;
+    summary?: string | null;
+    description?: string | null;
+    requirements?: string | null;
+    responsibilities?: string | null;
+    benefits?: string | null;
+    city?: string | null;
+    country?: string | null;
+    department?: string | null;
+    seniority?: string | null;
+    workMode?: unknown;
+    employmentType?: unknown;
+    openings?: number | null;
+    salaryMin?: number | null;
+    salaryMax?: number | null;
+    currency?: string | null;
+    status?: unknown;
+    branchId: string;
+    locations?: Array<{ branchId: string }>;
+  }) {
+    return {
+      title: vacancy.title,
+      summary: vacancy.summary,
+      description: vacancy.description,
+      requirements: vacancy.requirements,
+      responsibilities: vacancy.responsibilities,
+      benefits: vacancy.benefits,
+      city: vacancy.city,
+      country: vacancy.country,
+      department: vacancy.department,
+      seniority: vacancy.seniority,
+      workMode: vacancy.workMode,
+      employmentType: vacancy.employmentType,
+      openings: vacancy.openings,
+      salaryMin: vacancy.salaryMin,
+      salaryMax: vacancy.salaryMax,
+      currency: vacancy.currency,
+      status: vacancy.status,
+      branchId: vacancy.branchId,
+      locationBranchIds: vacancy.locations?.map((item) => item.branchId) ?? [vacancy.branchId],
+    };
+  }
+
+  private toJson(value: unknown): Prisma.InputJsonValue {
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 
   private assertActorCanAccessBranch(actor: JwtPayload, branchId: string) {

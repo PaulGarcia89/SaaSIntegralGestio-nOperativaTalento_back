@@ -11,6 +11,8 @@ describe('VacanciesService', () => {
     },
     vacancyStage: { createMany: jest.fn() },
     vacancyResponsible: { createMany: jest.fn() },
+    vacancyLocation: { createMany: jest.fn() },
+    vacancyChangeEvent: { create: jest.fn() },
   };
   const prisma = {
     branch: { findFirst: jest.fn() },
@@ -35,7 +37,7 @@ describe('VacanciesService', () => {
     jest.clearAllMocks();
     prisma.branch.findFirst.mockResolvedValue({ id: 'branch-1' });
     prisma.user.count.mockResolvedValue(1);
-    tx.vacancy.create.mockResolvedValue({ id: 'vacancy-1' });
+    tx.vacancy.create.mockResolvedValue({ id: 'vacancy-1', title: 'Operations coordinator', status: 'OPEN' });
     tx.vacancy.findUniqueOrThrow.mockResolvedValue({
       id: 'vacancy-1',
       stages: [{ code: 'APPLIED', position: 0 }],
@@ -80,6 +82,23 @@ describe('VacanciesService', () => {
         }),
       ],
       skipDuplicates: true,
+    });
+    expect(tx.vacancyLocation.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          vacancyId: 'vacancy-1',
+          branchId: 'branch-1',
+          isPrimary: true,
+        }),
+      ],
+    });
+    expect(tx.vacancyChangeEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        vacancyId: 'vacancy-1',
+        actorUserId: actor.sub,
+        type: 'CREATED',
+      }),
     });
     expect(result).toEqual(expect.objectContaining({ id: 'vacancy-1' }));
   });

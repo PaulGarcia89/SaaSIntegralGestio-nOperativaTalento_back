@@ -7,15 +7,19 @@ import { InterviewCalendarService } from "./interview-calendar.service";
 import { RecruitmentController } from "./recruitment.controller";
 import { RecruitmentService } from "./recruitment.service";
 import { ScorecardsService } from "./scorecards.service";
+import { InterviewSelfSchedulingService } from "./interview-self-scheduling.service";
+import { InterviewSelfSchedulingController } from "./interview-self-scheduling.controller";
+import { NotificationsModule } from "../notifications/notifications.module";
 
 @Module({
-  imports: [AtsCommunicationsModule],
-  controllers: [RecruitmentController],
+  imports: [AtsCommunicationsModule, NotificationsModule],
+  controllers: [RecruitmentController, InterviewSelfSchedulingController],
   providers: [
     RecruitmentService,
     ScorecardsService,
     InterviewCalendarService,
     CalendarTokenCryptoService,
+    InterviewSelfSchedulingService,
     SubscriptionGuard,
     ModuleAccessGuard,
   ],

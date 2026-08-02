@@ -31,20 +31,36 @@ import {
   CalendarAuthorizationQueryDto,
   CalendarOAuthDto,
   CreateDecisionCommitteeDto,
+  CreateInterviewPoolDto,
+  CreateInterviewResourceDto,
+  CreateInterviewSchedulingRequestDto,
   CreateScorecardTemplateDto,
+  UpdateScorecardTemplateAdminDto,
+  DuplicateScorecardTemplateDto,
+  ScorecardCompetencyDto,
+  ReplaceScorecardAssignmentsDto,
+  CreateExternalAssessmentDto,
+  UpdateExternalAssessmentResultDto,
+  AssignHiringManagerDto,
+  DecideHiringManagerApprovalDto,
+  RunBiasValidationDto,
   FinalizeDecisionCommitteeDto,
   ListInterviewsDto,
   ReplaceVacancyResponsiblesDto,
   ReplaceVacancyStagesDto,
   ScheduleInterviewDto,
+  ScheduleInterviewSequenceDto,
   SubmitScorecardDto,
   UpdateInterviewDto,
+  UpdateInterviewerProfileDto,
+  RespondInterviewInvitationDto,
   UpdateAvailabilityDto,
   VoteDecisionCommitteeDto,
 } from "./dto/recruitment.dto";
 import { InterviewCalendarService } from "./interview-calendar.service";
 import { RecruitmentService } from "./recruitment.service";
 import { ScorecardsService } from "./scorecards.service";
+import { InterviewSelfSchedulingService } from "./interview-self-scheduling.service";
 
 @Controller("recruitment")
 @UseGuards(
@@ -61,6 +77,7 @@ export class RecruitmentController {
     private readonly service: RecruitmentService,
     private readonly calendars: InterviewCalendarService,
     private readonly scorecards: ScorecardsService,
+    private readonly selfScheduling: InterviewSelfSchedulingService,
   ) {}
 
   @Get("vacancies/:id/setup")
@@ -119,6 +136,66 @@ export class RecruitmentController {
     return this.service.scheduleInterview(request.tenant!.id, actor, dto);
   }
 
+  @Post("interview-sequences")
+  @RequirePermissions("applications.update")
+  scheduleSequence(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: ScheduleInterviewSequenceDto) {
+    return this.service.scheduleSequence(request.tenant!.id, actor, dto);
+  }
+
+  @Get("interview-pools")
+  @RequirePermissions("applications.read")
+  pools(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload) {
+    return this.service.listPools(request.tenant!.id, actor);
+  }
+
+  @Post("interview-pools")
+  @RequirePermissions("applications.update")
+  createPool(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: CreateInterviewPoolDto) {
+    return this.service.createPool(request.tenant!.id, actor, dto);
+  }
+
+  @Get("interview-resources")
+  @RequirePermissions("applications.read")
+  resources(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query("branchId") branchId?: string) {
+    return this.service.listResources(request.tenant!.id, actor, branchId);
+  }
+
+  @Post("interview-resources")
+  @RequirePermissions("applications.update")
+  createResource(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: CreateInterviewResourceDto) {
+    return this.service.createResource(request.tenant!.id, actor, dto);
+  }
+
+  @Get("interviewer-profiles")
+  @RequirePermissions("applications.read")
+  interviewerProfiles(@Req() request: RequestWithUser) {
+    return this.service.listInterviewerProfiles(request.tenant!.id);
+  }
+
+  @Put("interviewer-profiles/:userId")
+  @RequirePermissions("applications.update")
+  updateInterviewerProfile(@Req() request: RequestWithUser, @Param("userId") userId: string, @Body() dto: UpdateInterviewerProfileDto) {
+    return this.service.updateInterviewerProfile(request.tenant!.id, userId, dto);
+  }
+
+  @Post("interview-scheduling-requests")
+  @RequirePermissions("applications.update")
+  createSchedulingRequest(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: CreateInterviewSchedulingRequestDto) {
+    return this.selfScheduling.createRequest(request.tenant!.id, actor, dto);
+  }
+
+  @Get("coordination-queue")
+  @RequirePermissions("applications.read")
+  coordinationQueue(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.service.coordinationQueue(request.tenant!.id, actor, Number(page ?? 1), Number(pageSize ?? 20));
+  }
+
+  @Patch("interviews/:id/participants/me")
+  @RequirePermissions("applications.read")
+  respondInvitation(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: RespondInterviewInvitationDto) {
+    return this.service.respondToInvitation(request.tenant!.id, actor, id, dto.accepted);
+  }
+
   @Patch("interviews/:id")
   @RequirePermissions("applications.update")
   update(
@@ -165,6 +242,104 @@ export class RecruitmentController {
     @Body() dto: CreateScorecardTemplateDto,
   ) {
     return this.scorecards.createTemplate(request.tenant!.id, actor, dto);
+  }
+
+  @Patch("scorecard-templates/:id")
+  @RequirePermissions("vacancies.update")
+  updateScorecardTemplate(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: UpdateScorecardTemplateAdminDto) {
+    return this.scorecards.updateTemplateAdmin(request.tenant!.id, actor, id, dto);
+  }
+
+  @Post("scorecard-templates/:id/duplicate")
+  @RequirePermissions("vacancies.update")
+  duplicateScorecardTemplate(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: DuplicateScorecardTemplateDto) {
+    return this.scorecards.duplicateTemplate(request.tenant!.id, actor, id, dto);
+  }
+
+  @Get("scorecard-competencies")
+  @RequirePermissions("applications.read")
+  scorecardCompetencies(@Req() request: RequestWithUser, @Query("includeInactive") includeInactive?: string) {
+    return this.scorecards.listCompetencies(request.tenant!.id, includeInactive === "true");
+  }
+
+  @Post("scorecard-competencies")
+  @RequirePermissions("vacancies.update")
+  createScorecardCompetency(@Req() request: RequestWithUser, @Body() dto: ScorecardCompetencyDto) {
+    return this.scorecards.upsertCompetency(request.tenant!.id, undefined, dto);
+  }
+
+  @Patch("scorecard-competencies/:id")
+  @RequirePermissions("vacancies.update")
+  updateScorecardCompetency(@Req() request: RequestWithUser, @Param("id") id: string, @Body() dto: ScorecardCompetencyDto) {
+    return this.scorecards.upsertCompetency(request.tenant!.id, id, dto);
+  }
+
+  @Put("interviews/:id/scorecard-assignments")
+  @RequirePermissions("applications.update")
+  replaceScorecardAssignments(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: ReplaceScorecardAssignmentsDto) {
+    return this.scorecards.replaceAssignments(request.tenant!.id, actor, id, dto);
+  }
+
+  @Get("applications/:id/external-assessments")
+  @RequirePermissions("applications.read")
+  externalAssessments(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string) {
+    return this.scorecards.listExternalAssessments(request.tenant!.id, actor, id);
+  }
+
+  @Post("external-assessments")
+  @RequirePermissions("applications.update")
+  createExternalAssessment(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: CreateExternalAssessmentDto) {
+    return this.scorecards.createExternalAssessment(request.tenant!.id, actor, dto);
+  }
+
+  @Patch("external-assessments/:id/result")
+  @RequirePermissions("applications.update")
+  updateExternalAssessment(@Req() request: RequestWithUser, @Param("id") id: string, @Body() dto: UpdateExternalAssessmentResultDto) {
+    return this.scorecards.updateExternalAssessment(request.tenant!.id, id, dto);
+  }
+
+  @Put("applications/:id/hiring-manager-approval")
+  @RequirePermissions("applications.update")
+  assignHiringManager(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: AssignHiringManagerDto) {
+    return this.scorecards.assignHiringManager(request.tenant!.id, actor, id, dto);
+  }
+
+  @Get("applications/:id/hiring-manager-approval")
+  @RequirePermissions("applications.read")
+  hiringManagerApproval(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string) {
+    return this.scorecards.getHiringManagerApproval(request.tenant!.id, actor, id);
+  }
+
+  @Post("applications/:id/hiring-manager-approval/decision")
+  @RequirePermissions("applications.update")
+  decideHiringManager(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: DecideHiringManagerApprovalDto) {
+    return this.scorecards.decideHiringManager(request.tenant!.id, actor, id, dto);
+  }
+
+  @Get("scorecard-calibration")
+  @RequirePermissions("applications.read")
+  scorecardCalibration(@Req() request: RequestWithUser) {
+    return this.scorecards.listCalibration(request.tenant!.id);
+  }
+
+  @Post("scorecard-calibration/run")
+  @RequirePermissions("vacancies.update")
+  calculateScorecardCalibration(@Req() request: RequestWithUser, @Query("startsAt") startsAt?: string, @Query("endsAt") endsAt?: string) {
+    const end = endsAt ? new Date(endsAt) : new Date();
+    const start = startsAt ? new Date(startsAt) : new Date(end.getTime() - 180 * 86_400_000);
+    return this.scorecards.calculateCalibration(request.tenant!.id, start, end);
+  }
+
+  @Get("scorecard-bias-validations")
+  @RequirePermissions("applications.read")
+  biasValidations(@Req() request: RequestWithUser) {
+    return this.scorecards.listBiasValidations(request.tenant!.id);
+  }
+
+  @Post("scorecard-bias-validations")
+  @RequirePermissions("vacancies.update")
+  runBiasValidation(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: RunBiasValidationDto) {
+    return this.scorecards.runBiasValidation(request.tenant!.id, actor, dto);
   }
 
   @Get("interviews/:id/scorecard-context")

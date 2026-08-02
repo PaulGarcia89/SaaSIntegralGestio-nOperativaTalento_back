@@ -3,9 +3,16 @@ import {
   CalendarProvider,
   DecisionCommitteeRole,
   InterviewRecommendation,
+  InterviewParticipantRole,
+  InterviewResourceType,
+  InterviewerTrainingStatus,
   InterviewStatus,
   InterviewType,
   ScorecardCriterionType,
+  ScorecardFeedbackVisibility,
+  ScorecardTemplateScope,
+  ExternalAssessmentStatus,
+  HiringManagerApprovalStatus,
   VideoConferenceProvider,
   VacancyResponsibleRole,
 } from "@prisma/client";
@@ -13,11 +20,13 @@ import { Type } from "class-transformer";
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -28,6 +37,7 @@ import {
   Min,
   ValidateNested,
 } from "class-validator";
+import { OffsetPaginationQueryDto } from "../../common/dto/offset-pagination-query.dto";
 
 export class VacancyStageInputDto {
   @IsOptional()
@@ -119,7 +129,7 @@ export class ReplaceVacancyResponsiblesDto {
   responsibles!: VacancyResponsibleInputDto[];
 }
 
-export class ListInterviewsDto {
+export class ListInterviewsDto extends OffsetPaginationQueryDto {
   @IsOptional()
   @IsUUID()
   applicationId?: string;
@@ -135,6 +145,31 @@ export class ListInterviewsDto {
   @IsOptional()
   @IsEnum(InterviewStatus)
   status?: InterviewStatus;
+
+  @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  resourceId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  sequenceId?: string;
+
+  @IsOptional()
+  @IsString()
+  startsFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  startsTo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  search?: string;
 }
 
 export class ScheduleInterviewDto {
@@ -147,6 +182,41 @@ export class ScheduleInterviewDto {
 
   @IsUUID()
   interviewerUserId!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  participantUserIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  shadowUserIds?: string[];
+
+  @IsOptional()
+  @IsUUID()
+  poolId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  resourceIds?: string[];
+
+  @IsOptional()
+  @IsUUID()
+  sequenceId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(20)
+  sequenceOrder?: number;
 
   @IsString()
   @IsNotEmpty()
@@ -239,6 +309,188 @@ export class UpdateInterviewDto {
   @IsString()
   @MaxLength(4000)
   notes?: string;
+}
+
+export class InterviewSequenceRoundDto extends ScheduleInterviewDto {}
+
+export class ScheduleInterviewSequenceDto {
+  @IsUUID()
+  applicationId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(160)
+  title!: string;
+
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => InterviewSequenceRoundDto)
+  rounds!: InterviewSequenceRoundDto[];
+}
+
+export class CreateInterviewPoolMemberDto {
+  @IsUUID()
+  userId!: string;
+
+  @IsEnum(InterviewParticipantRole)
+  defaultRole!: InterviewParticipantRole;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  priority?: number;
+}
+
+export class CreateInterviewPoolDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => CreateInterviewPoolMemberDto)
+  members!: CreateInterviewPoolMemberDto[];
+}
+
+export class CreateInterviewResourceDto {
+  @IsUUID()
+  branchId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name!: string;
+
+  @IsEnum(InterviewResourceType)
+  type!: InterviewResourceType;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  capacity?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  location?: string;
+}
+
+export class UpdateInterviewerProfileDto {
+  @IsEnum(InterviewerTrainingStatus)
+  trainingStatus!: InterviewerTrainingStatus;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  shadowSessionsRequired?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(50)
+  maxInterviewsPerDay?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(200)
+  maxInterviewsPerWeek?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoSubstitutionEnabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  specialties?: string[];
+}
+
+export class CreateInterviewSchedulingRequestDto {
+  @IsUUID()
+  applicationId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(160)
+  title!: string;
+
+  @IsEnum(InterviewType)
+  type!: InterviewType;
+
+  @IsString()
+  @MaxLength(100)
+  timezone!: string;
+
+  @IsInt()
+  @Min(15)
+  @Max(480)
+  durationMinutes!: number;
+
+  @IsString()
+  windowStartsAt!: string;
+
+  @IsString()
+  windowEndsAt!: string;
+
+  @IsOptional()
+  @IsUUID()
+  poolId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  interviewerUserIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  shadowUserIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  resourceIds?: string[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  expiresInDays?: number;
+}
+
+export class BookInterviewSlotDto {
+  @IsString()
+  startsAt!: string;
+}
+
+export class RespondInterviewInvitationDto {
+  @IsBoolean()
+  accepted!: boolean;
 }
 
 export class CalendarOAuthDto {
@@ -388,6 +640,10 @@ export class ScorecardCriterionInputDto {
   @MaxLength(160)
   competencyName?: string;
 
+  @IsOptional()
+  @IsUUID()
+  competencyId?: string;
+
   @IsEnum(ScorecardCriterionType)
   type!: ScorecardCriterionType;
 
@@ -410,8 +666,17 @@ export class ScorecardCriterionInputDto {
 }
 
 export class CreateScorecardTemplateDto {
+  @IsOptional()
   @IsUUID()
-  vacancyId!: string;
+  vacancyId?: string;
+
+  @IsOptional()
+  @IsEnum(ScorecardTemplateScope)
+  scope?: ScorecardTemplateScope;
+
+  @IsOptional()
+  @IsEnum(ScorecardFeedbackVisibility)
+  feedbackVisibility?: ScorecardFeedbackVisibility;
 
   @IsOptional()
   @IsUUID()
@@ -433,6 +698,187 @@ export class CreateScorecardTemplateDto {
   @ValidateNested({ each: true })
   @Type(() => ScorecardCriterionInputDto)
   criteria!: ScorecardCriterionInputDto[];
+}
+
+export class UpdateScorecardTemplateAdminDto {
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsEnum(ScorecardFeedbackVisibility)
+  feedbackVisibility?: ScorecardFeedbackVisibility;
+}
+
+export class DuplicateScorecardTemplateDto {
+  @IsOptional()
+  @IsUUID()
+  vacancyId?: string;
+
+  @IsOptional()
+  @IsEnum(ScorecardTemplateScope)
+  scope?: ScorecardTemplateScope;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  name?: string;
+}
+
+export class ScorecardCompetencyDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  code!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(160)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  category?: string;
+
+  @IsOptional()
+  @IsObject()
+  behavioralAnchors?: Record<string, string>;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class ScorecardEvaluatorAssignmentInputDto {
+  @IsUUID()
+  evaluatorUserId!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  criterionIds!: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  anonymousReview?: boolean;
+}
+
+export class ReplaceScorecardAssignmentsDto {
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => ScorecardEvaluatorAssignmentInputDto)
+  assignments!: ScorecardEvaluatorAssignmentInputDto[];
+}
+
+export class CreateExternalAssessmentDto {
+  @IsUUID()
+  applicationId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  provider!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  assessmentType!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  externalAssessmentId?: string;
+
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  launchUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  expiresAt?: string;
+
+  @IsBoolean()
+  consentRecorded!: boolean;
+}
+
+export class UpdateExternalAssessmentResultDto {
+  @IsEnum(ExternalAssessmentStatus)
+  status!: ExternalAssessmentStatus;
+
+  @IsOptional()
+  @IsNumber()
+  score?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  percentile?: number;
+
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  reportUrl?: string;
+
+  @IsOptional()
+  @IsObject()
+  result?: Record<string, unknown>;
+}
+
+export class AssignHiringManagerDto {
+  @IsUUID()
+  managerUserId!: string;
+}
+
+export class DecideHiringManagerApprovalDto {
+  @IsEnum(HiringManagerApprovalStatus)
+  status!: HiringManagerApprovalStatus;
+
+  @IsEnum(InterviewRecommendation)
+  recommendation!: InterviewRecommendation;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(4000)
+  rationale!: string;
+}
+
+export class BiasValidationGroupDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name!: string;
+
+  @IsInt()
+  @Min(1)
+  total!: number;
+
+  @IsInt()
+  @Min(0)
+  selected!: number;
+}
+
+export class RunBiasValidationDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  populationField!: string;
+
+  @ValidateNested()
+  @Type(() => BiasValidationGroupDto)
+  referenceGroup!: BiasValidationGroupDto;
+
+  @ValidateNested()
+  @Type(() => BiasValidationGroupDto)
+  comparisonGroup!: BiasValidationGroupDto;
 }
 
 export class CreateDecisionCommitteeDto {

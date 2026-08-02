@@ -1,5 +1,6 @@
 import { ApplicationStatus } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { OffsetPaginationQueryDto } from '../../common/dto/offset-pagination-query.dto';
 
 export class ListApplicationsDto extends OffsetPaginationQueryDto {
@@ -23,4 +24,25 @@ export class ListApplicationsDto extends OffsetPaginationQueryDto {
   @IsOptional()
   @IsEnum(ApplicationStatus)
   status?: ApplicationStatus;
+
+  @IsOptional()
+  @IsUUID()
+  assignedRecruiterId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  rejectionReasonId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  appliedFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  appliedTo?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  overdueOnly?: boolean;
 }

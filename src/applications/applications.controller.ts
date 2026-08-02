@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, Body, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards, Body, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
@@ -21,13 +21,15 @@ import { RequireModule } from '../common/decorators/module-access.decorator';
 import { ModuleCode } from '@prisma/client';
 import { BulkUpdateApplicationsDto } from './dto/bulk-update-applications.dto';
 import { DeleteResumeDto, ReplaceResumeDto } from './dto/file-operation.dto';
+import { CreateApplicationSavedViewDto, UpdateApplicationSavedViewDto } from './dto/application-operations.dto';
+import { ApplicationSlaService } from './application-sla.service';
 
 @Controller('applications')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
 @TenantWide()
 @RequireModule(ModuleCode.ATS)
 export class ApplicationsController {
-  constructor(private readonly applicationsService: ApplicationsService) {}
+  constructor(private readonly applicationsService: ApplicationsService, private readonly applicationSla: ApplicationSlaService) {}
 
   @Get()
   @RequirePermissions('applications.read')
@@ -57,6 +59,42 @@ export class ApplicationsController {
     @Body() dto: BulkUpdateApplicationsDto,
   ) {
     return this.applicationsService.bulkUpdateStatus(user, request.tenant!.id, dto);
+  }
+
+  @Get('saved-views/list')
+  @RequirePermissions('applications.read')
+  savedViews(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload) {
+    return this.applicationsService.listSavedViews(user, request.tenant!.id);
+  }
+
+  @Post('saved-views')
+  @RequirePermissions('applications.read')
+  createSavedView(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Body() dto: CreateApplicationSavedViewDto) {
+    return this.applicationsService.createSavedView(user, request.tenant!.id, dto);
+  }
+
+  @Put('saved-views/:id')
+  @RequirePermissions('applications.read')
+  updateSavedView(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateApplicationSavedViewDto) {
+    return this.applicationsService.updateSavedView(id, user, request.tenant!.id, dto);
+  }
+
+  @Delete('saved-views/:id')
+  @RequirePermissions('applications.read')
+  deleteSavedView(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.applicationsService.deleteSavedView(id, user, request.tenant!.id);
+  }
+
+  @Get('rejection-reasons/list')
+  @RequirePermissions('applications.read')
+  rejectionReasons(@Req() request: RequestWithUser) {
+    return this.applicationsService.listRejectionReasons(request.tenant!.id);
+  }
+
+  @Post('sla/process')
+  @RequirePermissions('applications.bulk_update')
+  processSla() {
+    return this.applicationSla.processDue();
   }
 
   @Get(':id/files/resume')

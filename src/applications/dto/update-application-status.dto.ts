@@ -21,6 +21,10 @@ export class UpdateApplicationStatusDto {
   reason?: string;
 
   @IsOptional()
+  @IsUUID()
+  rejectionReasonId?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(4000)
   notes?: string;
