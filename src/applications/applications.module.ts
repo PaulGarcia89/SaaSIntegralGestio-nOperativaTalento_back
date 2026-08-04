@@ -17,6 +17,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { CandidatePortalService } from './candidate-portal.service';
 import { ApplicationSlaService } from './application-sla.service';
 import { ApplicationSlaSchedulerService } from './application-sla-scheduler.service';
+import { TalentCrmController } from './talent-crm.controller';
+import { TalentCrmService } from './talent-crm.service';
 
 @Module({
   imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule],
@@ -26,6 +28,7 @@ import { ApplicationSlaSchedulerService } from './application-sla-scheduler.serv
     CandidateAuthController,
     CandidateApplicationsController,
     AtsFileAccessController,
+    TalentCrmController,
   ],
   providers: [
     ApplicationsService,
@@ -38,6 +41,7 @@ import { ApplicationSlaSchedulerService } from './application-sla-scheduler.serv
     TrainingAntivirusService,
     ApplicationSlaService,
     ApplicationSlaSchedulerService,
+    TalentCrmService,
   ],
 })
 export class ApplicationsModule {}

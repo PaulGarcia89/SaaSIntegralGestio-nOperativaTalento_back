@@ -38,6 +38,8 @@ export type EnqueueAtsEventInput = {
   actorId?: string;
   variables?: Record<string, string | null | undefined>;
   overrideBody?: string;
+  overrideSubject?: string;
+  inReplyToMessageId?: string;
 };
 
 const DEFAULT_TEMPLATES: Record<
@@ -121,6 +123,20 @@ export class AtsCommunicationsService {
     if (!application)
       throw new NotFoundException("Application not found for communication");
 
+    const conversation = await tx.atsConversation.upsert({
+      where: { applicationId: application.id },
+      create: {
+        tenantId: input.tenantId,
+        applicationId: application.id,
+        lastMessageAt: input.scheduledAt ?? new Date(),
+      },
+      update: {},
+    });
+    const communicationDomain = await tx.communicationDomain.findUnique({
+      where: { tenantId: input.tenantId },
+      select: { fromEmail: true },
+    });
+
     const stageCode = input.stageCode ?? application.currentStage?.code ?? null;
     const variables = {
       candidateName: application.candidate.fullName,
@@ -180,7 +196,7 @@ export class AtsCommunicationsService {
           messages.push(existing);
           continue;
         }
-        const subject = this.render(definition.subject, variables);
+        const subject = input.overrideSubject?.trim() || this.render(definition.subject, variables);
         const body =
           input.overrideBody?.trim() || this.render(definition.body, variables);
         const notification = await tx.notification.create({
@@ -282,6 +298,9 @@ export class AtsCommunicationsService {
               templateVersion: template?.version,
               type: input.type,
               audience,
+              conversationId: conversation.id,
+              inReplyToMessageId: input.inReplyToMessageId,
+              senderEmail: communicationDomain?.fromEmail,
               recipientEmail: recipient.email.toLowerCase(),
               recipientName: recipient.name,
               recipientUserId: recipient.userId,
@@ -301,6 +320,15 @@ export class AtsCommunicationsService {
             },
           }),
         );
+        await tx.atsConversation.update({
+          where: { id: conversation.id },
+          data: {
+            lastMessageAt: input.scheduledAt ?? new Date(),
+            lastOutboundAt: input.scheduledAt ?? new Date(),
+            archivedAt: null,
+            snoozedUntil: null,
+          },
+        });
       }
     }
     return messages;

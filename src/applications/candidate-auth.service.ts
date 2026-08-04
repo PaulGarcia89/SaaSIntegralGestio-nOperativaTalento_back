@@ -123,16 +123,20 @@ export class CandidateAuthService {
   async updateProfile(accountId: string, dto: CandidateProfileDto) {
     await this.prisma.$transaction(async (tx) => {
       await tx.candidateAccount.update({ where: { id: accountId }, data: { ...dto, profileSource: 'MANUAL' } });
+      const profileData = {
+        ...(dto.fullName !== undefined ? { fullName: dto.fullName } : {}),
+        ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
+        ...(dto.city !== undefined ? { city: dto.city } : {}),
+        ...(dto.linkedinUrl !== undefined ? { linkedinUrl: dto.linkedinUrl } : {}),
+        ...(dto.portfolioUrl !== undefined ? { portfolioUrl: dto.portfolioUrl } : {}),
+      };
+      const identities = await tx.candidate.findMany({ where: { accountId }, select: { mergedIntoId: true } });
       await tx.candidate.updateMany({
         where: { accountId },
-        data: {
-          ...(dto.fullName !== undefined ? { fullName: dto.fullName } : {}),
-          ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
-          ...(dto.city !== undefined ? { city: dto.city } : {}),
-          ...(dto.linkedinUrl !== undefined ? { linkedinUrl: dto.linkedinUrl } : {}),
-          ...(dto.portfolioUrl !== undefined ? { portfolioUrl: dto.portfolioUrl } : {}),
-        },
+        data: profileData,
       });
+      const mergedIntoIds = identities.map((item) => item.mergedIntoId).filter((id): id is string => Boolean(id));
+      if (mergedIntoIds.length) await tx.candidate.updateMany({ where: { id: { in: mergedIntoIds } }, data: profileData });
     });
     return this.profile(accountId);
   }

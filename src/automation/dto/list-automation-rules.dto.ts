@@ -1,9 +1,14 @@
 import { Transform } from 'class-transformer';
 import { AutomationScope, AutomationTriggerEvent } from '@prisma/client';
-import { IsBoolean, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { OffsetPaginationQueryDto } from '../../common/dto/offset-pagination-query.dto';
 
 export class ListAutomationRulesDto extends OffsetPaginationQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  search?: string;
+
   @IsOptional()
   @IsEnum(AutomationTriggerEvent)
   triggerEvent?: AutomationTriggerEvent;

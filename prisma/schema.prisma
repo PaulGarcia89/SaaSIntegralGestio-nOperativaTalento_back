@@ -110,6 +110,24 @@ enum CandidatePrivacyRequestStatus {
   CANCELLED
 }
 
+enum CandidateCrmStatus {
+  ACTIVE
+  MERGED
+  ARCHIVED
+}
+
+enum TalentActivityType {
+  NOTE
+  EMAIL
+  CALL
+  MEETING
+  TASK
+  STATUS_CHANGE
+  POOL_CHANGE
+  TAG_CHANGE
+  MERGE
+}
+
 enum ApplicationTransitionRequestStatus {
   PENDING
   APPROVED
@@ -448,6 +466,18 @@ enum NotificationChannel {
 enum AtsMessageDirection {
   OUTBOUND
   INBOUND
+}
+
+enum AtsConversationStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+enum AtsInboundMatchStatus {
+  UNMATCHED
+  LINKED
+  IGNORED
 }
 
 enum CommunicationDomainStatus {
@@ -1038,6 +1068,10 @@ model Tenant {
   subscription                  Subscription?
   auditLogs                     AuditLog[]
   candidates                    Candidate[]
+  talentPools                   TalentPool[]
+  talentTags                    TalentTag[]
+  talentActivities              TalentActivity[]
+  candidateMergeAudits          CandidateMergeAudit[]
   branches                      Branch[]
   employees                     Employee[]
   employeeBranches              EmployeeBranch[]
@@ -1111,6 +1145,9 @@ model Tenant {
   notificationPreferences       NotificationPreference[]
   notificationDeliveries        NotificationDelivery[]
   communicationDomain           CommunicationDomain?
+  atsConversations              AtsConversation[]
+  atsMessageAttachments         AtsMessageAttachment[]
+  atsUnmatchedInboundEmails     AtsUnmatchedInboundEmail[]
   candidateChannelPreferences   CandidateChannelPreference[]
   communicationEvents           CommunicationEvent[]
   billingCustomer               BillingCustomer?
@@ -2293,6 +2330,7 @@ model Branch {
   trainingOnboardingRules       TrainingOnboardingRule[]
   interviewPools                InterviewPool[]
   interviewResources            InterviewResource[]
+  talentPools                   TalentPool[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -2733,33 +2771,151 @@ model VacancyFormTemplate {
 }
 
 model Candidate {
-  id                   String                       @id @default(uuid())
-  tenantId             String
-  accountId            String?
-  fullName             String
-  email                String
-  phone                String?
-  city                 String?
-  linkedinUrl          String?
-  portfolioUrl         String?
-  resumeUrl            String?
-  createdAt            DateTime                     @default(now())
-  updatedAt            DateTime                     @updatedAt
-  tenant               Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  account              CandidateAccount?            @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  applications         VacancyApplication[]
-  masterWorkflows      MasterWorkflow[]
-  hiringFlows          HiringFlow[]
-  onboardingFlows      OnboardingFlow[]
-  automationExecutions AutomationExecution[]
-  automationAuditLogs  AutomationAuditLog[]
-  employees            Employee[]
-  resumeFiles          CandidateResumeFile[]
-  channelPreferences   CandidateChannelPreference[]
+  id                    String                       @id @default(uuid())
+  tenantId              String
+  accountId             String?
+  fullName              String
+  email                 String
+  phone                 String?
+  city                  String?
+  linkedinUrl           String?
+  portfolioUrl          String?
+  resumeUrl             String?
+  crmStatus             CandidateCrmStatus           @default(ACTIVE)
+  source                String?
+  doNotContact          Boolean                      @default(false)
+  mergedIntoId          String?
+  mergedAt              DateTime?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  tenant                Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account               CandidateAccount?            @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  applications          VacancyApplication[]
+  masterWorkflows       MasterWorkflow[]
+  hiringFlows           HiringFlow[]
+  onboardingFlows       OnboardingFlow[]
+  automationExecutions  AutomationExecution[]
+  automationAuditLogs   AutomationAuditLog[]
+  employees             Employee[]
+  resumeFiles           CandidateResumeFile[]
+  channelPreferences    CandidateChannelPreference[]
+  mergedInto            Candidate?                   @relation("CandidateMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedCandidates      Candidate[]                  @relation("CandidateMerge")
+  talentPoolMemberships TalentPoolMember[]
+  talentTagAssignments  CandidateTalentTag[]
+  talentActivities      TalentActivity[]
+  sourceMergeAudits     CandidateMergeAudit[]        @relation("CandidateMergeSource")
+  targetMergeAudits     CandidateMergeAudit[]        @relation("CandidateMergeTarget")
 
   @@unique([tenantId, email])
   @@index([tenantId])
+  @@index([tenantId, crmStatus, updatedAt])
+  @@index([tenantId, phone])
+  @@index([tenantId, linkedinUrl])
+  @@index([mergedIntoId])
   @@index([accountId])
+}
+
+model TalentPool {
+  id          String             @id @default(uuid())
+  tenantId    String
+  branchId    String?
+  name        String
+  description String?
+  color       String?
+  isActive    Boolean            @default(true)
+  createdById String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  members     TalentPoolMember[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, branchId, isActive])
+}
+
+model TalentPoolMember {
+  id          String     @id @default(uuid())
+  tenantId    String
+  poolId      String
+  candidateId String
+  addedById   String
+  addedAt     DateTime   @default(now())
+  pool        TalentPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  candidate   Candidate  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([poolId, candidateId])
+  @@index([tenantId, candidateId])
+}
+
+model TalentTag {
+  id         String               @id @default(uuid())
+  tenantId   String
+  name       String
+  color      String?
+  isActive   Boolean              @default(true)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  candidates CandidateTalentTag[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+}
+
+model CandidateTalentTag {
+  id          String    @id @default(uuid())
+  tenantId    String
+  candidateId String
+  tagId       String
+  addedById   String
+  addedAt     DateTime  @default(now())
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  tag         TalentTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, tagId])
+  @@index([tenantId, tagId])
+}
+
+model TalentActivity {
+  id          String             @id @default(uuid())
+  tenantId    String
+  candidateId String
+  type        TalentActivityType
+  subject     String
+  description String?
+  dueAt       DateTime?
+  completedAt DateTime?
+  actorId     String
+  metadata    Json?
+  createdAt   DateTime           @default(now())
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  candidate   Candidate          @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, candidateId, createdAt])
+  @@index([tenantId, type, dueAt])
+}
+
+model CandidateMergeAudit {
+  id                String    @id @default(uuid())
+  tenantId          String
+  sourceCandidateId String
+  targetCandidateId String
+  actorId           String
+  reason            String
+  sourceSnapshot    Json
+  targetSnapshot    Json
+  movedApplications Int       @default(0)
+  movedFiles        Int       @default(0)
+  createdAt         DateTime  @default(now())
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceCandidate   Candidate @relation("CandidateMergeSource", fields: [sourceCandidateId], references: [id], onDelete: Restrict)
+  targetCandidate   Candidate @relation("CandidateMergeTarget", fields: [targetCandidateId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, sourceCandidateId])
+  @@index([tenantId, targetCandidateId])
+  @@index([tenantId, createdAt])
 }
 
 model CandidateResumeFile {
@@ -3145,6 +3301,7 @@ model VacancyApplication {
   transitionRequests          ApplicationStageTransitionRequest[]
   resumeFiles                 CandidateResumeFile[]
   communications              AtsMessage[]
+  conversation                AtsConversation?
   decisionCommittee           HiringDecisionCommittee?
   externalAssessments         ExternalCandidateAssessment[]
   hiringManagerApproval       HiringManagerApproval?
@@ -3854,6 +4011,9 @@ model AtsMessage {
   deliveredAt        DateTime?
   providerMessageId  String?
   inReplyToMessageId String?
+  conversationId     String?
+  internetMessageId  String?
+  referencesHeader   String?
   readAt             DateTime?
   lastError          String?
   correlationId      String?
@@ -3868,14 +4028,83 @@ model AtsMessage {
   interview          ApplicationInterview?     @relation(fields: [interviewId], references: [id], onDelete: SetNull)
   template           AtsCommunicationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   notification       Notification?             @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  conversation       AtsConversation?          @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  attachments        AtsMessageAttachment[]
 
   @@unique([tenantId, deduplicationKey])
   @@index([tenantId, applicationId, createdAt])
+  @@index([tenantId, conversationId, createdAt])
   @@index([tenantId, status, nextAttemptAt])
   @@index([tenantId, recipientEmail, createdAt])
   @@index([tenantId, direction, channel, createdAt])
   @@index([tenantId, providerMessageId])
   @@index([interviewId, type])
+}
+
+model AtsConversation {
+  id             String                @id @default(uuid())
+  tenantId       String
+  applicationId  String                @unique
+  status         AtsConversationStatus @default(OPEN)
+  assignedUserId String?
+  unreadCount    Int                   @default(0)
+  lastMessageAt  DateTime              @default(now())
+  lastInboundAt  DateTime?
+  lastOutboundAt DateTime?
+  snoozedUntil   DateTime?
+  archivedAt     DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application    VacancyApplication    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  messages       AtsMessage[]
+
+  @@index([tenantId, status, lastMessageAt])
+  @@index([tenantId, assignedUserId, lastMessageAt])
+  @@index([tenantId, unreadCount, lastMessageAt])
+}
+
+model AtsMessageAttachment {
+  id                   String     @id @default(uuid())
+  tenantId             String
+  messageId            String
+  providerAttachmentId String
+  filename             String
+  mimeType             String
+  sizeBytes            Int?
+  disposition          String?
+  contentId            String?
+  createdAt            DateTime   @default(now())
+  tenant               Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  message              AtsMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, providerAttachmentId])
+  @@index([tenantId, messageId])
+}
+
+model AtsUnmatchedInboundEmail {
+  id                  String                @id @default(uuid())
+  tenantId            String
+  providerMessageId   String
+  providerEventId     String
+  senderEmail         String
+  recipientEmail      String
+  subject             String
+  body                String
+  status              AtsInboundMatchStatus @default(UNMATCHED)
+  linkedApplicationId String?
+  resolvedByUserId    String?
+  resolvedAt          DateTime?
+  reason              String?
+  attachments         Json?
+  occurredAt          DateTime
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  tenant              Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, providerMessageId])
+  @@index([tenantId, status, occurredAt])
 }
 
 model CommunicationDomain {

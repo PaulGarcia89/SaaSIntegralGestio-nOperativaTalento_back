@@ -445,7 +445,7 @@ export class NotificationsService {
   private async attemptEmailDelivery(id: string) {
     const delivery = await this.prisma.notificationDelivery.findUnique({
       where: { id },
-      include: { notification: true, user: true },
+      include: { notification: { include: { atsMessage: { select: { applicationId: true, inReplyToMessageId: true } } } }, user: true },
     });
     if (!delivery || delivery.channel !== NotificationChannel.EMAIL) {
       throw new NotFoundException('Email delivery not found');

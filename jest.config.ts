@@ -15,6 +15,7 @@ const config: Config = {
   ],
   coverageDirectory: 'coverage',
   testEnvironment: 'node',
+  testPathIgnorePatterns: ['/test/e2e/'],
 };
 
 export default config;

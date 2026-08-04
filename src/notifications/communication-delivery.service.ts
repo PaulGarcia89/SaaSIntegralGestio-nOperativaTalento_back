@@ -3,7 +3,12 @@ import { NotificationDelivery } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 type EmailDelivery = NotificationDelivery & {
-  notification: { title: string; message: string; actionUrl: string | null };
+  notification: {
+    title: string;
+    message: string;
+    actionUrl: string | null;
+    atsMessage: { applicationId: string; inReplyToMessageId: string | null } | null;
+  };
   user: { email: string } | null;
 };
 
@@ -21,6 +26,12 @@ export class CommunicationDeliveryService {
       ? `${domain.fromName} <${domain.fromEmail}>`
       : process.env.NOTIFICATION_FROM_EMAIL?.trim();
     if (!from) throw new Error('A verified sender domain or NOTIFICATION_FROM_EMAIL is required');
+    const parentMessage = delivery.notification.atsMessage?.inReplyToMessageId
+      ? await this.prisma.atsMessage.findUnique({ where: { id: delivery.notification.atsMessage.inReplyToMessageId }, select: { internetMessageId: true, referencesHeader: true } })
+      : null;
+    const replyTo = domain?.status === 'VERIFIED' && delivery.notification.atsMessage
+      ? this.applicationReplyAddress(domain.replyToEmail ?? domain.fromEmail, delivery.notification.atsMessage.applicationId)
+      : domain?.replyToEmail ?? undefined;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12_000);
     const response = await fetch('https://api.resend.com/emails', {
@@ -31,13 +42,22 @@ export class CommunicationDeliveryService {
         to: [recipient],
         subject: delivery.notification.title,
         text: delivery.notification.message,
-        reply_to: domain?.replyToEmail ?? undefined,
-        headers: { 'X-Correlation-Id': delivery.correlationId ?? delivery.id },
+        reply_to: replyTo,
+        headers: {
+          'X-Correlation-Id': delivery.correlationId ?? delivery.id,
+          ...(parentMessage?.internetMessageId ? { 'In-Reply-To': parentMessage.internetMessageId } : {}),
+          ...(parentMessage?.referencesHeader || parentMessage?.internetMessageId ? { References: [parentMessage?.referencesHeader, parentMessage?.internetMessageId].filter(Boolean).join(' ') } : {}),
+        },
       }),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
     const result = await response.json().catch(() => ({})) as { id?: string; message?: string };
     if (!response.ok) throw new Error(`Resend responded ${response.status}: ${result.message ?? 'delivery rejected'}`);
     return { id: result.id ?? '', provider: 'RESEND' as const };
+  }
+
+  private applicationReplyAddress(baseAddress: string, applicationId: string) {
+    const [local, domain] = baseAddress.toLowerCase().split('@');
+    return local && domain ? `${local.split('+')[0]}+${applicationId}@${domain}` : baseAddress;
   }
 }

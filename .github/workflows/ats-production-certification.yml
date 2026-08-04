@@ -1,0 +1,39 @@
+name: ATS production certification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      ATS_CERT_BASE_URL: ${{ vars.ATS_PRODUCTION_BACKEND_URL }}
+      ATS_CERT_TENANT_SLUG: ${{ vars.ATS_PRODUCTION_TENANT_SLUG }}
+      ATS_CERT_EXPECTED_TENANT_ID: ${{ vars.ATS_PRODUCTION_TENANT_ID }}
+      ATS_CERT_EXPECTED_BRANCH_ID: ${{ vars.ATS_PRODUCTION_BRANCH_ID }}
+      ATS_CERT_EMAIL: ${{ secrets.ATS_PRODUCTION_CERT_EMAIL }}
+      ATS_CERT_PASSWORD: ${{ secrets.ATS_PRODUCTION_CERT_PASSWORD }}
+      ATS_CERT_REPORT_PATH: ats-production-certification.json
+      ATS_CERT_TIMEOUT_MS: "12000"
+      ATS_CERT_MAX_P95_MS: "2000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run certify:ats:production
+      - name: Conservar reporte de certificación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ats-production-certification
+          path: ats-production-certification.json
+          if-no-files-found: error
+          retention-days: 30

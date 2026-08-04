@@ -29,6 +29,11 @@ describe('AtsCommunicationsService', () => {
         }),
       },
       atsCommunicationTemplate: { findFirst: jest.fn().mockResolvedValue(null) },
+      atsConversation: {
+        upsert: jest.fn().mockResolvedValue({ id: 'conversation-1' }),
+        update: jest.fn().mockResolvedValue({ id: 'conversation-1' }),
+      },
+      communicationDomain: { findUnique: jest.fn().mockResolvedValue({ fromEmail: 'talento@acme.test' }) },
       atsMessage: {
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn()
@@ -77,6 +82,10 @@ describe('AtsCommunicationsService', () => {
         ],
       }),
     );
+    expect(prisma.atsConversation.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'conversation-1' },
+      data: expect.objectContaining({ lastOutboundAt: expect.any(Date) }),
+    }));
     expect(prisma.notificationDelivery.createMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({

@@ -22,7 +22,7 @@ export class CandidatePortalService {
     if (!account) throw new NotFoundException('Candidate account not found');
     const [communications, resumes, signatureDocuments, privacyRequests] = await Promise.all([
       this.prisma.atsMessage.findMany({
-        where: { application: { candidate: { accountId } } },
+        where: { application: { candidate: this.candidateIdentityWhere(accountId) } },
         select: {
           id: true, applicationId: true, type: true, subject: true, body: true,
           status: true, deliveredAt: true, createdAt: true,
@@ -31,7 +31,7 @@ export class CandidatePortalService {
         take: 200,
       }),
       this.prisma.candidateResumeFile.findMany({
-        where: { candidate: { accountId }, status: { in: ['ACTIVE', 'SUPERSEDED'] } },
+        where: { candidate: this.candidateIdentityWhere(accountId), status: { in: ['ACTIVE', 'SUPERSEDED'] } },
         select: {
           id: true, applicationId: true, version: true, status: true, originalName: true,
           mimeType: true, sizeBytes: true, createdAt: true,
@@ -62,7 +62,7 @@ export class CandidatePortalService {
 
   async withdraw(accountId: string, applicationId: string, reason?: string) {
     const application = await this.prisma.vacancyApplication.findFirst({
-      where: { id: applicationId, candidate: { accountId } },
+      where: { id: applicationId, candidate: this.candidateIdentityWhere(accountId) },
       include: { candidate: { select: { fullName: true } } },
     });
     if (!application) throw new NotFoundException('Application not found');
@@ -144,7 +144,7 @@ export class CandidatePortalService {
 
   async resumeAccess(accountId: string, fileId: string) {
     const file = await this.prisma.candidateResumeFile.findFirst({
-      where: { id: fileId, candidate: { accountId }, status: { in: ['ACTIVE', 'SUPERSEDED'] }, retainUntil: { gt: new Date() } },
+      where: { id: fileId, candidate: this.candidateIdentityWhere(accountId), status: { in: ['ACTIVE', 'SUPERSEDED'] }, retainUntil: { gt: new Date() } },
       select: { id: true, originalName: true, mimeType: true, sizeBytes: true },
     });
     if (!file) throw new NotFoundException('Resume not found or no longer retained');
@@ -163,5 +163,14 @@ export class CandidatePortalService {
 
   private json(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  }
+
+  private candidateIdentityWhere(accountId: string): Prisma.CandidateWhereInput {
+    return {
+      OR: [
+        { accountId },
+        { mergedCandidates: { some: { accountId } } },
+      ],
+    };
   }
 }

@@ -160,6 +160,71 @@ export class InterviewCalendarService {
     });
   }
 
+  async certifyConnections(tenantId?: string) {
+    const connections = await this.prisma.atsCalendarConnection.findMany({
+      where: {
+        tenantId,
+        status: CalendarConnectionStatus.ACTIVE,
+        provider: { in: [CalendarProvider.GOOGLE, CalendarProvider.MICROSOFT] },
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        userId: true,
+        provider: true,
+        externalEmail: true,
+        tokenExpiresAt: true,
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    });
+    const results: Array<Record<string, unknown>> = [];
+    for (const connection of connections) {
+      const startedAt = Date.now();
+      try {
+        const token = await this.accessToken(
+          connection.tenantId,
+          connection.userId,
+          connection.provider,
+        );
+        const profile = await this.fetchProfile(connection.provider, token);
+        await this.prisma.atsCalendarConnection.update({
+          where: { id: connection.id },
+          data: { lastSyncedAt: new Date(), lastError: null },
+        });
+        results.push({
+          tenantId: connection.tenantId,
+          provider: connection.provider,
+          accountDomain: this.emailDomain(profile.email ?? connection.externalEmail),
+          status: "PASS",
+          tokenExpiresAt: connection.tokenExpiresAt?.toISOString() ?? null,
+          durationMs: Date.now() - startedAt,
+        });
+      } catch (error) {
+        const message = this.safeError(error);
+        await this.prisma.atsCalendarConnection.update({
+          where: { id: connection.id },
+          data: { lastError: message },
+        }).catch(() => undefined);
+        results.push({
+          tenantId: connection.tenantId,
+          provider: connection.provider,
+          accountDomain: this.emailDomain(connection.externalEmail),
+          status: "FAIL",
+          error: message,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+    }
+    return {
+      activeConnections: connections.length,
+      passed: results.filter((item) => item.status === "PASS").length,
+      failed: results.filter((item) => item.status === "FAIL").length,
+      truncated: connections.length === 100,
+      results,
+    };
+  }
+
   async disconnect(
     tenantId: string,
     actor: JwtPayload,
@@ -884,6 +949,15 @@ export class InterviewCalendarService {
       { headers: { authorization: `Bearer ${token}` } },
     );
     return { id: String(profile.id), email: profile.email };
+  }
+
+  private emailDomain(email?: string | null) {
+    return email?.includes("@") ? email.split("@").pop()?.toLowerCase() ?? null : null;
+  }
+
+  private safeError(error: unknown) {
+    const message = error instanceof Error ? error.message : "Calendar certification failed";
+    return message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").slice(0, 500);
   }
 
   private async fetchJson<T>(url: string, init: RequestInit): Promise<T> {

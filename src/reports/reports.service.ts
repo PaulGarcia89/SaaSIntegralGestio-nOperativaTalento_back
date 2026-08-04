@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { ReportQueryDto } from './dto/report-query.dto';
+import { AccessScope } from '../common/enums/access-scope.enum';
 
 const DAY = 86_400_000;
 
@@ -193,7 +194,15 @@ export class ReportsService {
     if (query.tenantId && !actor.isSuperAdmin && !actor.allowedTenantIds.includes(query.tenantId)) {
       throw new ForbiddenException('Tenant fuera del alcance autorizado');
     }
-    const branchId = query.scope === 'tenant' ? null : query.branchId ?? actor.activeBranchId;
+    const branchRestricted = !actor.isSuperAdmin && actor.scope === AccessScope.BRANCH;
+    const branchId = branchRestricted
+      ? query.branchId ?? actor.activeBranchId
+      : query.scope === 'tenant'
+        ? null
+        : query.branchId ?? actor.activeBranchId;
+    if (branchRestricted && (!branchId || !actor.allowedBranchIds.includes(branchId))) {
+      throw new ForbiddenException('Sucursal fuera del alcance autorizado');
+    }
     if (branchId) {
       if (!actor.isSuperAdmin && actor.allowedBranchIds.length > 0 && !actor.allowedBranchIds.includes(branchId)) {
         throw new ForbiddenException('Sucursal fuera del alcance autorizado');

@@ -27,6 +27,7 @@ export class OutboxDispatcherService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (process.env.OUTBOX_DISPATCHER_ENABLED === 'false') return;
     this.timer = setInterval(() => {
       void this.recoverStaleProcessingEvents();
       void this.drainPendingEvents();

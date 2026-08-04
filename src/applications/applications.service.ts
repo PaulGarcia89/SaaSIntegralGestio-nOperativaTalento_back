@@ -170,7 +170,7 @@ export class ApplicationsService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const candidate = await tx.candidate.upsert({
+        const matchedCandidate = await tx.candidate.upsert({
           where: {
             tenantId_email: {
               tenantId: vacancy.tenantId,
@@ -196,6 +196,18 @@ export class ApplicationsService {
             portfolioUrl: dto.portfolioUrl,
           },
         });
+        const candidate = matchedCandidate.mergedIntoId
+          ? await tx.candidate.update({
+              where: { id: matchedCandidate.mergedIntoId },
+              data: {
+                fullName: dto.fullName,
+                phone: dto.phone,
+                city: dto.city,
+                linkedinUrl: dto.linkedinUrl,
+                portfolioUrl: dto.portfolioUrl,
+              },
+            })
+          : matchedCandidate;
 
         const existing = await tx.vacancyApplication.findUnique({
           where: {
@@ -306,7 +318,14 @@ export class ApplicationsService {
 
   async listForCandidate(candidateAccountId: string) {
     const applications = await this.prisma.vacancyApplication.findMany({
-      where: { candidate: { accountId: candidateAccountId } },
+      where: {
+        candidate: {
+          OR: [
+            { accountId: candidateAccountId },
+            { mergedCandidates: { some: { accountId: candidateAccountId } } },
+          ],
+        },
+      },
       include: applicationInclude,
       orderBy: { appliedAt: "desc" },
     });

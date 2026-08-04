@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
@@ -8,12 +8,39 @@ import { PermissionGuard } from '../common/guards/permission.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { GlobalOnly } from '../common/decorators/global-only.decorator';
 import { ScopeGuard } from '../common/guards/scope.guard';
+import { IsOptional, IsUUID } from 'class-validator';
+import { ProductionIntegrationCertificationService } from './production-integration-certification.service';
+
+class RunIntegrationCertificationDto {
+  @IsOptional()
+  @IsUUID()
+  tenantId?: string;
+}
 
 @Controller('metrics')
 @UseGuards(JwtAuthGuard, ScopeGuard, PermissionGuard)
 @RequirePermissions('metrics.read')
 export class MetricsController {
-  constructor(private readonly metricsService: MetricsService) {}
+  constructor(
+    private readonly metricsService: MetricsService,
+    private readonly integrationCertification: ProductionIntegrationCertificationService,
+  ) {}
+
+  @Get('integration-certification')
+  @GlobalOnly()
+  @RequirePermissions('metrics.operations.read')
+  @AuditAction('PRODUCTION_INTEGRATIONS_INSPECTED')
+  getIntegrationCertification(@Query('tenantId') tenantId?: string) {
+    return this.integrationCertification.inspect(tenantId);
+  }
+
+  @Post('integration-certification/run')
+  @GlobalOnly()
+  @RequirePermissions('metrics.operations.read')
+  @AuditAction('PRODUCTION_INTEGRATIONS_CERTIFIED')
+  runIntegrationCertification(@Body() dto: RunIntegrationCertificationDto) {
+    return this.integrationCertification.certify({ active: true, tenantId: dto.tenantId });
+  }
 
   @Get('tenant-activity')
   @GlobalOnly()

@@ -31,7 +31,15 @@ describe('CandidatePortalService', () => {
     await service.withdraw('account-1', 'application-1', 'Accepted another role');
 
     expect(prisma.vacancyApplication.findFirst).toHaveBeenCalledWith({
-      where: { id: 'application-1', candidate: { accountId: 'account-1' } },
+      where: {
+        id: 'application-1',
+        candidate: {
+          OR: [
+            { accountId: 'account-1' },
+            { mergedCandidates: { some: { accountId: 'account-1' } } },
+          ],
+        },
+      },
       include: { candidate: { select: { fullName: true } } },
     });
     expect(tx.vacancyApplication.update).toHaveBeenCalledWith({

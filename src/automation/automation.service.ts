@@ -37,6 +37,9 @@ import { ListAutomationAuditDto } from './dto/list-automation-audit.dto';
 import { ListAutomationExecutionsDto } from './dto/list-automation-executions.dto';
 import { ListAutomationRulesDto } from './dto/list-automation-rules.dto';
 import { UpdateAutomationRuleDto } from './dto/update-automation-rule.dto';
+import { SimulateAutomationRuleDto } from './dto/simulate-automation-rule.dto';
+import { BulkAutomationRulesDto } from './dto/bulk-automation-rules.dto';
+import { BulkRetryExecutionsDto } from './dto/bulk-retry-executions.dto';
 import { CandidateHiredDto } from '../domain-events/dto/candidate-hired.dto';
 import { SimpleDomainEventDto } from '../domain-events/dto/simple-domain-event.dto';
 
@@ -106,10 +109,49 @@ export class AutomationService {
     private readonly workflowsService: WorkflowsService,
   ) {}
 
+  getCatalog() {
+    return {
+      triggers: [
+        this.catalogTrigger(AutomationTriggerEvent.CANDIDATE_HIRED, 'Candidato contratado', 'Se formaliza una contratación desde el ATS', ['payload.jobTitle', 'payload.applicationId']),
+        this.catalogTrigger(AutomationTriggerEvent.EMPLOYEE_BRANCH_CHANGED, 'Empleado cambia de sucursal', 'Se confirma un traslado entre sucursales', ['payload.previousBranchId', 'payload.targetBranchId']),
+        this.catalogTrigger(AutomationTriggerEvent.EMPLOYEE_OFFBOARDING_STARTED, 'Baja de empleado iniciada', 'Comienza el proceso de salida', ['payload.reason']),
+        this.catalogTrigger(AutomationTriggerEvent.ONBOARDING_COMPLETED, 'Incorporación completada', 'El expediente de incorporación queda cerrado', ['payload.flowId']),
+        this.catalogTrigger(AutomationTriggerEvent.INVENTORY_ASSET_ASSIGNED, 'Activo asignado', 'Se entrega o reserva un activo', ['payload.assetType', 'payload.itemId']),
+        this.catalogTrigger(AutomationTriggerEvent.TRAINING_COMPLETED, 'Capacitación completada', 'Una asignación formativa se completa', ['payload.courseId', 'payload.score']),
+        this.catalogTrigger(AutomationTriggerEvent.OPERATION_HANDOFF_COMPLETED, 'Entrega operativa completada', 'Finaliza una transferencia de responsabilidades', ['payload.handoffId']),
+        this.catalogTrigger(AutomationTriggerEvent.COMPLIANCE_CLOSED, 'Cumplimiento cerrado', 'Se completa una verificación de cumplimiento', ['payload.policyCode']),
+      ],
+      conditionOperators: [
+        { value: 'equals', label: 'Es igual a' },
+        { value: 'not_equals', label: 'No es igual a' },
+        { value: 'in', label: 'Está dentro de' },
+        { value: 'not_in', label: 'No está dentro de' },
+        { value: 'exists', label: 'Tiene un valor' },
+      ],
+      actions: [
+        this.catalogAction(AutomationConsequenceType.CREATE_ONBOARDING, 'Crear incorporación', 'Genera o actualiza el expediente de incorporación'),
+        this.catalogAction(AutomationConsequenceType.ASSIGN_ASSET, 'Solicitar activo', 'Crea una asignación de inventario pendiente', ['itemId', 'quantity']),
+        this.catalogAction(AutomationConsequenceType.PROVISION_ACCESS, 'Provisionar accesos', 'Crea una tarea de alta de accesos'),
+        this.catalogAction(AutomationConsequenceType.ACTIVATE_TRAINING, 'Asignar capacitación', 'Activa un curso o ruta de aprendizaje', ['courseId', 'curriculumId', 'dueDate']),
+        this.catalogAction(AutomationConsequenceType.CREATE_POLICY_CHECK, 'Crear verificación', 'Abre una tarea de cumplimiento', ['title', 'policyCode', 'dueDate']),
+        this.catalogAction(AutomationConsequenceType.MARK_WORKFLOW_STAGE, 'Completar etapa', 'Marca una etapa del flujo maestro como completada', ['stepKey']),
+        this.catalogAction(AutomationConsequenceType.NOTIFY_ACTOR, 'Notificar responsable', 'Crea una notificación interna', ['title', 'message']),
+        this.catalogAction(AutomationConsequenceType.ARCHIVE_RECORD, 'Archivar empleado', 'Marca el registro laboral como inactivo', ['message']),
+        this.catalogAction(AutomationConsequenceType.REVOKE_ACCESS, 'Revocar accesos', 'Crea una tarea de cierre de accesos'),
+      ],
+      scopes: [
+        { value: AutomationScope.TENANT, label: 'Toda la empresa' },
+        { value: AutomationScope.BRANCH, label: 'Una sucursal' },
+      ],
+      workflowStages: Object.values(WorkflowStageKey).map((value) => ({ value, label: this.stageLabel(value) })),
+    };
+  }
+
   async listRules(actor: JwtPayload, query: ListAutomationRulesDto) {
     const pagination = normalizeOffsetPagination(query);
     const where: Prisma.AutomationRuleWhereInput = {
       tenantId: actor.tenantId,
+      ...(query.search ? { name: { contains: query.search, mode: Prisma.QueryMode.insensitive } } : {}),
       ...(query.triggerEvent ? { triggerEvent: query.triggerEvent } : {}),
       ...(query.scope ? { scope: query.scope } : {}),
       ...(query.enabled !== undefined ? { enabled: query.enabled } : {}),
@@ -190,10 +232,158 @@ export class AutomationService {
     });
   }
 
+  async duplicateRule(actor: JwtPayload, id: string) {
+    const existing = await this.findAccessibleRule(actor, id);
+    await this.assertRuleScope(actor, existing.branchId, existing.scope);
+
+    return this.prisma.automationRule.create({
+      data: {
+        tenantId: existing.tenantId,
+        branchId: existing.branchId,
+        name: `${existing.name} (copia)`,
+        triggerEvent: existing.triggerEvent,
+        scope: existing.scope,
+        conditions: this.toJson(this.parseConditions(existing.conditions)),
+        enabled: false,
+        version: 1,
+        consequences: this.toRequiredJson(this.parseConsequences(existing.consequences)),
+        createdBy: actor.sub,
+      },
+    });
+  }
+
+  async simulateRule(actor: JwtPayload, id: string, dto: SimulateAutomationRuleDto) {
+    const rule = await this.findAccessibleRule(actor, id);
+    const branchId = dto.branchId ?? rule.branchId ?? actor.activeBranchId ?? null;
+    await this.assertRuleScope(actor, branchId, branchId ? AutomationScope.BRANCH : rule.scope);
+
+    const context: DomainEventContext = {
+      tenantId: actor.tenantId,
+      branchId,
+      workflowId: dto.workflowId ?? null,
+      employeeId: dto.employeeId ?? null,
+      candidateId: dto.candidateId ?? null,
+      actorUserId: actor.sub,
+      payload: dto.payload ?? {},
+      occurredAt: new Date(),
+    };
+    const conditions = this.parseConditions(rule.conditions);
+    const matchedConditions = conditions.map((condition) => ({
+      condition,
+      currentValue: this.getContextValue(context, condition.field) ?? null,
+      matches: this.matchesConditions([condition], context),
+    }));
+    const actions = this.parseConsequences(rule.consequences).map((action, index) => ({
+      position: index + 1,
+      type: action.type,
+      valid: this.validateConsequenceForSimulation(action, context),
+    }));
+
+    return {
+      matched: matchedConditions.every((item) => item.matches),
+      conditions: matchedConditions,
+      actions,
+      willExecute: matchedConditions.every((item) => item.matches) && actions.every((item) => item.valid.ok),
+      message: 'Simulación completada sin modificar datos.',
+    };
+  }
+
+  async deleteRule(actor: JwtPayload, id: string) {
+    const existing = await this.findAccessibleRule(actor, id);
+    const executions = await this.prisma.automationExecution.count({ where: { ruleId: existing.id } });
+
+    if (executions > 0) {
+      const rule = await this.prisma.automationRule.update({ where: { id: existing.id }, data: { enabled: false } });
+      return { deleted: false, disabled: true, rule, message: 'La regla tiene historial y fue desactivada.' };
+    }
+
+    await this.prisma.automationRule.delete({ where: { id: existing.id } });
+    return { deleted: true, disabled: false, message: 'Regla eliminada.' };
+  }
+
+  async bulkRules(actor: JwtPayload, dto: BulkAutomationRulesDto) {
+    const rules = await this.prisma.automationRule.findMany({
+      where: { id: { in: dto.ids }, tenantId: actor.tenantId, ...this.buildAutomationBranchFilter(actor) },
+      select: { id: true },
+    });
+    if (rules.length !== dto.ids.length) {
+      throw new ForbiddenException('Una o más reglas no pertenecen al alcance permitido');
+    }
+
+    if (dto.action === 'ENABLE' || dto.action === 'DISABLE') {
+      const result = await this.prisma.automationRule.updateMany({
+        where: { id: { in: dto.ids }, tenantId: actor.tenantId },
+        data: { enabled: dto.action === 'ENABLE' },
+      });
+      return { requested: dto.ids.length, updated: result.count, deleted: 0, preserved: 0 };
+    }
+
+    const executed = await this.prisma.automationExecution.groupBy({
+      by: ['ruleId'],
+      where: { ruleId: { in: dto.ids }, tenantId: actor.tenantId },
+      _count: { _all: true },
+    });
+    const preservedIds = executed.map((item) => item.ruleId);
+    const deletableIds = dto.ids.filter((id) => !preservedIds.includes(id));
+    const [disabled, deleted] = await this.prisma.$transaction([
+      this.prisma.automationRule.updateMany({ where: { id: { in: preservedIds } }, data: { enabled: false } }),
+      this.prisma.automationRule.deleteMany({ where: { id: { in: deletableIds } } }),
+    ]);
+    return {
+      requested: dto.ids.length,
+      updated: disabled.count,
+      deleted: deleted.count,
+      preserved: preservedIds.length,
+    };
+  }
+
+  async getOperationsOverview(actor: JwtPayload) {
+    const branchScope = this.buildAutomationBranchFilter(actor);
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const executionWhere: Prisma.AutomationExecutionWhereInput = {
+      tenantId: actor.tenantId,
+      createdAt: { gte: since },
+      ...branchScope,
+    };
+    const [activeRules, totalRules, executions, completed, failed, inProgress, oldestPending, topRuleGroups] = await this.prisma.$transaction([
+      this.prisma.automationRule.count({ where: { tenantId: actor.tenantId, enabled: true, ...branchScope } }),
+      this.prisma.automationRule.count({ where: { tenantId: actor.tenantId, ...branchScope } }),
+      this.prisma.automationExecution.count({ where: executionWhere }),
+      this.prisma.automationExecution.count({ where: { ...executionWhere, status: AutomationExecutionStatus.COMPLETED } }),
+      this.prisma.automationExecution.count({ where: { ...executionWhere, status: { in: [AutomationExecutionStatus.FAILED, AutomationExecutionStatus.PARTIAL] } } }),
+      this.prisma.automationExecution.count({ where: { ...executionWhere, status: { in: [AutomationExecutionStatus.PENDING, AutomationExecutionStatus.IN_PROGRESS] } } }),
+      this.prisma.automationExecution.findFirst({ where: { tenantId: actor.tenantId, status: { in: [AutomationExecutionStatus.PENDING, AutomationExecutionStatus.IN_PROGRESS] }, ...branchScope }, orderBy: { startedAt: 'asc' }, select: { startedAt: true } }),
+      this.prisma.automationExecution.groupBy({ by: ['ruleId'], where: executionWhere, _count: { ruleId: true }, orderBy: { _count: { ruleId: 'desc' } }, take: 5 }),
+    ]);
+    const topRules = topRuleGroups.length ? await this.prisma.automationRule.findMany({ where: { id: { in: topRuleGroups.map((item) => item.ruleId) }, tenantId: actor.tenantId }, select: { id: true, name: true } }) : [];
+    const counts = new Map(topRuleGroups.map((item) => {
+      const count = item._count as { ruleId?: number } | undefined;
+      return [item.ruleId, count?.ruleId ?? 0] as const;
+    }));
+    return {
+      generatedAt: new Date(),
+      periodHours: 24,
+      rules: { active: activeRules, total: totalRules },
+      executions: {
+        total: executions,
+        completed,
+        failed,
+        inProgress,
+        successRate: executions ? Math.round((completed / executions) * 1000) / 10 : 100,
+        oldestPendingAt: oldestPending?.startedAt ?? null,
+      },
+      capacity: { ruleBatchLimit: 100, retryBatchLimit: 50, outboxMaxAttempts: 10 },
+      topRules: topRules.map((rule) => ({ ...rule, executions: counts.get(rule.id) ?? 0 })).sort((a, b) => b.executions - a.executions),
+    };
+  }
+
   async listExecutions(actor: JwtPayload, query: ListAutomationExecutionsDto) {
     const pagination = normalizeOffsetPagination(query);
-    const where = {
+    const where: Prisma.AutomationExecutionWhereInput = {
       tenantId: actor.tenantId,
+      ...(query.search ? { OR: [{ rule: { name: { contains: query.search, mode: Prisma.QueryMode.insensitive } } }, { employee: { name: { contains: query.search, mode: Prisma.QueryMode.insensitive } } }, { candidate: { fullName: { contains: query.search, mode: Prisma.QueryMode.insensitive } } }] } : {}),
+      ...(query.ruleId ? { ruleId: query.ruleId } : {}),
+      ...(query.from || query.to ? { createdAt: { ...(query.from ? { gte: new Date(query.from) } : {}), ...(query.to ? { lte: new Date(query.to) } : {}) } } : {}),
       ...(query.triggerEvent ? { triggerEvent: query.triggerEvent } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.branchId ? { branchId: query.branchId } : {}),
@@ -234,6 +424,44 @@ export class AutomationService {
     }
 
     return this.serializeExecution(execution);
+  }
+
+  async retryExecution(actor: JwtPayload, id: string) {
+    const execution = await this.prisma.automationExecution.findFirst({
+      where: { id, tenantId: actor.tenantId, ...this.buildAutomationBranchFilter(actor) },
+      include: { rule: true },
+    });
+    if (!execution) throw new NotFoundException('Automation execution not found');
+    if (execution.status !== AutomationExecutionStatus.FAILED && execution.status !== AutomationExecutionStatus.PARTIAL) {
+      throw new BadRequestException('Solo se pueden reintentar ejecuciones fallidas o parciales');
+    }
+    if (!execution.rule.enabled) throw new BadRequestException('Activa la regla antes de reintentarla');
+    const detail = this.asRecord(execution.detail);
+    const payload = this.asRecord(detail['payload']);
+    const { __sourceEventId: _sourceEventId, ...retryPayload } = payload;
+    return this.executeRule(execution.rule, {
+      tenantId: execution.tenantId,
+      branchId: execution.branchId,
+      workflowId: execution.workflowId,
+      employeeId: execution.employeeId,
+      candidateId: execution.candidateId,
+      actorUserId: actor.sub,
+      payload: { ...retryPayload, __retryOfExecutionId: execution.id },
+      occurredAt: new Date(),
+    });
+  }
+
+  async bulkRetryExecutions(actor: JwtPayload, dto: BulkRetryExecutionsDto) {
+    const results: Array<{ id: string; ok: boolean; executionId?: string; error?: string }> = [];
+    for (const id of dto.ids) {
+      try {
+        const execution = await this.retryExecution(actor, id);
+        results.push({ id, ok: true, executionId: execution.id });
+      } catch (error) {
+        results.push({ id, ok: false, error: error instanceof Error ? error.message : 'No se pudo reintentar' });
+      }
+    }
+    return { requested: dto.ids.length, succeeded: results.filter((item) => item.ok).length, failed: results.filter((item) => !item.ok).length, results };
   }
 
   async listAudit(actor: JwtPayload, query: ListAutomationAuditDto) {
@@ -1012,6 +1240,111 @@ export class AutomationService {
     }
 
     return (context as Record<string, unknown>)[field];
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  }
+
+  private async findAccessibleRule(actor: JwtPayload, id: string) {
+    const rule = await this.prisma.automationRule.findFirst({
+      where: {
+        id,
+        tenantId: actor.tenantId,
+        ...this.buildAutomationBranchFilter(actor),
+      },
+    });
+
+    if (!rule) {
+      throw new NotFoundException('Automation rule not found');
+    }
+
+    return rule;
+  }
+
+  private validateConsequenceForSimulation(action: AutomationConsequence, context: DomainEventContext) {
+    const workflowActions = new Set<AutomationConsequenceType>([
+      AutomationConsequenceType.CREATE_ONBOARDING,
+      AutomationConsequenceType.ASSIGN_ASSET,
+      AutomationConsequenceType.PROVISION_ACCESS,
+      AutomationConsequenceType.ACTIVATE_TRAINING,
+      AutomationConsequenceType.CREATE_POLICY_CHECK,
+      AutomationConsequenceType.MARK_WORKFLOW_STAGE,
+      AutomationConsequenceType.REVOKE_ACCESS,
+    ]);
+    if (workflowActions.has(action.type) && !context.workflowId) {
+      return { ok: false, reason: 'La ejecución real necesitará un flujo maestro.' };
+    }
+    if (action.type === AutomationConsequenceType.MARK_WORKFLOW_STAGE && !action.stepKey) {
+      return { ok: false, reason: 'Selecciona una etapa del flujo.' };
+    }
+    if (action.type === AutomationConsequenceType.ARCHIVE_RECORD && !context.employeeId) {
+      return { ok: false, reason: 'La ejecución real necesitará un empleado.' };
+    }
+    if (action.type === AutomationConsequenceType.NOTIFY_ACTOR && !context.actorUserId) {
+      return { ok: false, reason: 'La ejecución real necesitará un responsable.' };
+    }
+    return { ok: true, reason: null };
+  }
+
+  private catalogTrigger(
+    value: AutomationTriggerEvent,
+    label: string,
+    description: string,
+    fields: string[],
+  ) {
+    return {
+      value,
+      label,
+      description,
+      fields: [
+        { value: 'branchId', label: 'Sucursal' },
+        { value: 'employeeId', label: 'Empleado' },
+        { value: 'candidateId', label: 'Candidato' },
+        ...fields.map((field) => ({ value: field, label: this.fieldLabel(field) })),
+      ],
+    };
+  }
+
+  private catalogAction(
+    value: AutomationConsequenceType,
+    label: string,
+    description: string,
+    fields: string[] = [],
+  ) {
+    return { value, label, description, fields };
+  }
+
+  private fieldLabel(field: string) {
+    const labels: Record<string, string> = {
+      'payload.jobTitle': 'Puesto',
+      'payload.applicationId': 'Postulación',
+      'payload.previousBranchId': 'Sucursal anterior',
+      'payload.targetBranchId': 'Sucursal destino',
+      'payload.reason': 'Motivo',
+      'payload.flowId': 'Expediente de incorporación',
+      'payload.assetType': 'Tipo de activo',
+      'payload.itemId': 'Artículo de inventario',
+      'payload.courseId': 'Curso',
+      'payload.score': 'Calificación',
+      'payload.handoffId': 'Entrega operativa',
+      'payload.policyCode': 'Política',
+    };
+    return labels[field] ?? field;
+  }
+
+  private stageLabel(value: WorkflowStageKey) {
+    const labels: Record<WorkflowStageKey, string> = {
+      [WorkflowStageKey.CANDIDACY]: 'Candidatura',
+      [WorkflowStageKey.HIRING]: 'Contratación',
+      [WorkflowStageKey.ONBOARDING]: 'Incorporación',
+      [WorkflowStageKey.TRAINING]: 'Capacitación',
+      [WorkflowStageKey.OPERATION]: 'Operación',
+      [WorkflowStageKey.ADMIN_COMPLIANCE]: 'Cumplimiento administrativo',
+    };
+    return labels[value];
   }
 
   private async loadActorContext(tenantId: string, actorUserId: string | null) {

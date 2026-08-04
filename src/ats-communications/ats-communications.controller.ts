@@ -4,6 +4,7 @@ import {
   Get,
   Headers,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -25,7 +26,7 @@ import { RequestWithUser } from "../common/types/request-with-user.type";
 import { JwtPayload } from "../common/interfaces/jwt-payload.interface";
 import { AtsCommunicationsService } from "./ats-communications.service";
 import { CommunicationGovernanceService } from "./communication-governance.service";
-import { ConfigureCommunicationDomainDto, ReplyCandidateEmailDto } from "./dto/communication-governance.dto";
+import { ComposeCandidateEmailDto, ConfigureCommunicationDomainDto, LinkInboundEmailDto, ListAtsConversationsDto, ReplyCandidateEmailDto, ResolveInboundEmailDto, UpdateAtsConversationDto } from "./dto/communication-governance.dto";
 import {
   CreateAtsCommunicationTemplateDto,
   SendOfferDto,
@@ -59,6 +60,42 @@ export class AtsCommunicationsController {
   @Get("inbox")
   @RequirePermissions("applications.read")
   inbox(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query("page") page?: string, @Query("pageSize") pageSize?: string, @Query("search") search?: string) { return this.governance.inbox(request.tenant!.id, actor, Number(page ?? 1), Number(pageSize ?? 30), search); }
+
+  @Get("conversations")
+  @RequirePermissions("applications.read")
+  conversations(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query() query: ListAtsConversationsDto) { return this.governance.conversations(request.tenant!.id, actor, query); }
+
+  @Get("conversations/:id")
+  @RequirePermissions("applications.read")
+  conversation(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string) { return this.governance.conversation(request.tenant!.id, actor, id); }
+
+  @Patch("conversations/:id")
+  @RequirePermissions("applications.update")
+  updateConversation(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: UpdateAtsConversationDto) { return this.governance.updateConversation(request.tenant!.id, actor, id, dto); }
+
+  @Post("conversations/:id/read")
+  @RequirePermissions("applications.read")
+  markRead(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string) { return this.governance.markRead(request.tenant!.id, actor, id); }
+
+  @Post("applications/:applicationId/messages")
+  @RequirePermissions("applications.update")
+  compose(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("applicationId") applicationId: string, @Body() dto: ComposeCandidateEmailDto) { return this.governance.compose(request.tenant!.id, actor, applicationId, dto); }
+
+  @Get("unmatched")
+  @RequirePermissions("applications.read")
+  unmatched(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query("page") page?: string, @Query("pageSize") pageSize?: string) { return this.governance.unmatched(request.tenant!.id, actor, Number(page ?? 1), Number(pageSize ?? 20)); }
+
+  @Post("unmatched/:id/link")
+  @RequirePermissions("applications.update")
+  linkUnmatched(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: LinkInboundEmailDto) { return this.governance.linkUnmatched(request.tenant!.id, actor, id, dto); }
+
+  @Post("unmatched/:id/ignore")
+  @RequirePermissions("applications.update")
+  ignoreUnmatched(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Body() dto: ResolveInboundEmailDto) { return this.governance.ignoreUnmatched(request.tenant!.id, actor, id, dto); }
+
+  @Get("attachments/:id/access")
+  @RequirePermissions("applications.files.read")
+  attachment(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string) { return this.governance.attachmentAccess(request.tenant!.id, actor, id); }
 
   @Post("messages/:id/reply")
   @RequirePermissions("applications.update")
