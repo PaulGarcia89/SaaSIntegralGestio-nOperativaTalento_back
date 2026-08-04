@@ -10,6 +10,8 @@ import { ScorecardsService } from "./scorecards.service";
 import { InterviewSelfSchedulingService } from "./interview-self-scheduling.service";
 import { InterviewSelfSchedulingController } from "./interview-self-scheduling.controller";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { CompetencyAiProviderService } from "./competency-ai-provider.service";
+import { CompetencyAiAssessmentService } from "./competency-ai-assessment.service";
 
 @Module({
   imports: [AtsCommunicationsModule, NotificationsModule],
@@ -20,6 +22,8 @@ import { NotificationsModule } from "../notifications/notifications.module";
     InterviewCalendarService,
     CalendarTokenCryptoService,
     InterviewSelfSchedulingService,
+    CompetencyAiProviderService,
+    CompetencyAiAssessmentService,
     SubscriptionGuard,
     ModuleAccessGuard,
   ],

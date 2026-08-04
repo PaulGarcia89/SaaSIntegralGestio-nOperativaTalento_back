@@ -936,3 +936,39 @@ export class FinalizeDecisionCommitteeDto {
   @MaxLength(8000)
   rationale!: string;
 }
+
+export class AiCompetencyHumanReviewItemDto {
+  @IsUUID()
+  itemId!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(5)
+  humanScore?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  reviewerNotes?: string;
+
+  @IsBoolean()
+  confirmed!: boolean;
+}
+
+export class SignAiCompetencyAssessmentDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => AiCompetencyHumanReviewItemDto)
+  items!: AiCompetencyHumanReviewItemDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  reviewerNotes?: string;
+
+  @IsBoolean()
+  acknowledgement!: boolean;
+}

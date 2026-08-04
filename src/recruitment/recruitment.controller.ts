@@ -56,7 +56,9 @@ import {
   RespondInterviewInvitationDto,
   UpdateAvailabilityDto,
   VoteDecisionCommitteeDto,
+  SignAiCompetencyAssessmentDto,
 } from "./dto/recruitment.dto";
+import { CompetencyAiAssessmentService } from "./competency-ai-assessment.service";
 import { InterviewCalendarService } from "./interview-calendar.service";
 import { RecruitmentService } from "./recruitment.service";
 import { ScorecardsService } from "./scorecards.service";
@@ -78,7 +80,26 @@ export class RecruitmentController {
     private readonly calendars: InterviewCalendarService,
     private readonly scorecards: ScorecardsService,
     private readonly selfScheduling: InterviewSelfSchedulingService,
+    private readonly competencyAi: CompetencyAiAssessmentService,
   ) {}
+
+  @Get("applications/:id/competency-ai-assessment")
+  @RequirePermissions("applications.read")
+  latestCompetencyAiAssessment(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string) {
+    return this.competencyAi.latest(request.tenant!.id, actor, id);
+  }
+
+  @Post("applications/:id/competency-ai-assessment")
+  @RequirePermissions("applications.update")
+  generateCompetencyAiAssessment(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string) {
+    return this.competencyAi.generate(request.tenant!.id, actor, id);
+  }
+
+  @Post("applications/:id/competency-ai-assessment/:assessmentId/sign")
+  @RequirePermissions("applications.update")
+  signCompetencyAiAssessment(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param("id") id: string, @Param("assessmentId") assessmentId: string, @Body() dto: SignAiCompetencyAssessmentDto) {
+    return this.competencyAi.sign(request.tenant!.id, actor, id, assessmentId, dto);
+  }
 
   @Get("vacancies/:id/setup")
   @RequirePermissions("vacancies.read")

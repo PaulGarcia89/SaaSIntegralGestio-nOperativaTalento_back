@@ -288,6 +288,17 @@ enum ScorecardStatus {
   SIGNED
 }
 
+enum AiCompetencyAssessmentStatus {
+  READY_FOR_REVIEW
+  SIGNED
+}
+
+enum AiEvidenceSufficiency {
+  SUFFICIENT
+  PARTIAL
+  INSUFFICIENT
+}
+
 enum DecisionCommitteeStatus {
   OPEN
   DECIDED
@@ -1094,6 +1105,7 @@ model Tenant {
   scorecardResponses            InterviewScorecardResponse[]
   scorecardCompetencies         ScorecardCompetency[]
   scorecardAssignments          ScorecardEvaluatorAssignment[]
+  aiCompetencyAssessments       AiCompetencyAssessment[]
   externalAssessments           ExternalCandidateAssessment[]
   hiringManagerApprovals        HiringManagerApproval[]
   evaluatorCalibrations         EvaluatorCalibrationSnapshot[]
@@ -1249,6 +1261,9 @@ model User {
   interviewScorecards                InterviewScorecard[]
   createdScorecardTemplates          ScorecardTemplate[]               @relation("ScorecardTemplateCreatedBy")
   signedScorecards                   InterviewScorecard[]              @relation("ScorecardSignedBy")
+  generatedAiAssessments             AiCompetencyAssessment[]          @relation("AiAssessmentGeneratedBy")
+  reviewedAiAssessments              AiCompetencyAssessment[]          @relation("AiAssessmentReviewedBy")
+  signedAiAssessments                AiCompetencyAssessment[]          @relation("AiAssessmentSignedBy")
   decisionCommitteeMemberships       HiringDecisionCommitteeMember[]
   decidedHiringCommittees            HiringDecisionCommittee[]         @relation("HiringCommitteeDecidedBy")
   scorecardEvaluatorAssignments      ScorecardEvaluatorAssignment[]
@@ -2331,6 +2346,7 @@ model Branch {
   interviewPools                InterviewPool[]
   interviewResources            InterviewResource[]
   talentPools                   TalentPool[]
+  aiCompetencyAssessments       AiCompetencyAssessment[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -3308,6 +3324,7 @@ model VacancyApplication {
   interviewSequences          InterviewSequence[]
   interviewSchedulingRequests InterviewSchedulingRequest[]
   jobOffers                   JobOffer[]
+  aiCompetencyAssessments     AiCompetencyAssessment[]
 
   @@unique([vacancyId, candidateId])
   @@index([tenantId, status])
@@ -3711,6 +3728,67 @@ model InterviewScorecard {
   @@index([tenantId, interviewId])
   @@index([reviewerUserId, submittedAt])
   @@index([tenantId, status, signedAt])
+}
+
+model AiCompetencyAssessment {
+  id                String                       @id @default(uuid())
+  tenantId          String
+  branchId          String
+  applicationId     String
+  version           Int
+  status            AiCompetencyAssessmentStatus @default(READY_FOR_REVIEW)
+  provider          String
+  model             String
+  promptVersion     String
+  summary           String
+  sourceSnapshot    Json
+  generatedByUserId String
+  generatedAt       DateTime                     @default(now())
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
+  reviewerNotes     String?
+  signedByUserId    String?
+  signedAt          DateTime?
+  signatureHash     String?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  tenant            Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch                       @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  application       VacancyApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  generatedBy       User                         @relation("AiAssessmentGeneratedBy", fields: [generatedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy        User?                        @relation("AiAssessmentReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+  signedBy          User?                        @relation("AiAssessmentSignedBy", fields: [signedByUserId], references: [id], onDelete: Restrict)
+  items             AiCompetencyAssessmentItem[]
+
+  @@unique([applicationId, version])
+  @@index([tenantId, branchId, status])
+  @@index([tenantId, applicationId, createdAt])
+}
+
+model AiCompetencyAssessmentItem {
+  id                   String                 @id @default(uuid())
+  assessmentId         String
+  criterionId          String?
+  competencyCode       String
+  competencyName       String
+  competencyDefinition String?
+  weight               Int                    @default(0)
+  aiScore              Decimal                @db.Decimal(3, 2)
+  confidence           Decimal                @db.Decimal(4, 3)
+  sufficiency          AiEvidenceSufficiency
+  explanation          String
+  evidence             Json
+  missingInformation   Json
+  suggestedQuestions   Json
+  humanScore           Decimal?               @db.Decimal(3, 2)
+  reviewerNotes        String?
+  reviewerConfirmed    Boolean                @default(false)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  assessment           AiCompetencyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, competencyCode])
+  @@index([assessmentId])
 }
 
 model ScorecardTemplate {
