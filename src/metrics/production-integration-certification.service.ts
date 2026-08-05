@@ -7,6 +7,7 @@ import {
 import { Injectable } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
+import nodemailer from "nodemailer";
 import { InterviewCalendarService } from "../recruitment/interview-calendar.service";
 
 export type CertificationStatus = "PASS" | "WARN" | "FAIL" | "SKIPPED";
@@ -60,13 +61,13 @@ export class ProductionIntegrationCertificationService {
     const storageProfiles = this.storageProfiles();
     const checks = options.active
       ? await Promise.all([
-          this.certifyResend(true),
+          this.certifyEmail(true),
           ...storageProfiles.map((profile) => this.certifyStorage(profile, true)),
           this.certifyClamAv(true),
           this.certifyCalendars(true, options.tenantId),
         ])
       : [
-          await this.certifyResend(false),
+          await this.certifyEmail(false),
           ...await Promise.all(storageProfiles.map((profile) => this.certifyStorage(profile, false))),
           await this.certifyClamAv(false),
           await this.certifyCalendars(false, options.tenantId),
@@ -86,6 +87,60 @@ export class ProductionIntegrationCertificationService {
       summary,
       checks,
     } satisfies ProductionIntegrationCertificationReport;
+  }
+
+  private async certifyEmail(activeProbe: boolean): Promise<IntegrationCertificationCheck> {
+    const provider = process.env.EMAIL_PROVIDER?.trim().toUpperCase()
+      || (process.env.SMTP_HOST?.trim() ? "SMTP" : "RESEND");
+    return provider === "SMTP"
+      ? this.certifySmtp(activeProbe)
+      : this.certifyResend(activeProbe);
+  }
+
+  private async certifySmtp(activeProbe: boolean): Promise<IntegrationCertificationCheck> {
+    const startedAt = Date.now();
+    const host = process.env.SMTP_HOST?.trim();
+    const user = process.env.SMTP_USER?.trim();
+    const password = process.env.SMTP_PASSWORD;
+    const port = Number(process.env.SMTP_PORT?.trim() || "465");
+    const secure = process.env.SMTP_SECURE?.trim().toLowerCase() !== "false";
+    const senderDomain = this.senderDomain(process.env.NOTIFICATION_FROM_EMAIL?.trim());
+    const configured = Boolean(host && user && password && senderDomain && Number.isInteger(port));
+    const evidence = { provider: "SMTP", host: host ?? null, port, secure, userConfigured: Boolean(user), senderDomain };
+    if (!configured || !activeProbe) {
+      return this.configurationCheck(
+        "email",
+        "Correo SMTP",
+        configured,
+        activeProbe,
+        evidence,
+        "Servidor SMTP, credenciales y remitente configurados",
+      );
+    }
+    try {
+      const transport = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: { user, pass: password },
+        connectionTimeout: 12_000,
+        greetingTimeout: 12_000,
+        socketTimeout: 20_000,
+      });
+      await transport.verify();
+      return {
+        key: "email",
+        label: "Correo SMTP",
+        status: "PASS",
+        configured: true,
+        activeProbe: true,
+        summary: "Conexión y autenticación SMTP verificadas",
+        durationMs: Date.now() - startedAt,
+        evidence: { ...evidence, authenticated: true },
+      };
+    } catch (error) {
+      return this.failedCheck("email", "Correo SMTP", true, true, startedAt, evidence, error);
+    }
   }
 
   private async certifyResend(activeProbe: boolean): Promise<IntegrationCertificationCheck> {

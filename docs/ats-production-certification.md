@@ -13,7 +13,7 @@ contra la base productiva.
    backend de staging. Crea una vacante y una postulación efímeras y archiva la
    vacante al finalizar.
 4. `npm run certify:integrations:production`: pruebas activas controladas de
-   Resend, S3/R2, ClamAV y calendarios.
+   correo SMTP o Resend, S3/R2, ClamAV y calendarios.
 5. `npm run certify:ats:production`: smoke ATS de solo lectura en producción.
 
 ## Certificación de producción
@@ -45,6 +45,25 @@ El comando comprueba:
 
 El reporte no contiene contraseña, token ni datos personales. Un fallo produce
 código de salida distinto de cero y un reporte con estado `FAIL`.
+
+### Correo saliente por SMTP
+
+Para usar un buzón SMTP en lugar de Resend, configura únicamente como secretos
+del entorno desplegado:
+
+```text
+EMAIL_PROVIDER=SMTP
+SMTP_HOST=mail.example.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=talento@example.com
+SMTP_PASSWORD=<secreto>
+NOTIFICATION_FROM_EMAIL=Talento <talento@example.com>
+```
+
+La certificación activa autentica contra el servidor, pero no expone la
+contraseña ni envía mensajes. La recepción bidireccional por webhook continúa
+requiriendo Resend hasta implementar un consumidor IMAP dedicado.
 
 ## Certificación E2E de staging
 

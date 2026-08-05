@@ -34,7 +34,7 @@ describe("ProductionIntegrationCertificationService", () => {
       durationMs: 1,
       evidence: {},
     });
-    jest.spyOn(service as any, "certifyResend").mockResolvedValue(pass("resend"));
+    jest.spyOn(service as any, "certifyEmail").mockResolvedValue(pass("email"));
     jest.spyOn(service as any, "certifyStorage").mockImplementation((profile: unknown) => {
       return Promise.resolve(pass((profile as { key: string }).key));
     });
