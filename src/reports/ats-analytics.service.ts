@@ -145,11 +145,15 @@ export class AtsAnalyticsService {
         this.prisma.applicationInterview.findMany({
           where: {
             ...tenantWhere,
-            startsAt: { gte: period.from, lte: period.to },
+            OR: [
+              { status: 'COMPLETED', completedAt: { gte: period.from, lte: period.to } },
+              { status: { not: 'COMPLETED' }, startsAt: { gte: period.from, lte: period.to } },
+            ],
             application: activityApplicationWhere,
           },
           select: {
             status: true,
+            completedAt: true,
             createdAt: true,
             startsAt: true,
             endsAt: true,
@@ -441,7 +445,7 @@ export class AtsAnalyticsService {
     }).sort((a, b) => b.active - a.active);
   }
 
-  private interviews(interviews: Array<{ status: string; createdAt: Date; startsAt: Date; endsAt: Date; scorecards: Array<{ overallRating: number; signedAt: Date | null }> }>) {
+  private interviews(interviews: Array<{ status: string; completedAt: Date | null; createdAt: Date; startsAt: Date; endsAt: Date; scorecards: Array<{ overallRating: number; signedAt: Date | null }> }>) {
     const counts = this.countBy(interviews.map((item) => item.status));
     const ratings = interviews.flatMap((item) => item.scorecards.map((scorecard) => Number(scorecard.overallRating)));
     return {

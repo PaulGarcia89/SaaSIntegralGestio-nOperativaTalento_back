@@ -242,7 +242,7 @@ export class ScorecardsService {
       interview.scorecardTemplateId,
     );
     if (!template) {
-      return this.submitLegacy(tenantId, actor, interviewId, dto);
+      return this.submitLegacy(tenantId, actor, interviewId, interview.completedAt, dto);
     }
     const assignment = await this.prisma.scorecardEvaluatorAssignment.findUnique({ where: { interviewId_evaluatorUserId: { interviewId, evaluatorUserId: actor.sub } } });
     const assignedIds = assignment ? new Set(assignment.criterionIds as string[]) : null;
@@ -364,7 +364,7 @@ export class ScorecardsService {
         where: { id: interviewId },
         data: {
           scorecardTemplateId: template.id,
-          ...(shouldSign ? { status: 'COMPLETED' } : {}),
+          ...(shouldSign ? { status: 'COMPLETED', completedAt: interview.completedAt ?? new Date() } : {}),
         },
       });
       return tx.interviewScorecard.findUnique({
@@ -953,6 +953,7 @@ export class ScorecardsService {
     tenantId: string,
     actor: JwtPayload,
     interviewId: string,
+    completedAt: Date | null,
     dto: SubmitScorecardDto,
   ) {
     if (!dto.overallRating) {
@@ -1019,7 +1020,7 @@ export class ScorecardsService {
       if (shouldSign) {
         await tx.applicationInterview.update({
           where: { id: interviewId },
-          data: { status: 'COMPLETED' },
+          data: { status: 'COMPLETED', completedAt: completedAt ?? new Date() },
         });
       }
       return scorecard;

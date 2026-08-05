@@ -30,7 +30,7 @@ describe('AtsAnalyticsService', () => {
       { id: 'vacancy-1', title: 'Analista', status: 'OPEN', openings: 2, createdAt: new Date('2026-06-01T00:00:00Z'), updatedAt: new Date('2026-07-31T00:00:00Z') },
     ]);
     prisma.applicationInterview.findMany.mockResolvedValue([
-      { status: 'COMPLETED', createdAt: new Date('2026-07-05T00:00:00Z'), startsAt: new Date('2026-07-07T00:00:00Z'), endsAt: new Date('2026-07-07T01:00:00Z'), scorecards: [{ overallRating: 4.5, signedAt: new Date() }] },
+      { status: 'COMPLETED', completedAt: new Date('2026-07-15T00:00:00Z'), createdAt: new Date('2026-07-05T00:00:00Z'), startsAt: new Date('2026-08-07T00:00:00Z'), endsAt: new Date('2026-08-07T01:00:00Z'), scorecards: [{ overallRating: 4.5, signedAt: new Date() }] },
     ]);
     prisma.jobOffer.findMany.mockResolvedValue([
       { status: 'ACCEPTED', createdAt: new Date('2026-07-10T00:00:00Z'), updatedAt: new Date('2026-07-12T00:00:00Z'), acceptedAt: new Date('2026-07-12T00:00:00Z'), rejectedAt: null, expiredAt: null, approvals: [{ status: 'APPROVED', decidedAt: new Date('2026-07-11T00:00:00Z') }], versions: [{ source: 'EMPLOYER' }] },
@@ -64,6 +64,13 @@ describe('AtsAnalyticsService', () => {
       expect.objectContaining({ source: 'Referido', rejected: 1 }),
     ]));
     expect(result.interviews).toMatchObject({ completed: 1, completionRate: 100, averageScore: 4.5 });
+    expect(prisma.applicationInterview.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          expect.objectContaining({ status: 'COMPLETED', completedAt: expect.any(Object) }),
+        ]),
+      }),
+    }));
     expect(result.offers).toMatchObject({ accepted: 1, acceptanceRate: 100 });
     expect(result.vacancies[0]).toMatchObject({ applications: 2, hires: 1, conversionRate: 50 });
   });

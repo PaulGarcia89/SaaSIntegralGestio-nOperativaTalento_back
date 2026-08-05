@@ -770,6 +770,11 @@ export class RecruitmentService {
         where: { id },
         data: {
           status: dto.status,
+          completedAt: dto.status === InterviewStatus.COMPLETED
+            ? interview.completedAt ?? new Date()
+            : dto.status !== undefined
+              ? null
+              : undefined,
           startsAt,
           endsAt,
           timezone: dto.timezone,
