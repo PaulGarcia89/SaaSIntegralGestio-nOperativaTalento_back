@@ -5,6 +5,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateSignaturePackageDto, CreateSignatureTemplateDto, SubmitSignatureConsentDto } from './dto/signatures.dto';
 import { SignatureProviderService } from './signature-provider.service';
 import { JobOffersService } from '../job-offers/job-offers.service';
+import { publicFrontendUrl } from '../common/urls/public-frontend-url';
 
 @Injectable()
 export class SignaturesService {
@@ -78,7 +79,7 @@ export class SignaturesService {
     if (!item || !item.template) throw new NotFoundException('Signature package not found');
     if (item.status === SignaturePackageStatus.COMPLETED || item.status === SignaturePackageStatus.CANCELLED) throw new ConflictException('Package cannot be sent');
     this.providers.assertAvailable(item.template.provider);
-    const origin = (process.env.PUBLIC_FRONTEND_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+    const origin = publicFrontendUrl();
     const links: Array<{ participantId: string; email: string; url: string }> = [];
     await this.prisma.$transaction(async (tx) => {
       for (const participant of item.participants.filter((entry) => entry.status === SignatureParticipantStatus.PENDING)) {

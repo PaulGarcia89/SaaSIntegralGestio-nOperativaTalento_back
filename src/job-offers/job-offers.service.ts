@@ -17,6 +17,7 @@ import {
   WorkflowSourceModule,
 } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
+import { publicFrontendUrl } from '../common/urls/public-frontend-url';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -168,7 +169,7 @@ export class JobOffersService {
     if (version.validUntil.getTime() <= Date.now()) throw new BadRequestException('La vigencia de la oferta ya terminó');
     const pdf = this.pdfFor(offer, version);
     const token = randomBytes(32).toString('base64url');
-    const origin = (process.env.PUBLIC_FRONTEND_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+    const origin = publicFrontendUrl();
     const signingUrl = `${origin}/sign/${token}`;
 
     return this.prisma.$transaction(async (tx) => {
@@ -257,7 +258,7 @@ export class JobOffersService {
       where: { id: participant.id },
       data: { signingTokenHash: this.hash(token), tokenExpiresAt: version.validUntil },
     });
-    const origin = (process.env.PUBLIC_FRONTEND_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+    const origin = publicFrontendUrl();
     return { url: `${origin}/sign/${token}`, expiresAt: version.validUntil.toISOString() };
   }
 
