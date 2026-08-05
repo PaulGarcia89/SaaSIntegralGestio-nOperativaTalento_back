@@ -160,6 +160,32 @@ export class InterviewCalendarService {
     });
   }
 
+  listProviderConfiguration() {
+    return [
+      {
+        provider: CalendarProvider.GOOGLE,
+        configured: this.hasEnvironmentVariables(
+          "GOOGLE_CALENDAR_CLIENT_ID",
+          "GOOGLE_CALENDAR_CLIENT_SECRET",
+        ),
+      },
+      {
+        provider: CalendarProvider.MICROSOFT,
+        configured: this.hasEnvironmentVariables(
+          "MICROSOFT_CALENDAR_CLIENT_ID",
+          "MICROSOFT_CALENDAR_CLIENT_SECRET",
+        ),
+      },
+      {
+        provider: CalendarProvider.ZOOM,
+        configured: this.hasEnvironmentVariables(
+          "ZOOM_CLIENT_ID",
+          "ZOOM_CLIENT_SECRET",
+        ),
+      },
+    ];
+  }
+
   async certifyConnections(tenantId?: string) {
     const connections = await this.prisma.atsCalendarConnection.findMany({
       where: {
@@ -913,6 +939,10 @@ export class InterviewCalendarService {
         "user:read:user",
       ],
     };
+  }
+
+  private hasEnvironmentVariables(...names: string[]) {
+    return names.every((name) => Boolean(process.env[name]?.trim()));
   }
 
   private oauthHeaders(provider: CalendarProvider): Record<string, string> {

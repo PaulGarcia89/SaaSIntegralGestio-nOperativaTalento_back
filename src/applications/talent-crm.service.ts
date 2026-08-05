@@ -169,12 +169,13 @@ export class TalentCrmService {
       take: 1000,
     });
     const minimumScore = query.minimumScore ?? 45;
+    const sharedIdentityKeys = this.sharedIdentityKeys(candidates);
     const matches: Array<Record<string, unknown>> = [];
     for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
       for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
         const left = candidates[leftIndex];
         const right = candidates[rightIndex];
-        const signals = this.matchSignals(left, right);
+        const signals = this.matchSignals(left, right, sharedIdentityKeys);
         const score = Math.min(100, signals.reduce((total, signal) => total + signal.weight, 0));
         if (score < minimumScore) continue;
         const leftVacancies = new Set(left.applications.map((item) => item.vacancyId));
@@ -186,7 +187,12 @@ export class TalentCrmService {
       }
     }
     matches.sort((a, b) => Number(b.score) - Number(a.score));
-    return { data: matches.slice(0, query.limit ?? 100), scannedCandidates: candidates.length, truncated: candidates.length === 1000 };
+    return {
+      data: matches.slice(0, query.limit ?? 100),
+      scannedCandidates: candidates.length,
+      truncated: candidates.length === 1000,
+      ignoredSharedValues: sharedIdentityKeys.size,
+    };
   }
 
   async mergeCandidates(actor: JwtPayload, tenantId: string, dto: MergeCandidatesDto) {
@@ -257,16 +263,32 @@ export class TalentCrmService {
     if (!branch) throw new NotFoundException('Branch not found');
   }
 
-  private matchSignals(left: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }, right: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }) {
+  private matchSignals(left: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }, right: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }, sharedIdentityKeys: Set<string>) {
     const signals: Array<{ label: string; weight: number }> = [];
     if (left.email.trim().toLowerCase() === right.email.trim().toLowerCase()) signals.push({ label: 'Correo idéntico', weight: 100 });
     const leftPhone = this.phoneKey(left.phone); const rightPhone = this.phoneKey(right.phone);
-    if (leftPhone && leftPhone === rightPhone) signals.push({ label: 'Teléfono idéntico', weight: 55 });
-    if (this.urlKey(left.linkedinUrl) && this.urlKey(left.linkedinUrl) === this.urlKey(right.linkedinUrl)) signals.push({ label: 'LinkedIn idéntico', weight: 55 });
-    if (left.resumeFiles[0]?.sha256 && left.resumeFiles[0].sha256 === right.resumeFiles[0]?.sha256) signals.push({ label: 'CV idéntico', weight: 75 });
+    if (leftPhone && leftPhone === rightPhone && !sharedIdentityKeys.has(`phone:${leftPhone}`)) signals.push({ label: 'Teléfono idéntico', weight: 55 });
+    const leftLinkedin = this.urlKey(left.linkedinUrl); const rightLinkedin = this.urlKey(right.linkedinUrl);
+    if (leftLinkedin && leftLinkedin === rightLinkedin && !sharedIdentityKeys.has(`linkedin:${leftLinkedin}`)) signals.push({ label: 'LinkedIn idéntico', weight: 55 });
+    const leftResume = left.resumeFiles[0]?.sha256; const rightResume = right.resumeFiles[0]?.sha256;
+    if (leftResume && leftResume === rightResume && !sharedIdentityKeys.has(`resume:${leftResume}`)) signals.push({ label: 'CV idéntico', weight: 75 });
     if (this.textKey(left.fullName) === this.textKey(right.fullName)) signals.push({ label: 'Nombre idéntico', weight: 20 });
     if (left.city && right.city && this.textKey(left.city) === this.textKey(right.city)) signals.push({ label: 'Ciudad idéntica', weight: 10 });
     return signals;
+  }
+
+  private sharedIdentityKeys(candidates: Array<{ phone: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }>) {
+    const counts = new Map<string, number>();
+    const count = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const candidate of candidates) {
+      const phone = this.phoneKey(candidate.phone);
+      const linkedin = this.urlKey(candidate.linkedinUrl);
+      const resume = candidate.resumeFiles[0]?.sha256;
+      if (phone) count(`phone:${phone}`);
+      if (linkedin) count(`linkedin:${linkedin}`);
+      if (resume) count(`resume:${resume}`);
+    }
+    return new Set(Array.from(counts.entries()).filter(([, occurrences]) => occurrences > 2).map(([key]) => key));
   }
 
   private duplicateCandidate(candidate: { id: string; fullName: string; email: string; phone: string | null; city: string | null; updatedAt: Date; applications: unknown[] }) {

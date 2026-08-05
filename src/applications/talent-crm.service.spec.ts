@@ -49,11 +49,49 @@ describe('TalentCrmService', () => {
     })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it('ignora valores de identidad compartidos por numerosos perfiles', async () => {
+    const sharedLinkedin = 'https://www.linkedin.com/in/talento-operaciones';
+    const prisma = {
+      candidate: {
+        findMany: jest.fn().mockResolvedValue([
+          candidate('candidate-1', 'Ana Pérez', 'ana@example.test', '+1 305 555 0101', 'cv-a', sharedLinkedin),
+          candidate('candidate-2', 'Bruno Díaz', 'bruno@example.test', '+1 305 555 0102', 'cv-b', sharedLinkedin),
+          candidate('candidate-3', 'Carla Ruiz', 'carla@example.test', '+1 305 555 0103', 'cv-c', sharedLinkedin),
+          candidate('candidate-4', 'Diego Soto', 'diego@example.test', '+1 305 555 0104', 'cv-d', sharedLinkedin),
+        ]),
+      },
+    };
+    const service = new TalentCrmService(prisma as never);
+
+    const result = await service.findDuplicates(actor, 'tenant-1', { minimumScore: 45 });
+
+    expect(result.data).toHaveLength(0);
+    expect(result.ignoredSharedValues).toBe(1);
+  });
+
+  it('conserva LinkedIn como señal fuerte cuando solo coincide entre dos perfiles', async () => {
+    const linkedin = 'https://www.linkedin.com/in/ana-perez';
+    const prisma = {
+      candidate: {
+        findMany: jest.fn().mockResolvedValue([
+          candidate('candidate-1', 'Ana Pérez', 'ana@example.test', '+1 305 555 0101', 'cv-a', linkedin),
+          candidate('candidate-2', 'Ana P. Pérez', 'ana.alt@example.test', '+1 305 555 0199', 'cv-b', linkedin),
+        ]),
+      },
+    };
+    const service = new TalentCrmService(prisma as never);
+
+    const result = await service.findDuplicates(actor, 'tenant-1', { minimumScore: 45 });
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toMatchObject({ score: 65, signals: ['LinkedIn idéntico', 'Ciudad idéntica'] });
+  });
 });
 
-function candidate(id: string, fullName: string, email: string, phone: string, sha256: string) {
+function candidate(id: string, fullName: string, email: string, phone: string, sha256: string, linkedinUrl: string | null = null) {
   return {
-    id, fullName, email, phone, city: 'Miami', linkedinUrl: null, updatedAt: new Date(),
+    id, fullName, email, phone, city: 'Miami', linkedinUrl, updatedAt: new Date(),
     resumeFiles: [{ sha256 }], applications: [{ vacancyId: `vacancy-${id}` }],
   };
 }

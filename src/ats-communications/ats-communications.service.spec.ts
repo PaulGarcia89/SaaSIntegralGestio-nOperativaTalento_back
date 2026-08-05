@@ -36,6 +36,7 @@ describe('AtsCommunicationsService', () => {
       communicationDomain: { findUnique: jest.fn().mockResolvedValue({ fromEmail: 'talento@acme.test' }) },
       atsMessage: {
         findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn(),
         create: jest.fn()
           .mockResolvedValueOnce({ id: 'candidate-message' })
           .mockResolvedValueOnce({ id: 'responsible-message' }),
@@ -115,5 +116,28 @@ describe('AtsCommunicationsService', () => {
     expect(result).toEqual([{ id: 'existing-message' }]);
     expect(prisma.notification.create).not.toHaveBeenCalled();
     expect(prisma.atsMessage.create).not.toHaveBeenCalled();
+  });
+
+  it('groups recipient copies under the same communication event key', async () => {
+    const { prisma, service } = setup();
+    prisma.atsMessage.findMany.mockResolvedValue([
+      {
+        id: 'candidate-message',
+        deduplicationKey: 'STAGE_UPDATE:application-1:ana@example.com:timeline:event-1',
+        status: 'PENDING',
+        notification: null,
+      },
+      {
+        id: 'responsible-message',
+        deduplicationKey: 'STAGE_UPDATE:application-1:recruiter@example.com:timeline:event-1',
+        status: 'PENDING',
+        notification: null,
+      },
+    ]);
+
+    const result = await service.listHistory('tenant-1', {} as never, 'application-1');
+
+    expect(result[0].eventKey).toBe('STAGE_UPDATE:application-1:timeline:event-1');
+    expect(result[1].eventKey).toBe(result[0].eventKey);
   });
 });

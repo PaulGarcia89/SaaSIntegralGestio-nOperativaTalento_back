@@ -1,5 +1,5 @@
 import AdmZip from 'adm-zip';
-import { ApplicationStatus, ApplicationTimelineEventType, CandidatePrivacyRequestType } from '@prisma/client';
+import { ApplicationStatus, ApplicationTimelineEventType, AtsCommunicationAudience, CandidatePrivacyRequestType } from '@prisma/client';
 import { CandidatePortalService } from './candidate-portal.service';
 
 describe('CandidatePortalService', () => {
@@ -9,8 +9,12 @@ describe('CandidatePortalService', () => {
     applicationTimelineEvent: { create: jest.fn() },
   };
   const prisma = {
+    candidateAccount: { findUnique: jest.fn() },
+    atsMessage: { findMany: jest.fn() },
+    candidateResumeFile: { findMany: jest.fn() },
+    signatureParticipant: { findMany: jest.fn() },
     vacancyApplication: { findFirst: jest.fn() },
-    candidatePrivacyRequest: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+    candidatePrivacyRequest: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
   };
   const files = { validateResume: jest.fn() };
@@ -25,6 +29,22 @@ describe('CandidatePortalService', () => {
       status: ApplicationStatus.INTERVIEW,
       candidate: { fullName: 'Ana Candidate' },
     });
+  });
+
+  it('only exposes candidate communications in the candidate portal', async () => {
+    prisma.candidateAccount.findUnique.mockResolvedValue({ email: 'ana@example.com' });
+    prisma.atsMessage.findMany.mockResolvedValue([]);
+    prisma.candidateResumeFile.findMany.mockResolvedValue([]);
+    prisma.signatureParticipant.findMany.mockResolvedValue([]);
+    prisma.candidatePrivacyRequest.findMany.mockResolvedValue([]);
+
+    await service.overview('account-1');
+
+    expect(prisma.atsMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        audience: AtsCommunicationAudience.CANDIDATE,
+      }),
+    }));
   });
 
   it('withdraws only the owner application and creates immutable timeline evidence', async () => {

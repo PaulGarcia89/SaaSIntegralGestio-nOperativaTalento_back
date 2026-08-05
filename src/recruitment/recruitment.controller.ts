@@ -443,6 +443,12 @@ export class RecruitmentController {
     return this.calendars.listConnections(request.tenant!.id, actor);
   }
 
+  @Get("calendar-providers")
+  @RequirePermissions("applications.read")
+  calendarProviders() {
+    return this.calendars.listProviderConfiguration();
+  }
+
   @Get("calendar-connections/:provider/authorize")
   @RequirePermissions("applications.read")
   authorizeCalendar(

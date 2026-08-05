@@ -999,7 +999,7 @@ async function main() {
       },
       update: {
         title,
-        summary: `${title} - contenido demo para frontend.`,
+        summary: `${title} - contenido listo para aprendizaje.`,
         description: `Contenido completo de ${title} para el tenant platform.`,
         coverImageUrl: 'https://images.unsplash.com/photo-1497366754035-f200968a6e72',
         type,
@@ -1012,13 +1012,13 @@ async function main() {
         isPublished: true,
         categoryId: categoryMap.get(categorySlug)!,
         curriculumId: curriculumMap.get(curriculumSlug)!,
-        tags: ['demo', 'frontend', curriculumSlug],
+        tags: ['aprendizaje', 'frontend', curriculumSlug],
       },
       create: {
         tenantId: tenant.id,
         slug,
         title,
-        summary: `${title} - contenido demo para frontend.`,
+        summary: `${title} - contenido listo para aprendizaje.`,
         description: `Contenido completo de ${title} para el tenant platform.`,
         coverImageUrl: 'https://images.unsplash.com/photo-1497366754035-f200968a6e72',
         type,
@@ -1031,7 +1031,7 @@ async function main() {
         isPublished: true,
         categoryId: categoryMap.get(categorySlug)!,
         curriculumId: curriculumMap.get(curriculumSlug)!,
-        tags: ['demo', 'frontend', curriculumSlug],
+        tags: ['aprendizaje', 'frontend', curriculumSlug],
       },
     });
     courseMap.set(slug, course.id);
@@ -1111,7 +1111,7 @@ async function main() {
         prompt: `Pregunta base del curso ${title}`,
         questionType: 'SINGLE_CHOICE',
         sortOrder: 1,
-        explanation: 'Respuesta correcta para demo.',
+        explanation: 'Respuesta correcta de la evaluación.',
       },
     });
 
@@ -1149,7 +1149,7 @@ async function main() {
         sizeBytes: 245760,
         durationSeconds: null,
         language: 'es',
-        tags: ['demo', 'training'],
+        tags: ['biblioteca', 'training'],
         isFeatured: true,
         isPublished: true,
         categoryId: categoryMap.get(categorySlug)!,
@@ -1167,7 +1167,7 @@ async function main() {
         sizeBytes: 245760,
         durationSeconds: null,
         language: 'es',
-        tags: ['demo', 'training'],
+        tags: ['biblioteca', 'training'],
         isFeatured: true,
         isPublished: true,
         categoryId: categoryMap.get(categorySlug)!,
@@ -1522,8 +1522,8 @@ async function main() {
       tenantId: tenant.id,
       userId: user.id,
       courseId: introCourseId,
-      verificationCode: `DEMO${introCourseId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
-      certificateNumber: `CERT-DEMO-${introCourseId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
+      verificationCode: `VALID${introCourseId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
+      certificateNumber: `CERT-${introCourseId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
       ...demoCertificateData,
     } });
   }

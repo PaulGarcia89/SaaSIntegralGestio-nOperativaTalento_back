@@ -427,6 +427,7 @@ export class AtsCommunicationsService {
     });
     return messages.map((message) => ({
       ...message,
+      eventKey: this.communicationEventKey(message.id, message.deduplicationKey),
       status:
         message.status === AtsMessageStatus.CANCELLED
           ? message.status
@@ -558,6 +559,14 @@ export class AtsCommunicationsService {
     return template.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, key: string) =>
       String(variables[key] ?? ""),
     );
+  }
+
+  private communicationEventKey(messageId: string, deduplicationKey: string) {
+    const parts = deduplicationKey.split(":");
+    if (parts.length < 4) return `message:${messageId}`;
+
+    // Event messages differ only by the recipient segment at index 2.
+    return [parts[0], parts[1], ...parts.slice(3)].join(":");
   }
 
   private async assertApplicationAccess(

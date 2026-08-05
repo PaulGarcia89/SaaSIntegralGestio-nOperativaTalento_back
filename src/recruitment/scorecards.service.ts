@@ -47,7 +47,10 @@ const scorecardInclude = {
   reviewer: { select: { id: true, firstName: true, lastName: true } },
   signedBy: { select: { id: true, firstName: true, lastName: true } },
   template: { select: { id: true, name: true, version: true } },
-  responses: { orderBy: { criterion: { sortOrder: 'asc' as const } } },
+  responses: {
+    include: { criterion: { select: { competencyName: true } } },
+    orderBy: { criterion: { sortOrder: 'asc' as const } },
+  },
 } satisfies Prisma.InterviewScorecardInclude;
 
 @Injectable()
@@ -776,7 +779,7 @@ export class ScorecardsService {
       return {
         key,
         label: responses[0]?.criterionLabel,
-        competencyName: responses[0]?.competencyName,
+        competencyName: responses[0]?.criterion.competencyName ?? responses[0]?.competencyName,
         ratings,
         mean: mean == null ? null : Number(mean.toFixed(2)),
         min: ratings.length ? Math.min(...ratings) : null,

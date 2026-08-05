@@ -26,6 +26,23 @@ describe("Interview calendar integration", () => {
     expect(() => crypto.verifyState(`${state}modified`)).toThrow();
   });
 
+  it("reports provider readiness without exposing OAuth credentials", () => {
+    const previousGoogleId = process.env.GOOGLE_CALENDAR_CLIENT_ID;
+    const previousGoogleSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+    process.env.GOOGLE_CALENDAR_CLIENT_ID = "google-client";
+    delete process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+    const service = new InterviewCalendarService({} as never, new CalendarTokenCryptoService());
+
+    const providers = service.listProviderConfiguration();
+
+    expect(providers.find((item) => item.provider === "GOOGLE")).toEqual({ provider: "GOOGLE", configured: false });
+    expect(providers.every((item) => !("clientId" in item) && !("clientSecret" in item))).toBe(true);
+    if (previousGoogleId === undefined) delete process.env.GOOGLE_CALENDAR_CLIENT_ID;
+    else process.env.GOOGLE_CALENDAR_CLIENT_ID = previousGoogleId;
+    if (previousGoogleSecret === undefined) delete process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+    else process.env.GOOGLE_CALENDAR_CLIENT_SECRET = previousGoogleSecret;
+  });
+
   it("blocks a local scheduling conflict before contacting external providers", async () => {
     const prisma = {
       applicationInterview: {

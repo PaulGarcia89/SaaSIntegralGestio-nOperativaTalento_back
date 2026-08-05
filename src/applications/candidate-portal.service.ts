@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ApplicationStatus, ApplicationTimelineEventType, CandidatePrivacyRequestStatus, Prisma } from '@prisma/client';
+import { ApplicationStatus, ApplicationTimelineEventType, AtsCommunicationAudience, CandidatePrivacyRequestStatus, Prisma } from '@prisma/client';
 import AdmZip from 'adm-zip';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
@@ -22,7 +22,10 @@ export class CandidatePortalService {
     if (!account) throw new NotFoundException('Candidate account not found');
     const [communications, resumes, signatureDocuments, privacyRequests] = await Promise.all([
       this.prisma.atsMessage.findMany({
-        where: { application: { candidate: this.candidateIdentityWhere(accountId) } },
+        where: {
+          audience: AtsCommunicationAudience.CANDIDATE,
+          application: { candidate: this.candidateIdentityWhere(accountId) },
+        },
         select: {
           id: true, applicationId: true, type: true, subject: true, body: true,
           status: true, deliveredAt: true, createdAt: true,
