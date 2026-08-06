@@ -9,7 +9,7 @@
     "preinstall": "node -e \"if(process.platform==='linux')require('child_process').execSync('apt-get update -y && apt-get install -y openssl',{stdio:'inherit'})\"",
     "postinstall": "node -e \"console.log('Prisma se genera durante el build')\"",
     "start": "npm run start:fluentops",
-    "start:fluentops": "prisma generate && node compiled-server/src/main.js",
+    "start:fluentops": "prisma migrate deploy && prisma generate && node compiled-server/src/main.js",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/src/main.js",
     "build": "prisma generate && nest build",
