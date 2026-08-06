@@ -1,9 +1,14 @@
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { CandidateHiredDto } from './dto/candidate-hired.dto';
 import { SimpleDomainEventDto } from './dto/simple-domain-event.dto';
+import { AtsAutomationEventDto } from './dto/ats-automation-event.dto';
 
 export const DOMAIN_EVENT_NAMES = {
   CANDIDATE_HIRED: 'candidate.hired',
+  APPLICATION_STAGE_CHANGED: 'ats.application_stage_changed',
+  APPLICATION_REJECTED: 'ats.application_rejected',
+  INTERVIEW_SCHEDULED: 'ats.interview_scheduled',
+  INTERVIEW_COMPLETED: 'ats.interview_completed',
   EMPLOYEE_BRANCH_CHANGED: 'employee.branch_changed',
   EMPLOYEE_OFFBOARDING_STARTED: 'employee.offboarding_started',
   ONBOARDING_COMPLETED: 'onboarding.completed',
@@ -24,6 +29,10 @@ export const DOMAIN_EVENT_CATALOG = {
     aggregateType: 'candidate',
     dtoClass: CandidateHiredDto,
   },
+  [DOMAIN_EVENT_NAMES.APPLICATION_STAGE_CHANGED]: { version: DOMAIN_EVENT_VERSION, aggregateType: 'application', dtoClass: AtsAutomationEventDto },
+  [DOMAIN_EVENT_NAMES.APPLICATION_REJECTED]: { version: DOMAIN_EVENT_VERSION, aggregateType: 'application', dtoClass: AtsAutomationEventDto },
+  [DOMAIN_EVENT_NAMES.INTERVIEW_SCHEDULED]: { version: DOMAIN_EVENT_VERSION, aggregateType: 'interview', dtoClass: AtsAutomationEventDto },
+  [DOMAIN_EVENT_NAMES.INTERVIEW_COMPLETED]: { version: DOMAIN_EVENT_VERSION, aggregateType: 'interview', dtoClass: AtsAutomationEventDto },
   [DOMAIN_EVENT_NAMES.EMPLOYEE_BRANCH_CHANGED]: {
     version: DOMAIN_EVENT_VERSION,
     aggregateType: 'employee',
@@ -68,7 +77,7 @@ export const DOMAIN_EVENT_CATALOG = {
   }
 >;
 
-export type DomainEventDto = CandidateHiredDto | SimpleDomainEventDto;
+export type DomainEventDto = CandidateHiredDto | SimpleDomainEventDto | AtsAutomationEventDto;
 
 export type DomainEventActorSnapshot = Pick<
   JwtPayload,

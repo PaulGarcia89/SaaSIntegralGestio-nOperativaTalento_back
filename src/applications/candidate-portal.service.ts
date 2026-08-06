@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ApplicationStatus, ApplicationTimelineEventType, AtsCommunicationAudience, CandidatePrivacyRequestStatus, Prisma } from '@prisma/client';
 import AdmZip from 'adm-zip';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
 import { CreateCandidatePrivacyRequestDto } from './dto/candidate-self-service.dto';
+import { InterviewCalendarService } from '../recruitment/interview-calendar.service';
 
 @Injectable()
 export class CandidatePortalService {
@@ -12,7 +13,25 @@ export class CandidatePortalService {
     private readonly prisma: PrismaService,
     private readonly files: AtsPrivateFileService,
     private readonly antivirus: TrainingAntivirusService,
+    @Optional() private readonly calendars?: InterviewCalendarService,
   ) {}
+
+  async interviewInvitation(accountId: string, interviewId: string) {
+    if (!this.calendars) throw new BadRequestException('Internal calendar is not available');
+    const interview = await this.prisma.applicationInterview.findFirst({
+      where: {
+        id: interviewId,
+        application: { candidate: this.candidateIdentityWhere(accountId) },
+      },
+      select: { tenantId: true, application: { select: { candidateId: true } } },
+    });
+    if (!interview) throw new NotFoundException('Interview not found');
+    return this.calendars.generateCandidateIcs(
+      interview.tenantId,
+      interview.application.candidateId,
+      interviewId,
+    );
+  }
 
   async overview(accountId: string) {
     const account = await this.prisma.candidateAccount.findUnique({

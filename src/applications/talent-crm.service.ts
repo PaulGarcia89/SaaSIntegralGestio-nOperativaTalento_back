@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CandidateCrmStatus, Prisma, TalentActivityType } from '@prisma/client';
+import { AtsCommunicationAudience, AtsCommunicationType, CandidateCrmStatus, Prisma, TalentActivityType, TalentCampaignStatus, TalentRecipientStatus, TalentSequenceEnrollmentStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AtsCommunicationsService } from '../ats-communications/ats-communications.service';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
@@ -13,6 +14,11 @@ import {
   MergeCandidatesDto,
   UpdateTalentCandidateDto,
   UpdateTalentPoolDto,
+  CreateTalentCampaignDto,
+  CreateTalentSegmentDto,
+  CreateTalentSequenceDto,
+  EnrollTalentSequenceDto,
+  TalentSegmentFiltersDto,
 } from './dto/talent-crm.dto';
 
 const crmCandidateInclude = {
@@ -38,7 +44,10 @@ const crmCandidateInclude = {
 
 @Injectable()
 export class TalentCrmService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly communications: AtsCommunicationsService,
+  ) {}
 
   async listCandidates(actor: JwtPayload, tenantId: string, query: ListTalentCandidatesDto) {
     const pagination = normalizeOffsetPagination(query);
@@ -229,6 +238,83 @@ export class TalentCrmService {
       await tx.talentActivity.create({ data: { tenantId, candidateId: target.id, actorId: actor.sub, type: TalentActivityType.MERGE, subject: `Perfil fusionado con ${source.fullName}`, description: dto.reason.trim(), metadata: { auditId: audit.id, sourceCandidateId: source.id, movedApplications: sourceApplications.length, movedFiles: sourceFiles.length } } });
       return { auditId: audit.id, sourceCandidateId: source.id, targetCandidateId: target.id, movedApplications: sourceApplications.length, movedFiles: sourceFiles.length };
     });
+  }
+
+  async listSegments(actor: JwtPayload, tenantId: string) {
+    const segments = await this.prisma.talentSegment.findMany({ where: { tenantId }, orderBy: { updatedAt: 'desc' } });
+    return Promise.all(segments.map(async (segment) => ({ ...segment, candidateCount: await this.prisma.candidate.count({ where: this.segmentWhere(actor, tenantId, segment.filters) }) })));
+  }
+
+  async createSegment(actor: JwtPayload, tenantId: string, dto: CreateTalentSegmentDto) {
+    this.segmentWhere(actor, tenantId, dto.filters);
+    return this.prisma.talentSegment.create({ data: { tenantId, name: dto.name.trim(), description: dto.description?.trim(), filters: this.json(dto.filters), createdById: actor.sub } });
+  }
+
+  async previewSegment(actor: JwtPayload, tenantId: string, segmentId: string) {
+    const segment = await this.assertSegment(tenantId, segmentId);
+    const where = this.segmentWhere(actor, tenantId, segment.filters);
+    const [total, candidates] = await this.prisma.$transaction([this.prisma.candidate.count({ where }), this.prisma.candidate.findMany({ where, select: { id: true, fullName: true, email: true, city: true }, take: 20, orderBy: { updatedAt: 'desc' } })]);
+    return { segmentId, total, candidates };
+  }
+
+  async rediscoverCandidates(actor: JwtPayload, tenantId: string, filters: TalentSegmentFiltersDto) {
+    const candidates = await this.prisma.candidate.findMany({ where: { ...this.segmentWhere(actor, tenantId, filters), applications: { some: { status: { in: ['REJECTED', 'WITHDRAWN'] } } } }, include: { talentTagAssignments: { include: { tag: true } }, applications: { include: { vacancy: { select: { title: true } } }, orderBy: { appliedAt: 'desc' }, take: 1 }, talentActivities: { orderBy: { createdAt: 'desc' }, take: 1 } }, take: 100, orderBy: { updatedAt: 'desc' } });
+    return candidates.map((candidate) => ({ id: candidate.id, fullName: candidate.fullName, email: candidate.email, city: candidate.city, competencies: candidate.talentTagAssignments.map((item) => item.tag.name), lastProcess: candidate.applications[0]?.vacancy.title ?? null, lastContactAt: candidate.talentActivities[0]?.createdAt ?? null, reason: 'Perfil con experiencia previa disponible para revisión.' }));
+  }
+
+  listCampaigns(actor: JwtPayload, tenantId: string) {
+    return this.prisma.talentCampaign.findMany({ where: { tenantId }, include: { segment: true, _count: { select: { recipients: true } } }, orderBy: { createdAt: 'desc' } });
+  }
+
+  async createCampaign(actor: JwtPayload, tenantId: string, dto: CreateTalentCampaignDto) {
+    await this.assertSegment(tenantId, dto.segmentId);
+    const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
+    return this.prisma.talentCampaign.create({ data: { tenantId, segmentId: dto.segmentId, name: dto.name.trim(), subject: dto.subject.trim(), body: dto.body.trim(), scheduledAt, status: scheduledAt ? 'SCHEDULED' : 'DRAFT', createdById: actor.sub } });
+  }
+
+  async launchCampaign(actor: JwtPayload, tenantId: string, campaignId: string) {
+    const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId } });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    throw new BadRequestException('La campaña requiere revisión y autorización de entrega antes de enviar correos externos.');
+  }
+
+  async campaignMetrics(actor: JwtPayload, tenantId: string, campaignId: string) {
+    const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId }, include: { recipients: { include: { message: { include: { notification: { include: { deliveries: true } } } } } } } });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    const queued = campaign.recipients.filter((item) => item.status === 'QUEUED').length;
+    const delivered = campaign.recipients.filter((item) => item.message?.notification?.deliveries.some((delivery) => delivery.deliveredAt)).length;
+    return { campaignId, audience: campaign.recipients.length, queued, delivered, deliveryRate: queued ? Number((delivered / queued * 100).toFixed(1)) : 0, conversionRate: 0 };
+  }
+
+  listSequences(actor: JwtPayload, tenantId: string) {
+    return this.prisma.talentSequence.findMany({ where: { tenantId }, include: { segment: true, steps: { orderBy: { position: 'asc' } }, _count: { select: { enrollments: true } } }, orderBy: { updatedAt: 'desc' } });
+  }
+
+  async createSequence(actor: JwtPayload, tenantId: string, dto: CreateTalentSequenceDto) {
+    if (dto.steps.length !== dto.stepCount) throw new BadRequestException('El número de pasos no coincide con la secuencia');
+    if (dto.segmentId) await this.assertSegment(tenantId, dto.segmentId);
+    return this.prisma.talentSequence.create({ data: { tenantId, segmentId: dto.segmentId, name: dto.name.trim(), description: dto.description?.trim(), createdById: actor.sub, steps: { create: dto.steps.map((step, position) => ({ position, delayHours: step.delayHours, subject: step.subject.trim(), body: step.body.trim() })) } }, include: { steps: { orderBy: { position: 'asc' } } } });
+  }
+
+  async enrollSequence(actor: JwtPayload, tenantId: string, sequenceId: string, dto: EnrollTalentSequenceDto) {
+    const sequence = await this.prisma.talentSequence.findFirst({ where: { id: sequenceId, tenantId, isActive: true }, include: { steps: { orderBy: { position: 'asc' } } } });
+    if (!sequence) throw new NotFoundException('Sequence not found');
+    if (!sequence.steps.length) throw new BadRequestException('La secuencia no tiene pasos');
+    if (!dto.candidateId && !dto.segmentId && !sequence.segmentId) throw new BadRequestException('Selecciona un segmento o candidato');
+    const candidates = dto.candidateId ? [await this.assertCandidate(actor, tenantId, dto.candidateId)] : await this.prisma.candidate.findMany({ where: this.segmentWhere(actor, tenantId, (await this.assertSegment(tenantId, dto.segmentId ?? sequence.segmentId!)).filters), select: { id: true } });
+    await this.prisma.talentSequenceEnrollment.createMany({ data: candidates.map((candidate) => ({ tenantId, sequenceId, candidateId: candidate.id, nextRunAt: new Date(Date.now() + sequence.steps[0].delayHours * 3_600_000) })), skipDuplicates: true });
+    return { enrolled: candidates.length, status: 'PENDING_DELIVERY_AUTHORIZATION' };
+  }
+
+  private segmentWhere(actor: JwtPayload, tenantId: string, filters: Prisma.JsonValue | TalentSegmentFiltersDto): Prisma.CandidateWhereInput {
+    const input = (filters ?? {}) as TalentSegmentFiltersDto;
+    return { ...this.candidateWhere(actor, tenantId, input.branchId), ...(input.search ? { OR: [{ fullName: { contains: input.search, mode: 'insensitive' } }, { email: { contains: input.search, mode: 'insensitive' } }, { city: { contains: input.search, mode: 'insensitive' } }] } : {}), ...(input.poolId ? { talentPoolMemberships: { some: { poolId: input.poolId } } } : {}), ...(input.tagId ? { talentTagAssignments: { some: { tagId: input.tagId } } } : {}), ...(input.competency ? { talentTagAssignments: { some: { tag: { name: { contains: input.competency, mode: 'insensitive' } } } } } : {}), ...(input.source ? { source: { contains: input.source, mode: 'insensitive' } } : {}), ...(input.doNotContact !== undefined ? { doNotContact: input.doNotContact } : { doNotContact: false }) };
+  }
+
+  private async assertSegment(tenantId: string, segmentId: string) {
+    const segment = await this.prisma.talentSegment.findFirst({ where: { id: segmentId, tenantId, isActive: true } });
+    if (!segment) throw new NotFoundException('Segment not found');
+    return segment;
   }
 
   private candidateWhere(actor: JwtPayload, tenantId: string, branchId?: string, extra: Prisma.CandidateWhereInput = {}): Prisma.CandidateWhereInput {

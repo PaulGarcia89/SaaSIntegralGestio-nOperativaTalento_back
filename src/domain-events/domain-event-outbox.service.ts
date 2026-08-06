@@ -35,24 +35,39 @@ export class DomainEventOutboxService {
     };
 
     return this.prisma.$transaction(async (tx) => {
-      const event = await tx.outboxEvent.create({
-        data: {
-          tenantId: input.envelope.tenantId,
-          branchId: input.envelope.branchId ?? null,
-          userId: input.userId ?? null,
-          aggregateType: catalogEntry.aggregateType,
-          aggregateId: input.aggregateId ?? null,
-          eventName: input.envelope.eventName,
-          eventVersion: input.envelope.eventVersion,
-          payload: this.toJson(signedPayload),
-          occurredAt: input.envelope.occurredAt,
-          correlationId: input.envelope.correlationId,
-          causationId: input.envelope.causationId ?? null,
-          idempotencyKey: input.envelope.idempotencyKey,
-          nextRetryAt: input.nextRetryAt ?? input.envelope.occurredAt,
-          maxAttempts: input.maxAttempts ?? 10,
-        },
-      });
+      let event;
+      try {
+        event = await tx.outboxEvent.create({
+          data: {
+            tenantId: input.envelope.tenantId,
+            branchId: input.envelope.branchId ?? null,
+            userId: input.userId ?? null,
+            aggregateType: catalogEntry.aggregateType,
+            aggregateId: input.aggregateId ?? null,
+            eventName: input.envelope.eventName,
+            eventVersion: input.envelope.eventVersion,
+            payload: this.toJson(signedPayload),
+            occurredAt: input.envelope.occurredAt,
+            correlationId: input.envelope.correlationId,
+            causationId: input.envelope.causationId ?? null,
+            idempotencyKey: input.envelope.idempotencyKey,
+            nextRetryAt: input.nextRetryAt ?? input.envelope.occurredAt,
+            maxAttempts: input.maxAttempts ?? 10,
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+          throw error;
+        }
+        return tx.outboxEvent.findUniqueOrThrow({
+          where: {
+            tenantId_idempotencyKey: {
+              tenantId: input.envelope.tenantId,
+              idempotencyKey: input.envelope.idempotencyKey,
+            },
+          },
+        });
+      }
 
       await this.trackingService.recordPublished(event, tx);
 

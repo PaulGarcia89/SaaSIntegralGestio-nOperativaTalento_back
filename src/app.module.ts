@@ -44,12 +44,14 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { PlanLimitsModule } from './plan-limits/plan-limits.module';
 import { JobOffersModule } from './job-offers/job-offers.module';
+import { AtsFileStorageModule } from './common/files/ats-file-storage.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     MessagingModule,
     PrismaModule,
+    AtsFileStorageModule,
     PlanLimitsModule,
     AccessControlModule,
     PlatformModule,

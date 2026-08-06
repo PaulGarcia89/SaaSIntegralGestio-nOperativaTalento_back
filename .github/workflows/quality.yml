@@ -1,0 +1,47 @@
+name: Calidad backend
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  unit-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --runInBand
+      - run: npm audit --omit=dev --audit-level=critical
+
+  e2e-before-publish:
+    needs: unit-security
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: ats_e2e }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ats_e2e" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ats_e2e?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run test:e2e:full
+
+  owasp-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dependency-check/Dependency-Check_Action@main
+        with: { project: talentos-ats, path: ., format: HTML, args: --failOnCVSS 9 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: owasp-dependency-check, path: reports }

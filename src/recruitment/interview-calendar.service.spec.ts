@@ -111,4 +111,34 @@ describe("Interview calendar integration", () => {
       endsAt: "2099-08-03T11:00:00.000Z",
     });
   });
+
+  it("generates an internal ICS invitation for the authenticated candidate", async () => {
+    const prisma = {
+      applicationInterview: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "interview-1",
+          externalICalUid: null,
+          icsSequence: 2,
+          status: "SCHEDULED",
+          title: "Entrevista técnica",
+          startsAt: new Date("2099-08-03T14:00:00.000Z"),
+          endsAt: new Date("2099-08-03T15:00:00.000Z"),
+          meetingUrl: "https://meet.example.com/manual-link",
+          location: null,
+          interviewer: { firstName: "Ana", lastName: "López", email: "ana@empresa.test" },
+          application: { candidate: { fullName: "María Pérez", email: "maria@example.test" }, vacancy: { title: "Analista" } },
+        }),
+      },
+    };
+    const service = new InterviewCalendarService(prisma as never, new CalendarTokenCryptoService());
+
+    const invitation = await service.generateCandidateIcs("tenant-1", "candidate-1", "interview-1");
+
+    expect(prisma.applicationInterview.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "interview-1", tenantId: "tenant-1", application: { candidateId: "candidate-1" } },
+    }));
+    expect(invitation.content).toContain("BEGIN:VCALENDAR");
+    expect(invitation.content).toContain("LOCATION:https://meet.example.com/manual-link");
+    expect(invitation.content).toContain("ATTENDEE;CN=María Pérez");
+  });
 });

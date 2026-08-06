@@ -624,8 +624,16 @@ export class VacanciesService {
     await this.findOne(id, tenantId, actor);
     if (!this.files || !this.antivirus) throw new BadRequestException('Vacancy image upload is not available');
     const mimeType = this.files.validateVacancyImage(file);
-    const scan = await this.antivirus.scan(file.buffer);
-    const stored = await this.files.store('vacancy-image', tenantId, id, file, mimeType);
+    const quarantined = await this.files.store('vacancy-image', tenantId, id, file, mimeType);
+    let stored: { storageKey: string; sha256: string };
+    let scan: Awaited<ReturnType<TrainingAntivirusService['scan']>>;
+    try {
+      scan = await this.antivirus.scan(file.buffer);
+      stored = { ...quarantined, ...await this.files.promote(quarantined.storageKey) };
+    } catch (error) {
+      await this.files.delete(quarantined.storageKey);
+      throw error;
+    }
     try {
       const created = await this.prisma.$transaction(async (tx) => {
         const latest = await tx.vacancyImageFile.aggregate({
@@ -648,7 +656,7 @@ export class VacanciesService {
             sizeBytes: file.size,
             sha256: stored.sha256,
             scanStatus: scan.status,
-            scanEngine: scan.engine,
+            scanEngine: scan.engine ?? 'static-structure-v1',
             uploadedByUserId: actor.sub,
             retainUntil: this.files!.retentionDate('vacancy-image'),
           },

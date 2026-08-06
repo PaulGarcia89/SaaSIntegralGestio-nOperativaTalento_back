@@ -4,7 +4,6 @@ import { VacanciesController } from './vacancies.controller';
 import { VacanciesService } from './vacancies.service';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
-import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
 import { PersonnelRequisitionsService } from './personnel-requisitions.service';
 
@@ -15,7 +14,6 @@ import { PersonnelRequisitionsService } from './personnel-requisitions.service';
     PersonnelRequisitionsService,
     SubscriptionGuard,
     ModuleAccessGuard,
-    AtsPrivateFileService,
     TrainingAntivirusService,
   ],
 })

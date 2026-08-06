@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import { ApplicationsService } from './applications.service';
 import { CandidateAuthGuard, CandidateRequest } from './candidate-auth.guard';
 import { CandidatePortalService } from './candidate-portal.service';
@@ -51,5 +52,18 @@ export class CandidateApplicationsController {
   @Get('resume/:id/access')
   resumeAccess(@Req() request: CandidateRequest, @Param('id') id: string) {
     return this.portal.resumeAccess(request.candidate.sub, id);
+  }
+
+  @Get('interviews/:id/invitation.ics')
+  async interviewInvitation(
+    @Req() request: CandidateRequest,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const invitation = await this.portal.interviewInvitation(request.candidate.sub, id);
+    response.setHeader('content-type', 'text/calendar; charset=utf-8');
+    response.setHeader('content-disposition', `attachment; filename="${invitation.filename}"`);
+    response.setHeader('cache-control', 'private, no-store');
+    return invitation.content;
   }
 }

@@ -9,6 +9,7 @@ import { AccessScope } from '../common/enums/access-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsAnalyticsQueryDto } from './dto/ats-analytics-query.dto';
+import { SaveAtsAnalyticsDashboardDto } from './dto/ats-analytics-query.dto';
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -270,6 +271,20 @@ export class AtsAnalyticsService {
       content: `\uFEFF${content}`,
       generatedAt: report.generatedAt,
     };
+  }
+
+  listDashboards(actor: JwtPayload) {
+    const tenantId = actor.activeTenantId ?? actor.tenantId;
+    return this.prisma.applicationSavedView.findMany({ where: { tenantId, userId: actor.sub, filters: { path: ['reportType'], equals: 'ATS_ANALYTICS' } }, orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }] });
+  }
+
+  async saveDashboard(actor: JwtPayload, dto: SaveAtsAnalyticsDashboardDto) {
+    const tenantId = actor.activeTenantId ?? actor.tenantId;
+    const filters = { reportType: 'ATS_ANALYTICS', query: { from: dto.from, to: dto.to, branchId: dto.branchId, vacancyId: dto.vacancyId, recruiterId: dto.recruiterId, granularity: dto.granularity }, widgets: dto.widgets ?? ['summary', 'funnel', 'sources', 'recruiters', 'sla', 'interviews', 'offers'] };
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault) await tx.applicationSavedView.updateMany({ where: { tenantId, userId: actor.sub }, data: { isDefault: false } });
+      return tx.applicationSavedView.upsert({ where: { tenantId_userId_name: { tenantId, userId: actor.sub, name: dto.name.trim() } }, update: { filters: filters as Prisma.InputJsonValue, isDefault: dto.isDefault ?? false }, create: { tenantId, userId: actor.sub, name: dto.name.trim(), filters: filters as Prisma.InputJsonValue, isDefault: dto.isDefault ?? false } });
+    });
   }
 
   private summary(applications: AnalyticsApplication[], now: Date) {

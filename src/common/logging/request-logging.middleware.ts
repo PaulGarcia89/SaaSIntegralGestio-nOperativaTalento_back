@@ -11,6 +11,9 @@ export class RequestLoggingMiddleware implements NestMiddleware {
 
     response.on('finish', () => {
       const durationMs = Date.now() - startedAt;
+      const verbose = process.env.HTTP_REQUEST_LOG_LEVEL === 'verbose';
+      const slow = durationMs >= Number(process.env.HTTP_SLOW_REQUEST_MS ?? 1500);
+      if (!verbose && response.statusCode < 400 && !slow) return;
       this.logger.log(
         JSON.stringify({
           type: 'request',

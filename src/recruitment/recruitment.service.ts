@@ -29,6 +29,7 @@ import {
   UpdateInterviewerProfileDto,
   UpdateInterviewDto,
 } from "./dto/recruitment.dto";
+import { DomainEventsService } from '../domain-events/domain-events.service';
 
 const interviewInclude = {
   application: { include: { candidate: true, vacancy: true } },
@@ -61,6 +62,7 @@ export class RecruitmentService {
     private readonly prisma: PrismaService,
     private readonly communications?: AtsCommunicationsService,
     private readonly calendars?: InterviewCalendarService,
+    private readonly domainEvents?: DomainEventsService,
   ) {}
 
   async getVacancySetup(
@@ -563,6 +565,21 @@ export class RecruitmentService {
         // The interview remains valid and exposes FAILED so an operator can retry.
       }
     }
+    await this.domainEvents?.interviewScheduled(actor, {
+      applicationId: created.applicationId,
+      candidateId: created.application.candidate.id,
+      vacancyId: created.application.vacancy.id,
+      branchId: created.application.vacancy.branchId,
+      interviewId: created.id,
+      status: created.status,
+      payload: {
+        interviewId: created.id,
+        interviewerUserId: created.interviewerUserId,
+        startsAt: created.startsAt.toISOString(),
+        endsAt: created.endsAt.toISOString(),
+        vacancyId: created.application.vacancy.id,
+      },
+    }, { idempotencyKey: `ats:interview-scheduled:${created.id}` });
     return this.prisma.applicationInterview.findUnique({
       where: { id: created.id },
       include: interviewInclude,
@@ -870,6 +887,17 @@ export class RecruitmentService {
       } catch {
         // Synchronization status and error are persisted for manual retry.
       }
+    }
+    if (dto.status === InterviewStatus.COMPLETED && interview.status !== InterviewStatus.COMPLETED) {
+      await this.domainEvents?.interviewCompleted(actor, {
+        applicationId: updatedInterview.applicationId,
+        candidateId: updatedInterview.application.candidate.id,
+        vacancyId: updatedInterview.application.vacancy.id,
+        branchId: updatedInterview.application.vacancy.branchId,
+        interviewId: id,
+        status: InterviewStatus.COMPLETED,
+        payload: { interviewId: id, vacancyId: updatedInterview.application.vacancy.id },
+      }, { idempotencyKey: `ats:interview-completed:${id}:${updatedInterview.completedAt?.toISOString() ?? 'completed'}` });
     }
     return this.prisma.applicationInterview.findUnique({
       where: { id: updatedInterview.id },

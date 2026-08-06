@@ -7,7 +7,8 @@ import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { ReportQueryDto } from './dto/report-query.dto';
-import { AtsAnalyticsQueryDto } from './dto/ats-analytics-query.dto';
+import { AtsAnalyticsQueryDto, SaveAtsAnalyticsDashboardDto } from './dto/ats-analytics-query.dto';
+import { Body, Post } from '@nestjs/common';
 import { AtsAnalyticsService } from './ats-analytics.service';
 import { ReportsService } from './reports.service';
 
@@ -42,4 +43,12 @@ export class ReportsController {
   atsExport(@CurrentUser() actor: JwtPayload, @Query() query: AtsAnalyticsQueryDto) {
     return this.atsAnalytics.exportCsv(actor, query);
   }
+
+  @Get('ats-analytics/dashboards')
+  @RequirePermissions('applications.read')
+  dashboards(@CurrentUser() actor: JwtPayload) { return this.atsAnalytics.listDashboards(actor); }
+
+  @Post('ats-analytics/dashboards')
+  @RequirePermissions('applications.read')
+  saveDashboard(@CurrentUser() actor: JwtPayload, @Body() dto: SaveAtsAnalyticsDashboardDto) { return this.atsAnalytics.saveDashboard(actor, dto); }
 }

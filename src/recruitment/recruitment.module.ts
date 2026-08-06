@@ -12,9 +12,10 @@ import { InterviewSelfSchedulingController } from "./interview-self-scheduling.c
 import { NotificationsModule } from "../notifications/notifications.module";
 import { CompetencyAiProviderService } from "./competency-ai-provider.service";
 import { CompetencyAiAssessmentService } from "./competency-ai-assessment.service";
+import { DomainEventsModule } from "../domain-events/domain-events.module";
 
 @Module({
-  imports: [AtsCommunicationsModule, NotificationsModule],
+  imports: [AtsCommunicationsModule, NotificationsModule, DomainEventsModule],
   controllers: [RecruitmentController, InterviewSelfSchedulingController],
   providers: [
     RecruitmentService,

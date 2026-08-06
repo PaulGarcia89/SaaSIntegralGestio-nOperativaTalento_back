@@ -14,6 +14,7 @@ import { UpdateAutomationRuleDto } from './dto/update-automation-rule.dto';
 import { SimulateAutomationRuleDto } from './dto/simulate-automation-rule.dto';
 import { BulkAutomationRulesDto } from './dto/bulk-automation-rules.dto';
 import { BulkRetryExecutionsDto } from './dto/bulk-retry-executions.dto';
+import { CreateAutomationFromTemplateDto } from './dto/create-automation-from-template.dto';
 
 @Controller('automation')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, PermissionGuard)
@@ -24,6 +25,22 @@ export class AutomationController {
   @RequirePermissions('automation.read')
   getCatalog() {
     return this.automationService.getCatalog();
+  }
+
+  @Get('templates')
+  @RequirePermissions('automation.read')
+  getTemplates() {
+    return this.automationService.getTemplates();
+  }
+
+  @Post('templates/:key')
+  @RequirePermissions('automation.create')
+  createFromTemplate(
+    @Req() request: RequestWithUser,
+    @Param('key') key: string,
+    @Body() dto: CreateAutomationFromTemplateDto,
+  ) {
+    return this.automationService.createFromTemplate(request.user, key, dto);
   }
 
   @Get('operations/overview')

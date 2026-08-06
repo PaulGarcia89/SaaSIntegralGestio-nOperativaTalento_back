@@ -23,6 +23,11 @@ import {
   TagCandidateDto,
   UpdateTalentCandidateDto,
   UpdateTalentPoolDto,
+  CreateTalentSegmentDto,
+  CreateTalentCampaignDto,
+  CreateTalentSequenceDto,
+  EnrollTalentSequenceDto,
+  TalentSegmentFiltersDto,
 } from './dto/talent-crm.dto';
 import { TalentCrmService } from './talent-crm.service';
 
@@ -121,5 +126,71 @@ export class TalentCrmController {
   @RequirePermissions('applications.update')
   merge(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: MergeCandidatesDto) {
     return this.talentCrm.mergeCandidates(actor, request.tenant!.id, dto);
+  }
+
+  @Get('segments')
+  @RequirePermissions('applications.read')
+  segments(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload) {
+    return this.talentCrm.listSegments(actor, request.tenant!.id);
+  }
+
+  @Post('segments')
+  @RequirePermissions('applications.update')
+  createSegment(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: CreateTalentSegmentDto) {
+    return this.talentCrm.createSegment(actor, request.tenant!.id, dto);
+  }
+
+  @Get('segments/:id/preview')
+  @RequirePermissions('applications.read')
+  previewSegment(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string) {
+    return this.talentCrm.previewSegment(actor, request.tenant!.id, id);
+  }
+
+  @Get('rediscovery')
+  @RequirePermissions('applications.read')
+  rediscovery(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query() query: TalentSegmentFiltersDto) {
+    return this.talentCrm.rediscoverCandidates(actor, request.tenant!.id, query);
+  }
+
+  @Get('campaigns')
+  @RequirePermissions('applications.read')
+  campaigns(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload) {
+    return this.talentCrm.listCampaigns(actor, request.tenant!.id);
+  }
+
+  @Post('campaigns')
+  @RequirePermissions('applications.update')
+  createCampaign(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: CreateTalentCampaignDto) {
+    return this.talentCrm.createCampaign(actor, request.tenant!.id, dto);
+  }
+
+  @Post('campaigns/:id/launch')
+  @RequirePermissions('applications.update')
+  launchCampaign(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string) {
+    return this.talentCrm.launchCampaign(actor, request.tenant!.id, id);
+  }
+
+  @Get('campaigns/:id/metrics')
+  @RequirePermissions('applications.read')
+  campaignMetrics(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string) {
+    return this.talentCrm.campaignMetrics(actor, request.tenant!.id, id);
+  }
+
+  @Get('sequences')
+  @RequirePermissions('applications.read')
+  sequences(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload) {
+    return this.talentCrm.listSequences(actor, request.tenant!.id);
+  }
+
+  @Post('sequences')
+  @RequirePermissions('applications.update')
+  createSequence(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Body() dto: CreateTalentSequenceDto) {
+    return this.talentCrm.createSequence(actor, request.tenant!.id, dto);
+  }
+
+  @Post('sequences/:id/enroll')
+  @RequirePermissions('applications.update')
+  enrollSequence(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Body() dto: EnrollTalentSequenceDto) {
+    return this.talentCrm.enrollSequence(actor, request.tenant!.id, id, dto);
   }
 }

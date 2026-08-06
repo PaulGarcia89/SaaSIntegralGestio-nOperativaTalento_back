@@ -1,9 +1,11 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   BadRequestException,
   Injectable,
@@ -12,7 +14,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,7 +24,9 @@ type AtsFileKind = 'resume' | 'vacancy-image';
 @Injectable()
 export class AtsPrivateFileService {
   readonly driver = (process.env.ATS_FILE_STORAGE_DRIVER ?? 'local').toLowerCase();
-  private readonly bucket = process.env.ATS_FILE_S3_BUCKET ?? 'talentos-ats-private';
+  readonly provider = process.env.ATS_FILE_STORAGE_PROVIDER?.toLowerCase()
+    ?? (process.env.ATS_FILE_S3_ENDPOINT?.includes('r2.cloudflarestorage.com') ? 'r2' : 's3');
+  readonly bucket = process.env.ATS_FILE_S3_BUCKET ?? 'talentos-ats-private';
   private readonly root = path.resolve(
     process.env.ATS_FILE_STORAGE_ROOT ?? path.join(process.cwd(), 'storage', 'ats-private'),
   );
@@ -45,11 +49,18 @@ export class AtsPrivateFileService {
   validateResume(file?: Express.Multer.File) {
     if (!file) throw new BadRequestException('A resume file is required');
     this.assertSize(file, 15 * 1024 * 1024);
+    this.assertSafeOriginalName(file.originalname);
     const detected = this.detectMime(file.buffer);
     const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     if (!allowed.includes(detected) || !allowed.includes(file.mimetype)) {
       throw new BadRequestException('Resume must be a valid PDF or DOCX file');
     }
+    const expectedExtension = detected === 'application/pdf' ? '.pdf' : '.docx';
+    if (path.extname(file.originalname).toLowerCase() !== expectedExtension) {
+      throw new BadRequestException('Resume extension does not match its binary format');
+    }
+    if (detected === 'application/pdf') this.assertSafePdf(file.buffer);
+    else this.assertSafeDocx(file.buffer);
     return detected;
   }
 
@@ -72,15 +83,19 @@ export class AtsPrivateFileService {
     mimeType: string,
   ) {
     const extension = this.extensionFor(mimeType);
-    const key = `${tenantId}/${kind}/${ownerId}/${new Date().getUTCFullYear()}/${randomUUID()}${extension}`;
+    // User-controlled names never become object keys. Every upload enters an isolated staging area.
+    const key = `${tenantId}/quarantine/${kind}/${ownerId}/${new Date().getUTCFullYear()}/${randomUUID()}${extension}`;
     if (this.driver === 's3') {
-      if (!this.client) throw new ServiceUnavailableException('ATS private storage is not configured');
-      await this.client.send(new PutObjectCommand({
+      const client = this.remoteClient();
+      await client.send(new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
         Body: file.buffer,
         ContentType: mimeType,
-        ServerSideEncryption: process.env.ATS_FILE_S3_SSE === 'false' ? undefined : 'AES256',
+        // R2 encrypts every object with AES-256 automatically. AWS S3 receives an explicit SSE request.
+        ServerSideEncryption: this.provider === 'r2' || process.env.ATS_FILE_S3_SSE === 'false'
+          ? undefined
+          : 'AES256',
         Metadata: { tenant: tenantId, kind },
       }));
     } else {
@@ -94,10 +109,41 @@ export class AtsPrivateFileService {
     };
   }
 
+  async promote(storageKey: string) {
+    if (!storageKey.includes('/quarantine/')) {
+      throw new ServiceUnavailableException('Only quarantined ATS files can be promoted');
+    }
+    const promotedKey = storageKey.replace('/quarantine/', '/private/');
+    if (this.driver === 's3') {
+      const client = this.remoteClient();
+      await client.send(new CopyObjectCommand({
+        Bucket: this.bucket,
+        CopySource: `${this.bucket}/${encodeURI(storageKey).replace(/#/g, '%23')}`,
+        Key: promotedKey,
+        MetadataDirective: 'COPY',
+        ServerSideEncryption: this.provider === 'r2' || process.env.ATS_FILE_S3_SSE === 'false'
+          ? undefined
+          : 'AES256',
+      }));
+      try {
+        await client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }));
+      } catch (error) {
+        await client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: promotedKey })).catch(() => undefined);
+        throw error;
+      }
+    } else {
+      const source = this.safePath(storageKey);
+      const destination = this.safePath(promotedKey);
+      await mkdir(path.dirname(destination), { recursive: true });
+      await rename(source, destination);
+    }
+    return { storageKey: promotedKey };
+  }
+
   async delete(storageKey: string) {
     if (this.driver === 's3') {
-      if (!this.client) throw new ServiceUnavailableException('ATS private storage is not configured');
-      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }));
+      const client = this.remoteClient();
+      await client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }));
       return;
     }
     await unlink(this.safePath(storageKey)).catch((error: NodeJS.ErrnoException) => {
@@ -126,6 +172,24 @@ export class AtsPrivateFileService {
           where: { id: fileId, status: { in: ['ACTIVE', 'SUPERSEDED'] }, retainUntil: { gt: new Date() } },
         });
     if (!record) throw new NotFoundException('File not found or no longer retained');
+    if (this.driver === 's3') {
+      const client = this.remoteClient();
+      const directTtl = Math.min(
+        Math.max(Number(process.env.ATS_FILE_DIRECT_URL_TTL_SECONDS ?? 60), 30),
+        300,
+      );
+      return {
+        redirectUrl: await getSignedUrl(client, new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: record.storageKey,
+          ResponseContentType: record.mimeType,
+          ResponseContentDisposition: `${kind === 'resume' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(record.originalName)}`,
+        }), { expiresIn: directTtl }),
+        mimeType: record.mimeType,
+        originalName: record.originalName,
+        sha256: record.sha256,
+      };
+    }
     return {
       buffer: await this.read(record.storageKey),
       mimeType: record.mimeType,
@@ -147,8 +211,8 @@ export class AtsPrivateFileService {
 
   private async read(storageKey: string) {
     if (this.driver === 's3') {
-      if (!this.client) throw new ServiceUnavailableException('ATS private storage is not configured');
-      const response = await this.client.send(new GetObjectCommand({
+      const client = this.remoteClient();
+      const response = await client.send(new GetObjectCommand({
         Bucket: this.bucket,
         Key: storageKey,
       }));
@@ -158,6 +222,24 @@ export class AtsPrivateFileService {
     return readFile(this.safePath(storageKey)).catch(() => {
       throw new NotFoundException('Stored file not found');
     });
+  }
+
+  storageConfiguration() {
+    const endpoint = process.env.ATS_FILE_S3_ENDPOINT?.trim() ?? null;
+    return {
+      driver: this.driver,
+      provider: this.driver === 's3' ? this.provider.toUpperCase() : 'LOCAL',
+      bucket: this.driver === 's3' ? this.bucket : null,
+      private: true,
+      directSignedUrls: this.driver === 's3',
+      encryption: this.driver === 's3'
+        ? { enabled: true, mode: this.provider === 'r2' ? 'R2_MANAGED_AES_256' : 'SSE_AES_256' }
+        : { enabled: true, mode: 'FILESYSTEM_PRIVATE_0600' },
+      endpointUsesTls: !endpoint || endpoint.startsWith('https://'),
+      credentialsConfigured: this.driver !== 's3' || Boolean(
+        process.env.ATS_FILE_S3_ACCESS_KEY_ID && process.env.ATS_FILE_S3_SECRET_ACCESS_KEY,
+      ),
+    };
   }
 
   private verifyToken(kind: AtsFileKind, fileId: string, token: string) {
@@ -188,9 +270,119 @@ export class AtsPrivateFileService {
     return secret ?? 'local-development-ats-file-secret';
   }
 
+  private remoteClient(): S3Client {
+    const endpoint = process.env.ATS_FILE_S3_ENDPOINT?.trim();
+    const credentials = process.env.ATS_FILE_S3_ACCESS_KEY_ID?.trim()
+      && process.env.ATS_FILE_S3_SECRET_ACCESS_KEY?.trim();
+    if (!this.client || !this.bucket || (this.provider === 'r2' && (!endpoint || !credentials))) {
+      throw new ServiceUnavailableException('ATS private S3/R2 storage is not fully configured');
+    }
+    if (endpoint && !endpoint.startsWith('https://') && process.env.NODE_ENV === 'production') {
+      throw new ServiceUnavailableException('ATS private storage endpoint must use HTTPS');
+    }
+    return this.client;
+  }
+
   private assertSize(file: Express.Multer.File, maximum: number) {
     if (!file.size || file.size > maximum || file.buffer.length > maximum) {
       throw new BadRequestException(`File exceeds the ${Math.floor(maximum / 1024 / 1024)} MB limit`);
+    }
+  }
+
+  private assertSafeOriginalName(originalName: string) {
+    if (!originalName || originalName.length > 180 || /[\0\r\n]/.test(originalName)) {
+      throw new BadRequestException('Resume filename is invalid');
+    }
+    const basename = path.basename(originalName);
+    if (basename !== originalName || basename.startsWith('.')) {
+      throw new BadRequestException('Resume filename is unsafe');
+    }
+  }
+
+  private assertSafePdf(buffer: Buffer) {
+    const header = buffer.subarray(0, 8).toString('ascii');
+    if (!/^%PDF-(?:1\.[0-7]|2\.0)/.test(header)) {
+      throw new BadRequestException('PDF version or binary signature is invalid');
+    }
+    const eof = buffer.lastIndexOf(Buffer.from('%%EOF'));
+    if (eof < 0 || buffer.subarray(eof + 5).toString('latin1').trim().length > 0) {
+      throw new BadRequestException('PDF is incomplete or contains suspicious trailing data');
+    }
+    const source = buffer.toString('latin1');
+    const activeTokens = [
+      /\/JavaScript\b/i,
+      /\/JS\b/i,
+      /\/OpenAction\b/i,
+      /\/AA\b/,
+      /\/Launch\b/i,
+      /\/RichMedia\b/i,
+      /\/EmbeddedFile\b/i,
+      /\/XFA\b/i,
+      /\/AcroForm\b/i,
+    ];
+    if (activeTokens.some((pattern) => pattern.test(source))) {
+      throw new BadRequestException('PDF contains active or embedded content');
+    }
+    const streamCount = source.match(/\bstream(?:\r?\n|\r)/g)?.length ?? 0;
+    if (streamCount > 2_000) throw new BadRequestException('PDF contains too many compressed streams');
+  }
+
+  private assertSafeDocx(buffer: Buffer) {
+    let archive: AdmZip;
+    try {
+      archive = new AdmZip(buffer);
+    } catch {
+      throw new BadRequestException('DOCX archive is corrupt');
+    }
+    const entries = archive.getEntries();
+    if (!entries.length || entries.length > 500) {
+      throw new BadRequestException('DOCX contains a suspicious number of compressed entries');
+    }
+    const names = new Set<string>();
+    let expandedBytes = 0;
+    for (const entry of entries) {
+      const name = entry.entryName.replace(/\\/g, '/');
+      const normalized = path.posix.normalize(name);
+      if (
+        names.has(name)
+        || name.includes('\0')
+        || name.startsWith('/')
+        || normalized.startsWith('../')
+        || normalized !== name.replace(/^\.\//, '')
+        || entry.header.encrypted
+      ) {
+        throw new BadRequestException('DOCX contains an unsafe compressed entry');
+      }
+      names.add(name);
+      expandedBytes += entry.header.size;
+      if (entry.header.size > 20 * 1024 * 1024 || expandedBytes > 60 * 1024 * 1024) {
+        throw new BadRequestException('DOCX expands beyond the safe processing limit');
+      }
+      const ratio = entry.header.compressedSize > 0
+        ? entry.header.size / entry.header.compressedSize
+        : entry.header.size > 0 ? Number.POSITIVE_INFINITY : 1;
+      if (ratio > 200) throw new BadRequestException('DOCX contains a suspicious compression ratio');
+    }
+    const required = ['[Content_Types].xml', '_rels/.rels', 'word/document.xml'];
+    if (required.some((name) => !names.has(name))) {
+      throw new BadRequestException('DOCX structure is incomplete');
+    }
+    const forbiddenPaths = /(^|\/)(vbaProject\.bin|activeX|embeddings|customUI|oleObject|macros)(\/|$)/i;
+    if ([...names].some((name) => forbiddenPaths.test(name))) {
+      throw new BadRequestException('DOCX contains macros, ActiveX or embedded objects');
+    }
+    const contentTypes = archive.readAsText('[Content_Types].xml');
+    const documentXml = archive.readAsText('word/document.xml');
+    const relationships = entries
+      .filter((entry) => entry.entryName.endsWith('.rels'))
+      .map((entry) => entry.getData().toString('utf8'))
+      .join('\n');
+    if (
+      /macroEnabled|vbaProject|activeX|oleObject|application\/vnd\.ms-word\.document\.macroEnabled/i.test(contentTypes)
+      || /\bDDE(?:AUTO)?\b|INCLUDETEXT|INCLUDEPICT|<w:altChunk\b/i.test(documentXml)
+      || /attachedTemplate|oleObject|externalLink/i.test(relationships)
+    ) {
+      throw new BadRequestException('DOCX contains active, macro-enabled or externally loaded content');
     }
   }
 

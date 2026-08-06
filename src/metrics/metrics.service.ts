@@ -1520,6 +1520,17 @@ export class MetricsService {
     return { from, to };
   }
 
+  getRuntimeUsage() {
+    const memory = process.memoryUsage();
+    return {
+      generatedAt: new Date().toISOString(),
+      uptimeSeconds: Math.round(process.uptime()),
+      memoryBytes: { rss: memory.rss, heapTotal: memory.heapTotal, heapUsed: memory.heapUsed, external: memory.external },
+      railway: { serviceId: process.env.RAILWAY_SERVICE_ID ?? null, deploymentId: process.env.RAILWAY_DEPLOYMENT_ID ?? null },
+      alertThresholdBytes: Number(process.env.RAILWAY_MEMORY_ALERT_BYTES ?? 402653184),
+    };
+  }
+
   private getLatestDate(values: Array<Date | null | undefined>) {
     const dates = values.filter((value): value is Date => value instanceof Date);
     if (dates.length === 0) {

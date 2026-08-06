@@ -7,6 +7,7 @@ import {
 } from './domain-event.constants';
 import { CandidateHiredDto } from './dto/candidate-hired.dto';
 import { SimpleDomainEventDto } from './dto/simple-domain-event.dto';
+import { AtsAutomationEventDto } from './dto/ats-automation-event.dto';
 import { AutomationService } from '../automation/automation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -25,6 +26,10 @@ export class EventHandlerRegistryService {
       [DOMAIN_EVENT_NAMES.CANDIDATE_HIRED]: (actor, dto) =>
         this.processWithNotification(actor, DOMAIN_EVENT_NAMES.CANDIDATE_HIRED, dto, () =>
           this.automationService.processCandidateHired(actor, dto as CandidateHiredDto)),
+      [DOMAIN_EVENT_NAMES.APPLICATION_STAGE_CHANGED]: (actor, dto) => this.processAts(actor, DOMAIN_EVENT_NAMES.APPLICATION_STAGE_CHANGED, dto as AtsAutomationEventDto),
+      [DOMAIN_EVENT_NAMES.APPLICATION_REJECTED]: (actor, dto) => this.processAts(actor, DOMAIN_EVENT_NAMES.APPLICATION_REJECTED, dto as AtsAutomationEventDto),
+      [DOMAIN_EVENT_NAMES.INTERVIEW_SCHEDULED]: (actor, dto) => this.processAts(actor, DOMAIN_EVENT_NAMES.INTERVIEW_SCHEDULED, dto as AtsAutomationEventDto),
+      [DOMAIN_EVENT_NAMES.INTERVIEW_COMPLETED]: (actor, dto) => this.processAts(actor, DOMAIN_EVENT_NAMES.INTERVIEW_COMPLETED, dto as AtsAutomationEventDto),
       [DOMAIN_EVENT_NAMES.EMPLOYEE_BRANCH_CHANGED]: (actor, dto) =>
         this.processWithNotification(actor, DOMAIN_EVENT_NAMES.EMPLOYEE_BRANCH_CHANGED, dto, () =>
           this.automationService.processBranchChanged(actor, dto as SimpleDomainEventDto)),
@@ -47,6 +52,10 @@ export class EventHandlerRegistryService {
         this.processWithNotification(actor, DOMAIN_EVENT_NAMES.COMPLIANCE_CLOSED, dto, () =>
           this.automationService.processComplianceClosed(actor, dto as SimpleDomainEventDto)),
     };
+  }
+
+  private processAts(actor: JwtPayload, eventName: DomainEventName, dto: AtsAutomationEventDto) {
+    return this.automationService.processAtsEvent(actor, eventName, dto);
   }
 
   private async processWithNotification(

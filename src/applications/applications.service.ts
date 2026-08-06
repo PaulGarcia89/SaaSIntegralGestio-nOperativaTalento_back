@@ -26,6 +26,7 @@ import { BulkUpdateApplicationsDto } from "./dto/bulk-update-applications.dto";
 import { AtsPrivateFileService } from "../common/files/ats-private-file.service";
 import { TrainingAntivirusService } from "../training/training-antivirus.service";
 import { AtsCommunicationsService } from "../ats-communications/ats-communications.service";
+import { DomainEventsService } from '../domain-events/domain-events.service';
 
 const applicationInclude = {
   candidate: {
@@ -93,6 +94,7 @@ export class ApplicationsService {
     private readonly files?: AtsPrivateFileService,
     private readonly antivirus?: TrainingAntivirusService,
     private readonly communications?: AtsCommunicationsService,
+    private readonly domainEvents?: DomainEventsService,
   ) {}
 
   async createPublic(
@@ -151,20 +153,27 @@ export class ApplicationsService {
         throw new BadRequestException("Resume upload is not available");
       }
       const mimeType = this.files.validateResume(resume);
-      const scan = await this.antivirus.scan(resume.buffer);
-      const stored = await this.files.store(
+      const quarantined = await this.files.store(
         "resume",
         vacancy.tenantId,
         candidateAccountId,
         resume,
         mimeType,
       );
-      storedResume = {
-        ...stored,
-        mimeType,
-        scanStatus: scan.status,
-        scanEngine: scan.engine,
-      };
+      try {
+        const scan = await this.antivirus.scan(resume.buffer);
+        const promoted = await this.files.promote(quarantined.storageKey);
+        storedResume = {
+          ...quarantined,
+          ...promoted,
+          mimeType,
+          scanStatus: scan.status,
+          scanEngine: scan.engine ?? "static-structure-v1",
+        };
+      } catch (error) {
+        await this.files.delete(quarantined.storageKey);
+        throw error;
+      }
       resumeConsentVersion = consentVersion;
     }
 
@@ -577,14 +586,22 @@ export class ApplicationsService {
     if (!this.files || !this.antivirus)
       throw new BadRequestException("Resume upload is not available");
     const mimeType = this.files.validateResume(file);
-    const scan = await this.antivirus.scan(file.buffer);
-    const stored = await this.files.store(
+    const quarantined = await this.files.store(
       "resume",
       tenantId,
       application.candidate.id,
       file,
       mimeType,
     );
+    let stored: { storageKey: string; sha256: string };
+    let scan: Awaited<ReturnType<TrainingAntivirusService["scan"]>>;
+    try {
+      scan = await this.antivirus.scan(file.buffer);
+      stored = { ...quarantined, ...await this.files.promote(quarantined.storageKey) };
+    } catch (error) {
+      await this.files.delete(quarantined.storageKey);
+      throw error;
+    }
     try {
       const created = await this.prisma.$transaction(async (tx) => {
         const latest = await tx.candidateResumeFile.aggregate({
@@ -607,7 +624,7 @@ export class ApplicationsService {
             sizeBytes: file.size,
             sha256: stored.sha256,
             scanStatus: scan.status,
-            scanEngine: scan.engine,
+            scanEngine: scan.engine ?? "static-structure-v1",
             uploadedByType: "USER",
             uploadedById: actor.sub,
             consentGrantedAt: new Date(),
@@ -818,6 +835,7 @@ export class ApplicationsService {
       }
     }
 
+    let automationEventId: string | null = null;
     await this.prisma.$transaction(async (tx) => {
       await tx.vacancyApplication.update({
         where: { id },
@@ -862,6 +880,7 @@ export class ApplicationsService {
             : `Estado actualizado a ${targetStatus}`,
           source: "ATS_TRANSITION",
         });
+        automationEventId = timelineEvent.id;
         const communicationType =
           targetStatus === ApplicationStatus.REJECTED
             ? AtsCommunicationType.REJECTION
@@ -891,6 +910,31 @@ export class ApplicationsService {
         await this.appendTimelineEvents(tx, tenantId, id, actor, dto.tracking);
       }
     });
+
+    if (automationEventId) {
+      const event = {
+        applicationId: id,
+        candidateId: application.candidate.id,
+        vacancyId: application.vacancyId,
+        branchId: actor.activeBranchId ?? undefined,
+        stageCode: targetStage?.code,
+        status: targetStatus,
+        payload: {
+          previousStageCode: application.currentStage?.code ?? null,
+          stageCode: targetStage?.code ?? null,
+          status: targetStatus,
+          reason: dto.reason ?? null,
+          rejectionReasonId: dto.rejectionReasonId ?? null,
+          vacancyId: application.vacancyId,
+        },
+      };
+      const context = { idempotencyKey: `ats:application-stage:${automationEventId}` };
+      if (targetStatus === ApplicationStatus.REJECTED) {
+        await this.domainEvents?.applicationRejected(actor, event, context);
+      } else {
+        await this.domainEvents?.applicationStageChanged(actor, event, context);
+      }
+    }
 
     return this.findOneForTenant(id, actor, tenantId);
   }

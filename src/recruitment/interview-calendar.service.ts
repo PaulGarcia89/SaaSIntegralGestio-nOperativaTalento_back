@@ -520,6 +520,28 @@ export class InterviewCalendarService {
       },
     });
     if (!interview) throw new NotFoundException("Interview not found");
+    return this.icsInvitation(interview);
+  }
+
+  async generateCandidateIcs(
+    tenantId: string,
+    candidateId: string,
+    interviewId: string,
+  ) {
+    const interview = await this.prisma.applicationInterview.findFirst({
+      where: { id: interviewId, tenantId, application: { candidateId } },
+      include: {
+        interviewer: {
+          select: { email: true, firstName: true, lastName: true },
+        },
+        application: { include: { candidate: true, vacancy: true } },
+      },
+    });
+    if (!interview) throw new NotFoundException("Interview not found");
+    return this.icsInvitation(interview);
+  }
+
+  private icsInvitation(interview: any) {
     const uid = interview.externalICalUid ?? `${interview.id}@talentos`;
     const cancelled = interview.status === InterviewStatus.CANCELED;
     const lines = [

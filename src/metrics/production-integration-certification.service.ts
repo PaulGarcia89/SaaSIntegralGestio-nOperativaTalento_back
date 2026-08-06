@@ -201,7 +201,12 @@ export class ProductionIntegrationCertificationService {
       bucket: bucket ?? null,
       provider: endpoint?.includes("r2.cloudflarestorage.com") ? "R2" : "S3",
       customEndpoint: Boolean(endpoint),
-      encryptionEnabled: process.env[profile.sseEnv] !== "false",
+      encryptionEnabled: true,
+      encryptionMode: endpoint?.includes("r2.cloudflarestorage.com")
+        ? "R2_MANAGED_AES_256"
+        : process.env[profile.sseEnv] === "false" ? "PROVIDER_MANAGED" : "SSE_AES_256",
+      privateAccessExpected: true,
+      directSignedUrls: profile.key === "storage-ats" && driver === "s3",
     };
     if (!configured || !activeProbe) {
       return this.configurationCheck(profile.key, profile.label, configured, activeProbe, evidence, "Almacenamiento privado configurado");

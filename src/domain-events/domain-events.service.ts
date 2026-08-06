@@ -4,6 +4,7 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { CandidateHiredDto } from './dto/candidate-hired.dto';
 import { DomainEventBaseDto } from './dto/domain-event-base.dto';
 import { SimpleDomainEventDto } from './dto/simple-domain-event.dto';
+import { AtsAutomationEventDto } from './dto/ats-automation-event.dto';
 import {
   DOMAIN_EVENT_CATALOG,
   DOMAIN_EVENT_NAMES,
@@ -17,6 +18,7 @@ import { OutboxDispatcherService } from './outbox-dispatcher.service';
 
 type DomainEventRequestContext = {
   correlationId?: string | null;
+  idempotencyKey?: string;
 };
 
 @Injectable()
@@ -36,6 +38,22 @@ export class DomainEventsService {
       },
       context,
     );
+  }
+
+  applicationStageChanged(actor: JwtPayload, dto: AtsAutomationEventDto, context?: DomainEventRequestContext) {
+    return this.publishAts(actor, DOMAIN_EVENT_NAMES.APPLICATION_STAGE_CHANGED, dto, context);
+  }
+
+  applicationRejected(actor: JwtPayload, dto: AtsAutomationEventDto, context?: DomainEventRequestContext) {
+    return this.publishAts(actor, DOMAIN_EVENT_NAMES.APPLICATION_REJECTED, dto, context);
+  }
+
+  interviewScheduled(actor: JwtPayload, dto: AtsAutomationEventDto, context?: DomainEventRequestContext) {
+    return this.publishAts(actor, DOMAIN_EVENT_NAMES.INTERVIEW_SCHEDULED, dto, context);
+  }
+
+  interviewCompleted(actor: JwtPayload, dto: AtsAutomationEventDto, context?: DomainEventRequestContext) {
+    return this.publishAts(actor, DOMAIN_EVENT_NAMES.INTERVIEW_COMPLETED, dto, context);
   }
 
   branchChanged(actor: JwtPayload, dto: SimpleDomainEventDto, context?: DomainEventRequestContext) {
@@ -162,7 +180,7 @@ export class DomainEventsService {
       branchId: dto.branchId ?? actor.activeBranchId ?? null,
       correlationId,
       causationId: null,
-      idempotencyKey: this.buildIdempotencyKey(eventName, dto, occurredAt),
+      idempotencyKey: context?.idempotencyKey ?? this.buildIdempotencyKey(eventName, dto, occurredAt),
       payload: {
         dto: dto as DomainEventDto,
         actor: this.toActorSnapshot(actor),
@@ -181,6 +199,15 @@ export class DomainEventsService {
           null,
       })
       .then((event) => this.dispatcherService.dispatchEventById(event.id));
+  }
+
+  private publishAts(
+    actor: JwtPayload,
+    eventName: Extract<DomainEventName, 'ats.application_stage_changed' | 'ats.application_rejected' | 'ats.interview_scheduled' | 'ats.interview_completed'>,
+    dto: AtsAutomationEventDto,
+    context?: DomainEventRequestContext,
+  ) {
+    return this.publishAndProcess(actor, eventName, dto, { aggregateId: dto.interviewId ?? dto.applicationId }, context);
   }
 
   private buildIdempotencyKey(

@@ -9,8 +9,6 @@ import { CandidateApplicationsController } from './candidate-applications.contro
 import { CandidateAuthController } from './candidate-auth.controller';
 import { CandidateAuthGuard } from './candidate-auth.guard';
 import { CandidateAuthService } from './candidate-auth.service';
-import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
-import { AtsFileAccessController } from '../common/files/ats-file-access.controller';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
 import { AtsCommunicationsModule } from '../ats-communications/ats-communications.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -19,15 +17,16 @@ import { ApplicationSlaService } from './application-sla.service';
 import { ApplicationSlaSchedulerService } from './application-sla-scheduler.service';
 import { TalentCrmController } from './talent-crm.controller';
 import { TalentCrmService } from './talent-crm.service';
+import { RecruitmentModule } from '../recruitment/recruitment.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
-  imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule],
+  imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule, RecruitmentModule, DomainEventsModule],
   controllers: [
     ApplicationsController,
     PublicApplicationsController,
     CandidateAuthController,
     CandidateApplicationsController,
-    AtsFileAccessController,
     TalentCrmController,
   ],
   providers: [
@@ -37,7 +36,6 @@ import { TalentCrmService } from './talent-crm.service';
     CandidateAuthService,
     CandidateAuthGuard,
     CandidatePortalService,
-    AtsPrivateFileService,
     TrainingAntivirusService,
     ApplicationSlaService,
     ApplicationSlaSchedulerService,

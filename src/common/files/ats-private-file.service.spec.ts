@@ -1,5 +1,9 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import AdmZip from 'adm-zip';
+import { createHash } from 'node:crypto';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { AtsPrivateFileService } from './ats-private-file.service';
 
 function uploaded(buffer: Buffer, mimetype: string, originalname: string): Express.Multer.File {
@@ -18,8 +22,16 @@ describe('AtsPrivateFileService security', () => {
   };
   const service = new AtsPrivateFileService(prisma as never);
 
+  function validDocx() {
+    const docx = new AdmZip();
+    docx.addFile('[Content_Types].xml', Buffer.from('<Types><Override ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'));
+    docx.addFile('_rels/.rels', Buffer.from('<Relationships/>'));
+    docx.addFile('word/document.xml', Buffer.from('<w:document><w:p>Candidate</w:p></w:document>'));
+    return docx;
+  }
+
   it('accepts a PDF only when MIME and magic bytes agree', () => {
-    const file = uploaded(Buffer.from('%PDF-1.7\ncontent'), 'application/pdf', 'resume.pdf');
+    const file = uploaded(Buffer.from('%PDF-1.7\ncontent\n%%EOF\n'), 'application/pdf', 'resume.pdf');
     expect(service.validateResume(file)).toBe('application/pdf');
   });
 
@@ -29,9 +41,7 @@ describe('AtsPrivateFileService security', () => {
   });
 
   it('accepts DOCX structure and rejects an arbitrary ZIP', () => {
-    const docx = new AdmZip();
-    docx.addFile('[Content_Types].xml', Buffer.from('<Types/>'));
-    docx.addFile('word/document.xml', Buffer.from('<document/>'));
+    const docx = validDocx();
     expect(service.validateResume(uploaded(
       docx.toBuffer(),
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -45,6 +55,61 @@ describe('AtsPrivateFileService security', () => {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'fake.docx',
     ))).toThrow(BadRequestException);
+  });
+
+  it('rejects active PDF actions and data appended after EOF', () => {
+    expect(() => service.validateResume(uploaded(
+      Buffer.from('%PDF-1.7\n1 0 obj <</OpenAction 2 0 R>>\n%%EOF'),
+      'application/pdf',
+      'active.pdf',
+    ))).toThrow(BadRequestException);
+    expect(() => service.validateResume(uploaded(
+      Buffer.from('%PDF-1.7\ncontent\n%%EOF\nMZ executable'),
+      'application/pdf',
+      'polyglot.pdf',
+    ))).toThrow(BadRequestException);
+  });
+
+  it('rejects macros, embedded objects and legacy extensions in DOCX uploads', () => {
+    const macro = validDocx();
+    macro.addFile('word/vbaProject.bin', Buffer.from('macro'));
+    expect(() => service.validateResume(uploaded(
+      macro.toBuffer(),
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'macro.docx',
+    ))).toThrow(BadRequestException);
+    expect(() => service.validateResume(uploaded(
+      validDocx().toBuffer(),
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'legacy.doc',
+    ))).toThrow(BadRequestException);
+  });
+
+  it('uses random quarantine names, records SHA-256 and promotes only after validation', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ats-security-'));
+    const previousRoot = process.env.ATS_FILE_STORAGE_ROOT;
+    process.env.ATS_FILE_STORAGE_ROOT = root;
+    try {
+      const local = new AtsPrivateFileService(prisma as never);
+      const file = uploaded(Buffer.from('%PDF-1.7\nprofile\n%%EOF'), 'application/pdf', 'candidate-name.pdf');
+      local.validateResume(file);
+      const first = await local.store('resume', 'tenant-1', 'candidate-1', file, 'application/pdf');
+      const second = await local.store('resume', 'tenant-1', 'candidate-1', file, 'application/pdf');
+
+      expect(first.storageKey).toContain('/quarantine/resume/');
+      expect(first.storageKey).not.toContain(file.originalname);
+      expect(first.storageKey).not.toBe(second.storageKey);
+      expect(first.sha256).toBe(createHash('sha256').update(file.buffer).digest('hex'));
+
+      const promoted = await local.promote(first.storageKey);
+      expect(promoted.storageKey).toContain('/private/resume/');
+      await expect(stat(path.join(root, promoted.storageKey))).resolves.toBeDefined();
+      await expect(stat(path.join(root, first.storageKey))).rejects.toBeDefined();
+    } finally {
+      if (previousRoot === undefined) delete process.env.ATS_FILE_STORAGE_ROOT;
+      else process.env.ATS_FILE_STORAGE_ROOT = previousRoot;
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('rejects altered and expired signed URLs before reading storage', async () => {

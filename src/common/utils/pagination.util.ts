@@ -10,8 +10,8 @@ export function normalizeOffsetPagination(
   pagination: OffsetPaginationQueryDto,
   defaults: { page?: number; pageSize?: number } = {},
 ): NormalizedPagination {
-  const page = pagination.page ?? defaults.page ?? 1;
-  const pageSize = pagination.pageSize ?? defaults.pageSize ?? 20;
+  const page = Math.max(1, pagination.page ?? defaults.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, pagination.pageSize ?? defaults.pageSize ?? 20));
 
   return {
     page,

@@ -42,6 +42,8 @@ import { BulkAutomationRulesDto } from './dto/bulk-automation-rules.dto';
 import { BulkRetryExecutionsDto } from './dto/bulk-retry-executions.dto';
 import { CandidateHiredDto } from '../domain-events/dto/candidate-hired.dto';
 import { SimpleDomainEventDto } from '../domain-events/dto/simple-domain-event.dto';
+import { AtsAutomationEventDto } from '../domain-events/dto/ats-automation-event.dto';
+import { DomainEventName, DOMAIN_EVENT_NAMES } from '../domain-events/domain-event.constants';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -113,6 +115,10 @@ export class AutomationService {
     return {
       triggers: [
         this.catalogTrigger(AutomationTriggerEvent.CANDIDATE_HIRED, 'Candidato contratado', 'Se formaliza una contratación desde el ATS', ['payload.jobTitle', 'payload.applicationId']),
+        this.catalogTrigger(AutomationTriggerEvent.APPLICATION_STAGE_CHANGED, 'Etapa de candidatura cambiada', 'Una postulación avanza o retrocede en el pipeline ATS', ['payload.previousStageCode', 'payload.stageCode', 'payload.status', 'payload.vacancyId']),
+        this.catalogTrigger(AutomationTriggerEvent.APPLICATION_REJECTED, 'Candidatura descartada', 'Una postulación queda rechazada con motivo estructurado', ['payload.reason', 'payload.rejectionReasonId', 'payload.vacancyId']),
+        this.catalogTrigger(AutomationTriggerEvent.INTERVIEW_SCHEDULED, 'Entrevista programada', 'Se confirma una entrevista en el calendario interno', ['payload.interviewId', 'payload.interviewerUserId', 'payload.startsAt', 'payload.vacancyId']),
+        this.catalogTrigger(AutomationTriggerEvent.INTERVIEW_COMPLETED, 'Entrevista completada', 'Una entrevista se marca como realizada', ['payload.interviewId', 'payload.vacancyId']),
         this.catalogTrigger(AutomationTriggerEvent.EMPLOYEE_BRANCH_CHANGED, 'Empleado cambia de sucursal', 'Se confirma un traslado entre sucursales', ['payload.previousBranchId', 'payload.targetBranchId']),
         this.catalogTrigger(AutomationTriggerEvent.EMPLOYEE_OFFBOARDING_STARTED, 'Baja de empleado iniciada', 'Comienza el proceso de salida', ['payload.reason']),
         this.catalogTrigger(AutomationTriggerEvent.ONBOARDING_COMPLETED, 'Incorporación completada', 'El expediente de incorporación queda cerrado', ['payload.flowId']),
@@ -145,6 +151,61 @@ export class AutomationService {
       ],
       workflowStages: Object.values(WorkflowStageKey).map((value) => ({ value, label: this.stageLabel(value) })),
     };
+  }
+
+  getTemplates() {
+    return [
+      {
+        key: 'ats-stage-alert',
+        name: 'Alertar cambio de etapa',
+        description: 'Notifica al responsable cuando una candidatura cambia de etapa.',
+        triggerEvent: AutomationTriggerEvent.APPLICATION_STAGE_CHANGED,
+        conditions: [],
+        consequences: [{ type: AutomationConsequenceType.NOTIFY_ACTOR, title: 'Candidatura movida de etapa', message: 'Revisa la candidatura y toma la siguiente acción.' }],
+      },
+      {
+        key: 'ats-rejection-review',
+        name: 'Revisar descarte de candidato',
+        description: 'Crea una alerta auditable al registrar un descarte.',
+        triggerEvent: AutomationTriggerEvent.APPLICATION_REJECTED,
+        conditions: [],
+        consequences: [{ type: AutomationConsequenceType.NOTIFY_ACTOR, title: 'Candidatura descartada', message: 'Confirma que el motivo de descarte y la comunicación sean correctos.' }],
+      },
+      {
+        key: 'ats-interview-follow-up',
+        name: 'Seguimiento de entrevista',
+        description: 'Notifica al responsable al completar una entrevista para cerrar la evaluación.',
+        triggerEvent: AutomationTriggerEvent.INTERVIEW_COMPLETED,
+        conditions: [],
+        consequences: [{ type: AutomationConsequenceType.NOTIFY_ACTOR, title: 'Completar evaluación de entrevista', message: 'La entrevista terminó. Completa la ficha de evaluación y define la siguiente etapa.' }],
+      },
+      {
+        key: 'ats-hiring-onboarding',
+        name: 'Preparar incorporación al contratar',
+        description: 'Crea el expediente de incorporación y avisa al responsable tras la contratación.',
+        triggerEvent: AutomationTriggerEvent.CANDIDATE_HIRED,
+        conditions: [],
+        consequences: [
+          { type: AutomationConsequenceType.CREATE_ONBOARDING },
+          { type: AutomationConsequenceType.NOTIFY_ACTOR, title: 'Incorporación iniciada', message: 'El expediente de incorporación fue creado automáticamente.' },
+        ],
+      },
+    ];
+  }
+
+  async createFromTemplate(actor: JwtPayload, key: string, input?: { branchId?: string; enabled?: boolean }) {
+    const template = this.getTemplates().find((item) => item.key === key);
+    if (!template) throw new NotFoundException('Automation template not found');
+    const scope = input?.branchId ? AutomationScope.BRANCH : AutomationScope.TENANT;
+    return this.createRule(actor, {
+      name: template.name,
+      triggerEvent: template.triggerEvent,
+      scope,
+      branchId: input?.branchId,
+      enabled: input?.enabled ?? false,
+      conditions: template.conditions,
+      consequences: template.consequences,
+    });
   }
 
   async listRules(actor: JwtPayload, query: ListAutomationRulesDto) {
@@ -544,6 +605,34 @@ export class AutomationService {
 
   async processComplianceClosed(actor: JwtPayload, dto: SimpleDomainEventDto) {
     return this.processEmployeeEvent(actor, AutomationTriggerEvent.COMPLIANCE_CLOSED, dto);
+  }
+
+  async processAtsEvent(actor: JwtPayload, eventName: DomainEventName, dto: AtsAutomationEventDto) {
+    const triggerByEvent: Partial<Record<DomainEventName, AutomationTriggerEvent>> = {
+      [DOMAIN_EVENT_NAMES.APPLICATION_STAGE_CHANGED]: AutomationTriggerEvent.APPLICATION_STAGE_CHANGED,
+      [DOMAIN_EVENT_NAMES.APPLICATION_REJECTED]: AutomationTriggerEvent.APPLICATION_REJECTED,
+      [DOMAIN_EVENT_NAMES.INTERVIEW_SCHEDULED]: AutomationTriggerEvent.INTERVIEW_SCHEDULED,
+      [DOMAIN_EVENT_NAMES.INTERVIEW_COMPLETED]: AutomationTriggerEvent.INTERVIEW_COMPLETED,
+    };
+    const triggerEvent = triggerByEvent[eventName];
+    if (!triggerEvent) throw new BadRequestException(`Unsupported ATS event ${eventName}`);
+    return this.processEvent(actor, triggerEvent, {
+      tenantId: actor.tenantId,
+      branchId: dto.branchId ?? actor.activeBranchId ?? null,
+      workflowId: dto.workflowId ?? null,
+      employeeId: dto.employeeId ?? null,
+      candidateId: dto.candidateId ?? null,
+      actorUserId: actor.sub,
+      payload: {
+        applicationId: dto.applicationId,
+        vacancyId: dto.vacancyId ?? null,
+        interviewId: dto.interviewId ?? null,
+        stageCode: dto.stageCode ?? null,
+        status: dto.status ?? null,
+        ...(dto.payload ?? {}),
+      },
+      occurredAt: dto.occurredAt ?? new Date(),
+    });
   }
 
   private async processEmployeeEvent(

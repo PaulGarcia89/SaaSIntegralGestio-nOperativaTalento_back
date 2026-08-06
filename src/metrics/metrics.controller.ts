@@ -10,6 +10,7 @@ import { GlobalOnly } from '../common/decorators/global-only.decorator';
 import { ScopeGuard } from '../common/guards/scope.guard';
 import { IsOptional, IsUUID } from 'class-validator';
 import { ProductionIntegrationCertificationService } from './production-integration-certification.service';
+import { AtsStorageOperationsService } from '../common/files/ats-storage-operations.service';
 
 class RunIntegrationCertificationDto {
   @IsOptional()
@@ -24,7 +25,32 @@ export class MetricsController {
   constructor(
     private readonly metricsService: MetricsService,
     private readonly integrationCertification: ProductionIntegrationCertificationService,
+    private readonly atsStorage: AtsStorageOperationsService,
   ) {}
+
+  @Get('ats-storage')
+  @GlobalOnly()
+  @RequirePermissions('metrics.operations.read')
+  @AuditAction('ATS_STORAGE_INSPECTED')
+  getAtsStorage() {
+    return this.atsStorage.inspect();
+  }
+
+  @Get('runtime-usage')
+  @GlobalOnly()
+  @RequirePermissions('metrics.operations.read')
+  @AuditAction('RUNTIME_USAGE_INSPECTED')
+  getRuntimeUsage() {
+    return this.metricsService.getRuntimeUsage();
+  }
+
+  @Post('ats-storage/maintenance')
+  @GlobalOnly()
+  @RequirePermissions('metrics.operations.read')
+  @AuditAction('ATS_STORAGE_MAINTENANCE_RUN')
+  runAtsStorageMaintenance() {
+    return this.atsStorage.runMaintenance();
+  }
 
   @Get('integration-certification')
   @GlobalOnly()
