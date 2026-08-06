@@ -30,6 +30,7 @@
     "certify": "npm run build && npm test && npm run audit:production",
     "certify:integrations:production": "ts-node -r dotenv/config scripts/certify-production-integrations.ts",
     "certify:ats:production": "node --env-file-if-exists=.env scripts/certify-ats-production.mjs",
+    "load:ats:railway": "k6 run k6/ats-railway-readonly.js",
     "backup": "bash scripts/backup-production.sh",
     "restore:verify": "bash scripts/verify-backup.sh",
     "smoke:production": "node scripts/production-smoke.mjs",

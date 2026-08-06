@@ -15,6 +15,8 @@ import { JwtPayload } from "../common/interfaces/jwt-payload.interface";
 import { AccessScope } from "../common/enums/access-scope.enum";
 import { normalizeOffsetPagination } from "../common/utils/pagination.util";
 import { CreatePublicApplicationDto } from "./dto/create-public-application.dto";
+import { CreateEmployeeReferralDto } from './dto/application-operations.dto';
+import { randomBytes } from 'crypto';
 import {
   ApplicationInterviewDto,
   ApplicationTimelineEventDto,
@@ -96,6 +98,14 @@ export class ApplicationsService {
     private readonly communications?: AtsCommunicationsService,
     private readonly domainEvents?: DomainEventsService,
   ) {}
+
+  listReferrals(user: JwtPayload, tenantId: string) { return this.prisma.employeeReferral.findMany({ where: { tenantId, referrerUserId: user.sub }, include: { vacancy: { select: { id: true, title: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }); }
+
+  async createReferral(user: JwtPayload, tenantId: string, dto: CreateEmployeeReferralDto) {
+    const vacancy = await this.prisma.vacancy.findFirst({ where: { id: dto.vacancyId, tenantId, status: 'OPEN', ...(user.scope === AccessScope.BRANCH && !user.isSuperAdmin ? { branchId: { in: user.allowedBranchIds } } : {}) }, select: { id: true } });
+    if (!vacancy) throw new NotFoundException('Vacante no disponible para referidos.');
+    return this.prisma.employeeReferral.create({ data: { tenantId, vacancyId: vacancy.id, referrerUserId: user.sub, referralCode: `REF-${randomBytes(5).toString('hex').toUpperCase()}`, candidateEmail: dto.candidateEmail?.trim().toLowerCase(), candidateName: dto.candidateName?.trim() }, include: { vacancy: { select: { id: true, title: true } } } });
+  }
 
   async createPublic(
     vacancyId: string,
@@ -193,6 +203,7 @@ export class ApplicationsService {
             city: dto.city,
             linkedinUrl: dto.linkedinUrl,
             portfolioUrl: dto.portfolioUrl,
+            source: dto.source?.trim() || undefined,
           },
           create: {
             accountId: candidateAccountId,
@@ -203,6 +214,7 @@ export class ApplicationsService {
             city: dto.city,
             linkedinUrl: dto.linkedinUrl,
             portfolioUrl: dto.portfolioUrl,
+            source: dto.source?.trim() || undefined,
           },
         });
         const candidate = matchedCandidate.mergedIntoId
@@ -245,7 +257,7 @@ export class ApplicationsService {
               stageEnteredAt: new Date(),
               status: initialStatus,
               coverLetter: dto.coverLetter,
-              dynamicResponses: normalizedDynamicResponses,
+              dynamicResponses: { ...(normalizedDynamicResponses as Record<string, unknown>), attribution: { source: dto.source?.trim() || 'CAREERS_PAGE', referralCode: dto.referralCode?.trim() || null, utmSource: dto.utmSource?.trim() || null, utmMedium: dto.utmMedium?.trim() || null, utmCampaign: dto.utmCampaign?.trim() || null } },
               timelineEvents: {
                 create: {
                   tenantId: vacancy.tenantId,
@@ -268,6 +280,10 @@ export class ApplicationsService {
             },
             include: applicationInclude,
           }));
+
+        if (dto.referralCode?.trim()) {
+          await tx.employeeReferral.updateMany({ where: { tenantId: vacancy.tenantId, vacancyId, referralCode: dto.referralCode.trim(), applicationId: null }, data: { applicationId: created.id, candidateEmail: candidate.email, candidateName: candidate.fullName, acceptedAt: new Date() } });
+        }
 
         if (storedResume && resume) {
           const latest = await tx.candidateResumeFile.aggregate({

@@ -16,6 +16,12 @@ export class CreateApplicationSavedViewDto {
 
 export class UpdateApplicationSavedViewDto extends CreateApplicationSavedViewDto {}
 
+export class CreateEmployeeReferralDto {
+  @IsUUID() vacancyId!: string;
+  @IsOptional() @IsString() @MaxLength(160) candidateEmail?: string;
+  @IsOptional() @IsString() @MaxLength(160) candidateName?: string;
+}
+
 export class UpsertRejectionReasonDto {
   @IsOptional()
   @IsUUID()

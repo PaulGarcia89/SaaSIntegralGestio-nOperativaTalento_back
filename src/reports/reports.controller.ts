@@ -7,7 +7,7 @@ import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { ReportQueryDto } from './dto/report-query.dto';
-import { AtsAnalyticsQueryDto, SaveAtsAnalyticsDashboardDto } from './dto/ats-analytics-query.dto';
+import { AtsAnalyticsQueryDto, SaveAtsAnalyticsDashboardDto, UpsertHiringQualityReviewDto, UpsertRecruitmentSourceCostDto } from './dto/ats-analytics-query.dto';
 import { Body, Post } from '@nestjs/common';
 import { AtsAnalyticsService } from './ats-analytics.service';
 import { ReportsService } from './reports.service';
@@ -51,4 +51,20 @@ export class ReportsController {
   @Post('ats-analytics/dashboards')
   @RequirePermissions('applications.read')
   saveDashboard(@CurrentUser() actor: JwtPayload, @Body() dto: SaveAtsAnalyticsDashboardDto) { return this.atsAnalytics.saveDashboard(actor, dto); }
+
+  @Get('ats-analytics/source-costs')
+  @RequirePermissions('applications.read')
+  sourceCosts(@CurrentUser() actor: JwtPayload) { return this.atsAnalytics.listSourceCosts(actor); }
+
+  @Post('ats-analytics/source-costs')
+  @RequirePermissions('applications.update')
+  upsertSourceCost(@CurrentUser() actor: JwtPayload, @Body() dto: UpsertRecruitmentSourceCostDto) { return this.atsAnalytics.upsertSourceCost(actor, dto); }
+
+  @Get('ats-analytics/hiring-quality')
+  @RequirePermissions('applications.read')
+  hiringQuality(@CurrentUser() actor: JwtPayload) { return this.atsAnalytics.listHiringQuality(actor); }
+
+  @Post('ats-analytics/hiring-quality')
+  @RequirePermissions('applications.update')
+  upsertHiringQuality(@CurrentUser() actor: JwtPayload, @Body() dto: UpsertHiringQualityReviewDto) { return this.atsAnalytics.upsertHiringQuality(actor, dto); }
 }

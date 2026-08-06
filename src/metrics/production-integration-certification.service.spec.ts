@@ -17,7 +17,7 @@ describe("ProductionIntegrationCertificationService", () => {
 
     expect(report.status).toBe("FAIL");
     expect(report.mode).toBe("CONFIGURATION");
-    expect(report.checks).toHaveLength(6);
+    expect(report.checks).toHaveLength(7);
     expect(JSON.stringify(report)).not.toContain("Bearer ");
   });
 
@@ -40,10 +40,11 @@ describe("ProductionIntegrationCertificationService", () => {
     });
     jest.spyOn(service as any, "certifyClamAv").mockResolvedValue(pass("clamav"));
     jest.spyOn(service as any, "certifyCalendars").mockResolvedValue(pass("calendars"));
+    jest.spyOn(service as any, "certifySignatures").mockResolvedValue(pass("signatures"));
 
     const report = await service.certify({ active: true });
 
     expect(report.status).toBe("PASS");
-    expect(report.summary).toEqual({ passed: 6, warnings: 0, failed: 0, skipped: 0 });
+    expect(report.summary).toEqual({ passed: 7, warnings: 0, failed: 0, skipped: 0 });
   });
 });

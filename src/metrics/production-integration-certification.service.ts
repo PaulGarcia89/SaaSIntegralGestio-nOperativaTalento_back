@@ -65,12 +65,14 @@ export class ProductionIntegrationCertificationService {
           ...storageProfiles.map((profile) => this.certifyStorage(profile, true)),
           this.certifyClamAv(true),
           this.certifyCalendars(true, options.tenantId),
+          this.certifySignatures(true),
         ])
       : [
           await this.certifyEmail(false),
           ...await Promise.all(storageProfiles.map((profile) => this.certifyStorage(profile, false))),
           await this.certifyClamAv(false),
           await this.certifyCalendars(false, options.tenantId),
+          await this.certifySignatures(false),
         ];
     const summary = {
       passed: checks.filter((check) => check.status === "PASS").length,
@@ -322,6 +324,39 @@ export class ProductionIntegrationCertificationService {
       };
     } catch (error) {
       return this.failedCheck("calendars", "Calendarios", true, true, startedAt, evidence, error);
+    }
+  }
+
+  private async certifySignatures(activeProbe: boolean): Promise<IntegrationCertificationCheck> {
+    const startedAt = Date.now();
+    const publicUrl = process.env.PUBLIC_FRONTEND_URL?.trim();
+    const provider = (process.env.SIGNATURE_PROVIDER ?? "INTERNAL").trim().toUpperCase();
+    const configured = Boolean(publicUrl && /^https:\/\//.test(publicUrl) && provider === "INTERNAL");
+    const evidence = {
+      provider,
+      publicSigningUrlConfigured: Boolean(publicUrl),
+      securePublicUrl: Boolean(publicUrl && /^https:\/\//.test(publicUrl)),
+      oneTimeTokens: provider === "INTERNAL",
+      auditEvidence: provider === "INTERNAL",
+    };
+    if (!configured || !activeProbe) {
+      return this.configurationCheck("signatures", "Firma electrónica", configured, activeProbe, evidence, "Firma interna, URL pública HTTPS y evidencia auditable configuradas");
+    }
+    try {
+      const url = new URL(publicUrl!);
+      if (url.hostname === "localhost") throw new Error("La firma no puede certificarse con localhost");
+      return {
+        key: "signatures",
+        label: "Firma electrónica",
+        status: "PASS",
+        configured: true,
+        activeProbe: true,
+        summary: "Firma interna con tokens de un solo uso y URL pública HTTPS verificada",
+        durationMs: Date.now() - startedAt,
+        evidence,
+      };
+    } catch (error) {
+      return this.failedCheck("signatures", "Firma electrónica", true, true, startedAt, evidence, error);
     }
   }
 

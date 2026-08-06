@@ -52,4 +52,10 @@ export class CreatePublicApplicationDto {
   })
   @IsObject()
   dynamicResponses?: Record<string, unknown>;
+
+  @IsOptional() @IsString() @MaxLength(80) source?: string;
+  @IsOptional() @IsString() @MaxLength(120) referralCode?: string;
+  @IsOptional() @IsString() @MaxLength(160) utmSource?: string;
+  @IsOptional() @IsString() @MaxLength(160) utmMedium?: string;
+  @IsOptional() @IsString() @MaxLength(160) utmCampaign?: string;
 }

@@ -27,6 +27,9 @@ import {
   CreateTalentCampaignDto,
   CreateTalentSequenceDto,
   EnrollTalentSequenceDto,
+  ListTalentCampaignAudienceDto,
+  ReviewTalentCampaignAudienceDto,
+  ApproveTalentCampaignDto,
   TalentSegmentFiltersDto,
 } from './dto/talent-crm.dto';
 import { TalentCrmService } from './talent-crm.service';
@@ -169,6 +172,28 @@ export class TalentCrmController {
   launchCampaign(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string) {
     return this.talentCrm.launchCampaign(actor, request.tenant!.id, id);
   }
+
+  @Post('campaigns/:id/audience/prepare')
+  @RequirePermissions('applications.update')
+  prepareCampaignAudience(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string) {
+    return this.talentCrm.prepareCampaignAudience(actor, request.tenant!.id, id);
+  }
+
+  @Get('campaigns/:id/audience')
+  @RequirePermissions('applications.read')
+  campaignAudience(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query() query: ListTalentCampaignAudienceDto) {
+    return this.talentCrm.getCampaignAudience(actor, request.tenant!.id, id, query);
+  }
+
+  @Post('campaigns/:id/audience/review')
+  @RequirePermissions('applications.update')
+  reviewCampaignAudience(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Body() dto: ReviewTalentCampaignAudienceDto) {
+    return this.talentCrm.reviewCampaignAudience(actor, request.tenant!.id, id, dto);
+  }
+
+  @Post('campaigns/:id/approvals')
+  @RequirePermissions('applications.update')
+  approveCampaign(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Body() dto: ApproveTalentCampaignDto) { return this.talentCrm.approveCampaign(actor, request.tenant!.id, id, dto); }
 
   @Get('campaigns/:id/metrics')
   @RequirePermissions('applications.read')

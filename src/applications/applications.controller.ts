@@ -21,7 +21,7 @@ import { RequireModule } from '../common/decorators/module-access.decorator';
 import { ModuleCode } from '@prisma/client';
 import { BulkUpdateApplicationsDto } from './dto/bulk-update-applications.dto';
 import { DeleteResumeDto, ReplaceResumeDto } from './dto/file-operation.dto';
-import { CreateApplicationSavedViewDto, UpdateApplicationSavedViewDto } from './dto/application-operations.dto';
+import { CreateApplicationSavedViewDto, CreateEmployeeReferralDto, UpdateApplicationSavedViewDto } from './dto/application-operations.dto';
 import { ApplicationSlaService } from './application-sla.service';
 
 @Controller('applications')
@@ -66,6 +66,12 @@ export class ApplicationsController {
   savedViews(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload) {
     return this.applicationsService.listSavedViews(user, request.tenant!.id);
   }
+
+  @Get('referrals') @RequirePermissions('applications.read')
+  referrals(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload) { return this.applicationsService.listReferrals(user, request.tenant!.id); }
+
+  @Post('referrals') @RequirePermissions('applications.create')
+  createReferral(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Body() dto: CreateEmployeeReferralDto) { return this.applicationsService.createReferral(user, request.tenant!.id, dto); }
 
   @Post('saved-views')
   @RequirePermissions('applications.read')

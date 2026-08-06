@@ -106,6 +106,18 @@ export class CreateTalentCampaignDto {
   @IsOptional() @IsDateString() scheduledAt?: string;
 }
 
+export class ListTalentCampaignAudienceDto extends OffsetPaginationQueryDto {}
+
+export class ReviewTalentCampaignAudienceDto {
+  @Transform(({ value }) => value === true || value === 'true') @IsBoolean() confirm!: boolean;
+  @IsString() @MinLength(8) @MaxLength(128) audienceFingerprint!: string;
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
+export class ApproveTalentCampaignDto {
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
 export class CreateTalentSequenceStepDto {
   @IsInt() @Min(0) @Max(720) delayHours!: number;
   @IsString() @MinLength(2) @MaxLength(180) subject!: string;

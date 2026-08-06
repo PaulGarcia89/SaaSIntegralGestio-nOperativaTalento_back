@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AtsCommunicationAudience, AtsCommunicationType, CandidateCrmStatus, Prisma, TalentActivityType, TalentCampaignStatus, TalentRecipientStatus, TalentSequenceEnrollmentStatus } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsCommunicationsService } from '../ats-communications/ats-communications.service';
 import { AccessScope } from '../common/enums/access-scope.enum';
@@ -18,6 +19,9 @@ import {
   CreateTalentSegmentDto,
   CreateTalentSequenceDto,
   EnrollTalentSequenceDto,
+  ListTalentCampaignAudienceDto,
+  ReviewTalentCampaignAudienceDto,
+  ApproveTalentCampaignDto,
   TalentSegmentFiltersDto,
 } from './dto/talent-crm.dto';
 
@@ -275,7 +279,74 @@ export class TalentCrmService {
   async launchCampaign(actor: JwtPayload, tenantId: string, campaignId: string) {
     const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId } });
     if (!campaign) throw new NotFoundException('Campaign not found');
-    throw new BadRequestException('La campaña requiere revisión y autorización de entrega antes de enviar correos externos.');
+    const approvalCount = await this.prisma.talentCampaignApproval.count({ where: { campaignId, tenantId } });
+    if (!campaign.audienceReviewedAt || !campaign.audienceReviewedById || !campaign.audienceFingerprint || approvalCount < 2) throw new BadRequestException('La campaña requiere audiencia revisada y dos aprobaciones de usuarios distintos.');
+    // Dispatch is intentionally separated from review so no request can send an unapproved audience.
+    return { campaignId, status: 'READY_FOR_DELIVERY_AUTHORIZATION', message: 'La audiencia fue revisada. La entrega de correo requiere una autorización de envío independiente.' };
+  }
+
+  async prepareCampaignAudience(actor: JwtPayload, tenantId: string, campaignId: string) {
+    const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId }, include: { segment: true } });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    if (campaign.status === TalentCampaignStatus.RUNNING || campaign.status === TalentCampaignStatus.COMPLETED || campaign.status === TalentCampaignStatus.CANCELLED) throw new BadRequestException('La audiencia no se puede recalcular para esta campaña.');
+    const candidates = await this.prisma.candidate.findMany({
+      where: this.segmentWhere(actor, tenantId, campaign.segment.filters, true),
+      select: { id: true, doNotContact: true, channelPreferences: { select: { emailEnabled: true, marketingEnabled: true, unsubscribedAt: true } }, applications: { where: this.applicationScope(actor), select: { id: true }, take: 1 } },
+      orderBy: { id: 'asc' },
+      take: 5000,
+    });
+    const audience = candidates.map((candidate) => {
+      const preferences = candidate.channelPreferences[0];
+      const skipReason = candidate.doNotContact
+        ? 'El candidato solicitó no recibir contacto.'
+        : preferences?.unsubscribedAt
+          ? 'El candidato se dio de baja de comunicaciones por correo.'
+          : preferences && (!preferences.emailEnabled || !preferences.marketingEnabled)
+            ? 'No existe consentimiento para campañas por correo.'
+            : !candidate.applications[0]
+              ? 'No tiene una postulación accesible para asociar el correo.'
+              : null;
+      return { candidateId: candidate.id, status: skipReason ? TalentRecipientStatus.SKIPPED : TalentRecipientStatus.PENDING, skipReason };
+    });
+    const fingerprint = createHash('sha256').update(audience.filter((item) => item.status === TalentRecipientStatus.PENDING).map((item) => item.candidateId).join(':')).digest('hex');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.talentCampaignRecipient.deleteMany({ where: { campaignId, status: { in: [TalentRecipientStatus.PENDING, TalentRecipientStatus.SKIPPED] } } });
+      if (audience.length) await tx.talentCampaignRecipient.createMany({ data: audience.map((item) => ({ tenantId, campaignId, ...item })) });
+      await tx.talentCampaign.update({ where: { id: campaignId }, data: { audiencePreparedAt: new Date(), audienceReviewedAt: null, audienceReviewedById: null, audienceReviewNote: null, audienceFingerprint: fingerprint } });
+    });
+    return { campaignId, total: audience.length, eligible: audience.filter((item) => item.status === TalentRecipientStatus.PENDING).length, excluded: audience.filter((item) => item.status === TalentRecipientStatus.SKIPPED).length, audienceFingerprint: fingerprint };
+  }
+
+  async getCampaignAudience(actor: JwtPayload, tenantId: string, campaignId: string, query: ListTalentCampaignAudienceDto) {
+    const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId }, select: { id: true, audiencePreparedAt: true, audienceReviewedAt: true, audienceReviewedById: true, audienceReviewNote: true, audienceFingerprint: true } });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    const pagination = normalizeOffsetPagination(query);
+    const where = { campaignId, tenantId };
+    const [data, total, eligible, excluded] = await this.prisma.$transaction([
+      this.prisma.talentCampaignRecipient.findMany({ where, include: { candidate: { select: { id: true, fullName: true, email: true } } }, orderBy: [{ status: 'asc' }, { createdAt: 'asc' }], skip: pagination.skip, take: pagination.pageSize }),
+      this.prisma.talentCampaignRecipient.count({ where }),
+      this.prisma.talentCampaignRecipient.count({ where: { ...where, status: TalentRecipientStatus.PENDING } }),
+      this.prisma.talentCampaignRecipient.count({ where: { ...where, status: TalentRecipientStatus.SKIPPED } }),
+    ]);
+    return { data, meta: { total, page: pagination.page, pageSize: pagination.pageSize, totalPages: Math.ceil(total / pagination.pageSize) }, summary: { eligible, excluded }, review: campaign };
+  }
+
+  async reviewCampaignAudience(actor: JwtPayload, tenantId: string, campaignId: string, dto: ReviewTalentCampaignAudienceDto) {
+    if (!dto.confirm) throw new BadRequestException('Debes confirmar la audiencia antes de habilitar el envío.');
+    const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId } });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    if (!campaign.audiencePreparedAt || !campaign.audienceFingerprint) throw new BadRequestException('Primero prepara la audiencia de la campaña.');
+    if (campaign.audienceFingerprint !== dto.audienceFingerprint) throw new BadRequestException('La audiencia cambió. Vuelve a revisarla antes de enviar.');
+    return this.prisma.talentCampaign.update({ where: { id: campaignId }, data: { audienceReviewedAt: new Date(), audienceReviewedById: actor.sub, audienceReviewNote: dto.note?.trim() ?? null } });
+  }
+
+  async approveCampaign(actor: JwtPayload, tenantId: string, campaignId: string, dto: ApproveTalentCampaignDto) {
+    const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId } });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    if (!campaign.audienceReviewedAt || !campaign.audienceFingerprint) throw new BadRequestException('Primero revisa la audiencia de la campaña.');
+    const approval = await this.prisma.talentCampaignApproval.upsert({ where: { campaignId_approverId: { campaignId, approverId: actor.sub } }, create: { tenantId, campaignId, approverId: actor.sub, note: dto.note?.trim() }, update: { note: dto.note?.trim() ?? null, approvedAt: new Date() } });
+    const approvals = await this.prisma.talentCampaignApproval.count({ where: { campaignId, tenantId } });
+    return { approval, approvals, required: 2, readyForDeliveryAuthorization: approvals >= 2 };
   }
 
   async campaignMetrics(actor: JwtPayload, tenantId: string, campaignId: string) {
@@ -306,9 +377,9 @@ export class TalentCrmService {
     return { enrolled: candidates.length, status: 'PENDING_DELIVERY_AUTHORIZATION' };
   }
 
-  private segmentWhere(actor: JwtPayload, tenantId: string, filters: Prisma.JsonValue | TalentSegmentFiltersDto): Prisma.CandidateWhereInput {
+  private segmentWhere(actor: JwtPayload, tenantId: string, filters: Prisma.JsonValue | TalentSegmentFiltersDto, includeSuppressed = false): Prisma.CandidateWhereInput {
     const input = (filters ?? {}) as TalentSegmentFiltersDto;
-    return { ...this.candidateWhere(actor, tenantId, input.branchId), ...(input.search ? { OR: [{ fullName: { contains: input.search, mode: 'insensitive' } }, { email: { contains: input.search, mode: 'insensitive' } }, { city: { contains: input.search, mode: 'insensitive' } }] } : {}), ...(input.poolId ? { talentPoolMemberships: { some: { poolId: input.poolId } } } : {}), ...(input.tagId ? { talentTagAssignments: { some: { tagId: input.tagId } } } : {}), ...(input.competency ? { talentTagAssignments: { some: { tag: { name: { contains: input.competency, mode: 'insensitive' } } } } } : {}), ...(input.source ? { source: { contains: input.source, mode: 'insensitive' } } : {}), ...(input.doNotContact !== undefined ? { doNotContact: input.doNotContact } : { doNotContact: false }) };
+    return { ...this.candidateWhere(actor, tenantId, input.branchId), ...(input.search ? { OR: [{ fullName: { contains: input.search, mode: 'insensitive' } }, { email: { contains: input.search, mode: 'insensitive' } }, { city: { contains: input.search, mode: 'insensitive' } }] } : {}), ...(input.poolId ? { talentPoolMemberships: { some: { poolId: input.poolId } } } : {}), ...(input.tagId ? { talentTagAssignments: { some: { tagId: input.tagId } } } : {}), ...(input.competency ? { talentTagAssignments: { some: { tag: { name: { contains: input.competency, mode: 'insensitive' } } } } } : {}), ...(input.source ? { source: { contains: input.source, mode: 'insensitive' } } : {}), ...(input.doNotContact !== undefined ? { doNotContact: input.doNotContact } : includeSuppressed ? {} : { doNotContact: false }) };
   }
 
   private async assertSegment(tenantId: string, segmentId: string) {

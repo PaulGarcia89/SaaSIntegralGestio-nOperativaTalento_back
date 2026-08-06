@@ -8,8 +8,7 @@ import { ApplicationStatus, Prisma } from '@prisma/client';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { AtsAnalyticsQueryDto } from './dto/ats-analytics-query.dto';
-import { SaveAtsAnalyticsDashboardDto } from './dto/ats-analytics-query.dto';
+import { AtsAnalyticsQueryDto, SaveAtsAnalyticsDashboardDto, UpsertHiringQualityReviewDto, UpsertRecruitmentSourceCostDto } from './dto/ats-analytics-query.dto';
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -106,7 +105,7 @@ export class AtsAnalyticsService {
     const tenantWhere = context.tenantId ? { tenantId: context.tenantId } : {};
     const branchWhere = context.branchId ? { branchId: context.branchId } : {};
 
-    const [applications, previousApplications, vacancies, interviews, offers] =
+    const [applications, previousApplications, vacancies, interviews, offers, sourceCosts, qualityReviews] =
       await Promise.all([
         this.prisma.vacancyApplication.findMany({
           where: currentPeriodWhere,
@@ -179,13 +178,15 @@ export class AtsAnalyticsService {
             versions: { select: { source: true } },
           },
         }),
+        this.prisma.recruitmentSourceCost.findMany({ where: { ...tenantWhere, periodStart: { lte: period.to }, periodEnd: { gte: period.from } } }),
+        this.prisma.hiringQualityReview.findMany({ where: { ...tenantWhere, reviewedAt: { gte: period.from, lte: period.to } } }),
       ]);
 
     const now = new Date();
     const current = this.summary(applications, now);
     const previous = this.previousSummary(previousApplications);
     const funnel = this.funnel(applications, now);
-    const sources = this.sources(applications);
+    const sources = this.sources(applications, sourceCosts);
     const sla = this.sla(applications, now);
     const vacancyPerformance = this.vacancyPerformance(vacancies, applications, now);
     const recruiterPerformance = this.recruiterPerformance(applications, now);
@@ -234,6 +235,10 @@ export class AtsAnalyticsService {
       sla,
       interviews: interviewMetrics,
       offers: offerMetrics,
+      qualityOfHire: this.qualityOfHire(qualityReviews),
+      cohorts: this.cohorts(applications),
+      attribution: this.attribution(applications),
+      forecast: this.forecast(vacancies, applications, now),
       rejectionReasons,
       insights: this.insights({
         applications: current.applications,
@@ -256,7 +261,8 @@ export class AtsAnalyticsService {
       ['Resumen', 'Tiempo promedio de contratación', report.summary.averageTimeToHireHours, 'horas'],
       ['Resumen', 'Cumplimiento SLA', report.sla.complianceRate, '%'],
       ...report.funnel.map((item) => ['Embudo', item.stageName, item.reached, `${item.conversionRate}%`]),
-      ...report.sources.map((item) => ['Fuente', item.source, item.applications, `${item.conversionRate}%`]),
+      ...report.sources.map((item) => ['Fuente', item.source, item.applications, `${item.conversionRate}% · ${item.costPerHire ?? 0} ${item.currency ?? ''}`]),
+      ...report.qualityOfHire.byCheckpoint.map((item) => ['Calidad de contratación', `${item.checkpointDays} días`, item.averagePerformanceScore, `${item.retentionRate}% retención`]),
       ...report.vacancies.map((item) => ['Vacante', item.title, item.applications, `${item.conversionRate}%`]),
       ...report.recruiters.map((item) => ['Reclutador', item.name, item.applications, `${item.conversionRate}%`]),
       ...report.rejectionReasons.map((item) => ['Descarte', item.label, item.count, `${item.percentage}%`]),
@@ -285,6 +291,39 @@ export class AtsAnalyticsService {
       if (dto.isDefault) await tx.applicationSavedView.updateMany({ where: { tenantId, userId: actor.sub }, data: { isDefault: false } });
       return tx.applicationSavedView.upsert({ where: { tenantId_userId_name: { tenantId, userId: actor.sub, name: dto.name.trim() } }, update: { filters: filters as Prisma.InputJsonValue, isDefault: dto.isDefault ?? false }, create: { tenantId, userId: actor.sub, name: dto.name.trim(), filters: filters as Prisma.InputJsonValue, isDefault: dto.isDefault ?? false } });
     });
+  }
+
+  listSourceCosts(actor: JwtPayload) {
+    const tenantId = actor.activeTenantId ?? actor.tenantId;
+    return this.prisma.recruitmentSourceCost.findMany({ where: { tenantId }, orderBy: [{ periodEnd: 'desc' }, { source: 'asc' }] });
+  }
+
+  async upsertSourceCost(actor: JwtPayload, dto: UpsertRecruitmentSourceCostDto) {
+    const tenantId = actor.activeTenantId ?? actor.tenantId;
+    const periodStart = new Date(dto.periodStart); const periodEnd = new Date(dto.periodEnd);
+    if (periodEnd < periodStart) throw new BadRequestException('El fin del periodo no puede ser anterior al inicio.');
+    const source = dto.source.trim();
+    return this.prisma.recruitmentSourceCost.upsert({
+      where: { tenantId_source_periodStart_periodEnd: { tenantId, source, periodStart, periodEnd } },
+      create: { tenantId, source, amount: dto.amountCents / 100, currency: (dto.currency ?? 'USD').trim().toUpperCase(), periodStart, periodEnd, notes: dto.notes?.trim(), createdById: actor.sub },
+      update: { amount: dto.amountCents / 100, currency: (dto.currency ?? 'USD').trim().toUpperCase(), notes: dto.notes?.trim() ?? null, createdById: actor.sub },
+    });
+  }
+
+  async listHiringQuality(actor: JwtPayload) {
+    const tenantId = actor.activeTenantId ?? actor.tenantId;
+    const branchScope = actor.scope === AccessScope.BRANCH && !actor.isSuperAdmin ? { branchAssignments: { some: { branchId: { in: actor.allowedBranchIds }, releasedAt: null } } } : {};
+    const employees = await this.prisma.employee.findMany({ where: { tenantId, sourceCandidateId: { not: null }, ...branchScope }, select: { id: true, name: true, email: true, jobTitle: true, status: true, createdAt: true, sourceCandidate: { select: { source: true } }, hiringQualityReviews: { orderBy: { checkpointDays: 'asc' } } }, orderBy: { createdAt: 'desc' }, take: 500 });
+    const now = Date.now();
+    return employees.map((employee) => ({ ...employee, checkpoints: [30, 60, 90].map((checkpointDays) => ({ checkpointDays, due: now >= employee.createdAt.getTime() + checkpointDays * DAY, review: employee.hiringQualityReviews.find((item) => item.checkpointDays === checkpointDays) ?? null })) }));
+  }
+
+  async upsertHiringQuality(actor: JwtPayload, dto: UpsertHiringQualityReviewDto) {
+    const tenantId = actor.activeTenantId ?? actor.tenantId;
+    const employee = await this.prisma.employee.findFirst({ where: { id: dto.employeeId, tenantId, sourceCandidateId: { not: null } }, select: { id: true, createdAt: true } });
+    if (!employee) throw new NotFoundException('Empleado contratado no encontrado.');
+    if (Date.now() < employee.createdAt.getTime() + dto.checkpointDays * DAY) throw new BadRequestException(`La revisión de ${dto.checkpointDays} días aún no está disponible.`);
+    return this.prisma.hiringQualityReview.upsert({ where: { employeeId_checkpointDays: { employeeId: employee.id, checkpointDays: dto.checkpointDays } }, create: { tenantId, employeeId: employee.id, checkpointDays: dto.checkpointDays, performanceScore: dto.performanceScore, retained: dto.retained, managerComment: dto.managerComment?.trim(), reviewedById: actor.sub }, update: { performanceScore: dto.performanceScore, retained: dto.retained, managerComment: dto.managerComment?.trim() ?? null, reviewedById: actor.sub, reviewedAt: new Date() } });
   }
 
   private summary(applications: AnalyticsApplication[], now: Date) {
@@ -378,7 +417,7 @@ export class AtsAnalyticsService {
     });
   }
 
-  private sources(applications: AnalyticsApplication[]) {
+  private sources(applications: AnalyticsApplication[], costs: Array<{ source: string; amount: Prisma.Decimal; currency: string }>) {
     const grouped = new Map<string, { applications: number; hires: number; rejected: number }>();
     for (const application of applications) {
       const source = this.applicationSource(application.dynamicResponses);
@@ -388,12 +427,22 @@ export class AtsAnalyticsService {
       if (application.status === ApplicationStatus.REJECTED) row.rejected += 1;
       grouped.set(source, row);
     }
+    const costBySource = new Map<string, { amount: number; currency: string }>();
+    for (const cost of costs) { const current = costBySource.get(cost.source) ?? { amount: 0, currency: cost.currency }; current.amount += Number(cost.amount); costBySource.set(cost.source, current); }
     return [...grouped.entries()].map(([source, row]) => ({
       source,
       ...row,
       conversionRate: this.percent(row.hires, row.applications),
       rejectionRate: this.percent(row.rejected, row.applications),
+      cost: costBySource.get(source)?.amount ?? 0,
+      currency: costBySource.get(source)?.currency ?? null,
+      costPerApplication: row.applications ? Number(((costBySource.get(source)?.amount ?? 0) / row.applications).toFixed(2)) : 0,
+      costPerHire: row.hires ? Number(((costBySource.get(source)?.amount ?? 0) / row.hires).toFixed(2)) : null,
     })).sort((a, b) => b.applications - a.applications);
+  }
+
+  private qualityOfHire(reviews: Array<{ checkpointDays: number; performanceScore: number; retained: boolean }>) {
+    return { reviewed: reviews.length, byCheckpoint: [30, 60, 90].map((checkpointDays) => { const items = reviews.filter((item) => item.checkpointDays === checkpointDays); return { checkpointDays, reviews: items.length, averagePerformanceScore: this.average(items.map((item) => item.performanceScore)), retentionRate: this.percent(items.filter((item) => item.retained).length, items.length) }; }) };
   }
 
   private sla(applications: AnalyticsApplication[], now: Date) {
@@ -534,6 +583,24 @@ export class AtsAnalyticsService {
       buckets.set(key, row);
     }
     return [...buckets.values()].sort((a, b) => a.period.localeCompare(b.period));
+  }
+
+  private cohorts(applications: AnalyticsApplication[]) {
+    const groups = new Map<string, { applications: number; hires: number }>();
+    for (const item of applications) { const period = this.bucket(item.appliedAt, 'month'); const row = groups.get(period) ?? { applications: 0, hires: 0 }; row.applications += 1; if (item.status === ApplicationStatus.HIRED) row.hires += 1; groups.set(period, row); }
+    return [...groups.entries()].map(([period, row]) => ({ period, ...row, conversionRate: this.percent(row.hires, row.applications) })).sort((a, b) => a.period.localeCompare(b.period));
+  }
+
+  private attribution(applications: AnalyticsApplication[]) {
+    const groups = new Map<string, { firstTouch: string; applications: number; hires: number }>();
+    for (const item of applications) { const data = this.jsonObject(item.dynamicResponses); const firstTouch = this.stringValue(data.utmSource) || this.stringValue(this.jsonObject(data.attribution).source) || this.applicationSource(item.dynamicResponses); const row = groups.get(firstTouch) ?? { firstTouch, applications: 0, hires: 0 }; row.applications += 1; if (item.status === ApplicationStatus.HIRED) row.hires += 1; groups.set(firstTouch, row); }
+    return [...groups.values()].map((row) => ({ ...row, conversionRate: this.percent(row.hires, row.applications) })).sort((a, b) => b.applications - a.applications);
+  }
+
+  private forecast(vacancies: Array<{ id: string; title: string; status: string; openings: number }>, applications: AnalyticsApplication[], now: Date) {
+    const historicalHires = applications.filter((item) => item.status === ApplicationStatus.HIRED);
+    const averageDaysToHire = this.average(historicalHires.map((item) => Math.max(0, (this.hiredAt(item).getTime() - item.appliedAt.getTime()) / DAY)));
+    return vacancies.filter((vacancy) => vacancy.status === 'OPEN').map((vacancy) => { const hires = applications.filter((item) => item.vacancyId === vacancy.id && item.status === ApplicationStatus.HIRED).length; const remainingOpenings = Math.max(0, vacancy.openings - hires); return { vacancyId: vacancy.id, title: vacancy.title, remainingOpenings, historicalSample: historicalHires.length, averageDaysToHire, estimatedFillDate: historicalHires.length && remainingOpenings ? new Date(now.getTime() + averageDaysToHire * DAY).toISOString() : null }; });
   }
 
   private insights(input: { applications: number; funnel: Array<{ stageName: string; dropOffRate: number; averageHours: number }>; sources: Array<{ source: string; applications: number }>; sla: { breached: number; complianceRate: number }; interviews: { noShowRate: number }; offers: { acceptanceRate: number; total: number } }) {

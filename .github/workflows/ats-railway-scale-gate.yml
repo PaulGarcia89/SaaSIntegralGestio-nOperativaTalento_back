@@ -1,0 +1,52 @@
+name: ATS Railway scale gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      virtual_users:
+        description: "Usuarios virtuales de lectura (máximo 25)"
+        required: true
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  production-read-only-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      ATS_CERT_BASE_URL: ${{ vars.ATS_PRODUCTION_BACKEND_URL }}
+      ATS_CERT_TENANT_SLUG: ${{ vars.ATS_PRODUCTION_TENANT_SLUG }}
+      ATS_CERT_EXPECTED_TENANT_ID: ${{ vars.ATS_PRODUCTION_TENANT_ID }}
+      ATS_CERT_EXPECTED_BRANCH_ID: ${{ vars.ATS_PRODUCTION_BRANCH_ID }}
+      ATS_CERT_EMAIL: ${{ secrets.ATS_PRODUCTION_CERT_EMAIL }}
+      ATS_CERT_PASSWORD: ${{ secrets.ATS_PRODUCTION_CERT_PASSWORD }}
+      ATS_CERT_REPORT_PATH: ats-railway-security-report.json
+      ATS_LOAD_BASE_URL: ${{ vars.ATS_PRODUCTION_BACKEND_URL }}
+      ATS_LOAD_VUS: ${{ inputs.virtual_users }}
+      ATS_LOAD_MAX_P95_MS: "1500"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: grafana/setup-k6-action@v1
+      - run: npm ci
+      - name: Certificar seguridad, sesión y alcance productivo
+        run: npm run certify:ats:production
+      - name: Ejecutar carga de solo lectura con límites
+        run: npm run load:ats:railway -- --summary-export=ats-railway-load-summary.json
+      - name: Guardar evidencia de certificación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ats-railway-scale-gate
+          path: |
+            ats-railway-security-report.json
+            ats-railway-load-summary.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -142,6 +142,7 @@ enum TalentRecipientStatus {
   SKIPPED
 }
 
+
 enum TalentSequenceEnrollmentStatus {
   ACTIVE
   COMPLETED
@@ -1111,6 +1112,10 @@ model Tenant {
   talentSegments                TalentSegment[]
   talentCampaigns               TalentCampaign[]
   talentSequences               TalentSequence[]
+  jobBoardPostings              JobBoardPosting[]
+  employeeReferrals             EmployeeReferral[]
+  recruitmentSourceCosts        RecruitmentSourceCost[]
+  hiringQualityReviews          HiringQualityReview[]
   branches                      Branch[]
   employees                     Employee[]
   employeeBranches              EmployeeBranch[]
@@ -2413,6 +2418,7 @@ model Employee {
   inventoryAssets             InventoryAsset[]
   inventoryMovements          InventoryMovement[]
   trainingActivations         TrainingActivation[]
+  hiringQualityReviews        HiringQualityReview[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, sourceCandidateId])
@@ -2611,6 +2617,8 @@ model Vacancy {
   communications         AtsMessage[]
   scorecardTemplates     ScorecardTemplate[]
   decisionCommittees     HiringDecisionCommittee[]
+  jobBoardPostings       JobBoardPosting[]
+  employeeReferrals      EmployeeReferral[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
@@ -2635,6 +2643,43 @@ model VacancyLocation {
 
   @@unique([vacancyId, branchId])
   @@index([tenantId, branchId])
+}
+
+model JobBoardPosting {
+  id                String   @id @default(uuid())
+  tenantId          String
+  vacancyId         String
+  provider          String
+  status            String   @default("DRAFT")
+  externalPostingId String?
+  externalUrl       String?
+  trackingCode      String   @unique
+  publishedAt       DateTime?
+  createdById       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy           Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@unique([vacancyId, provider])
+  @@index([tenantId, provider, status])
+}
+
+model EmployeeReferral {
+  id             String   @id @default(uuid())
+  tenantId       String
+  vacancyId      String
+  referrerUserId String
+  referralCode   String   @unique
+  candidateEmail String?
+  candidateName  String?
+  applicationId  String?  @unique
+  acceptedAt     DateTime?
+  createdAt      DateTime @default(now())
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy        Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, vacancyId])
 }
 
 model PersonnelRequisition {
@@ -2961,6 +3006,43 @@ model TalentSegment {
   @@index([tenantId, isActive])
 }
 
+model RecruitmentSourceCost {
+  id          String   @id @default(uuid())
+  tenantId    String
+  source      String
+  amount      Decimal  @db.Decimal(14, 2)
+  currency    String   @default("USD")
+  periodStart DateTime
+  periodEnd   DateTime
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, source, periodStart, periodEnd])
+  @@index([tenantId, periodStart, periodEnd])
+}
+
+model HiringQualityReview {
+  id               String   @id @default(uuid())
+  tenantId         String
+  employeeId       String
+  checkpointDays   Int
+  performanceScore Int
+  retained         Boolean
+  managerComment   String?
+  reviewedById     String
+  reviewedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, checkpointDays])
+  @@index([tenantId, checkpointDays, reviewedAt])
+}
+
 model TalentCampaign {
   id          String               @id @default(uuid())
   tenantId    String
@@ -2970,6 +3052,11 @@ model TalentCampaign {
   body        String
   status      TalentCampaignStatus @default(DRAFT)
   scheduledAt DateTime?
+  audiencePreparedAt DateTime?
+  audienceReviewedAt DateTime?
+  audienceReviewedById String?
+  audienceReviewNote String?
+  audienceFingerprint String?
   launchedAt  DateTime?
   completedAt DateTime?
   createdById String
@@ -2978,9 +3065,23 @@ model TalentCampaign {
   tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   segment     TalentSegment        @relation(fields: [segmentId], references: [id], onDelete: Restrict)
   recipients  TalentCampaignRecipient[]
+  approvals   TalentCampaignApproval[]
 
   @@index([tenantId, status, scheduledAt])
   @@index([segmentId, createdAt])
+}
+
+model TalentCampaignApproval {
+  id          String   @id @default(uuid())
+  tenantId    String
+  campaignId  String
+  approverId  String
+  approvedAt  DateTime @default(now())
+  note        String?
+  campaign    TalentCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, approverId])
+  @@index([tenantId, campaignId, approvedAt])
 }
 
 model TalentCampaignRecipient {
