@@ -11,8 +11,12 @@ import { ScopeGuard } from '../common/guards/scope.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
-import { ApplyOnboardingTemplateDto, CreateOnboardingTemplateDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto } from './dto/onboarding.dto';
+import { ApplyOnboardingTemplateDto, ApproveOnboardingTemplateDto, BulkApplyOnboardingTemplateDto, CreateOnboardingLegalHoldDto, CreateOnboardingLibraryItemDto, CreateOnboardingTemplateDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, ReviseOnboardingTemplateDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto, UpsertOnboardingRetentionPolicyDto } from './dto/onboarding.dto';
 import { OnboardingService } from './onboarding.service';
+import { OnboardingAutomationService } from './onboarding-automation.service';
+import { CandidatePreboardingService } from './candidate-preboarding.service';
+import { CandidateAuthGuard, CandidateRequest } from '../applications/candidate-auth.guard';
+import { OnboardingAnalyticsService } from './onboarding-analytics.service';
 
 const allowedDocumentTypes = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 
@@ -20,7 +24,21 @@ const allowedDocumentTypes = new Set(['application/pdf', 'image/jpeg', 'image/pn
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
 @RequireModule(ModuleCode.ONBOARDING)
 export class OnboardingController {
-  constructor(private readonly service: OnboardingService) {}
+  constructor(private readonly service: OnboardingService, private readonly automation: OnboardingAutomationService, private readonly analytics: OnboardingAnalyticsService) {}
+
+  @Get('analytics')
+  @RequirePermissions('applications.read')
+  analyticsOverview(@Req() request: RequestWithUser, @Query('branchId') branchId?: string) {
+    return this.analytics.overview(request.tenant!.id, request.user, branchId);
+  }
+
+  @Get('operations/overview')
+  @RequirePermissions('applications.read')
+  operationsOverview() { return this.automation.overview(); }
+
+  @Post('operations/process-due')
+  @RequirePermissions('applications.update')
+  processDue() { return this.automation.processDueTasks(); }
 
   @Get('templates')
   @RequirePermissions('applications.read')
@@ -47,6 +65,46 @@ export class OnboardingController {
     request.auditAction = 'ONBOARDING_TEMPLATE_UPDATED';
     return this.service.updateTemplateStatus(request.tenant!.id, request.user.sub, id, dto);
   }
+
+  @Post('templates/:id/revisions')
+  @RequirePermissions('applications.update')
+  reviseTemplate(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ReviseOnboardingTemplateDto) {
+    request.auditAction = 'ONBOARDING_TEMPLATE_REVISION_CREATED';
+    return this.service.reviseTemplate(request.tenant!.id, request.user.sub, id, dto);
+  }
+
+  @Post('templates/:id/approve')
+  @RequirePermissions('applications.update')
+  approveTemplate(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ApproveOnboardingTemplateDto) {
+    request.auditAction = 'ONBOARDING_TEMPLATE_APPROVED';
+    return this.service.approveTemplate(request.tenant!.id, request.user.sub, id, dto);
+  }
+
+  @Get('library')
+  @RequirePermissions('applications.read')
+  library(@Req() request: RequestWithUser) { return this.service.listLibrary(request.tenant!.id); }
+
+  @Post('library')
+  @RequirePermissions('applications.update')
+  createLibraryItem(@Req() request: RequestWithUser, @Body() dto: CreateOnboardingLibraryItemDto) {
+    request.auditAction = 'ONBOARDING_LIBRARY_ITEM_CREATED';
+    return this.service.createLibraryItem(request.tenant!.id, request.user.sub, dto);
+  }
+
+  @Get('compliance/retention-policies')
+  @RequirePermissions('applications.read')
+  retentionPolicies(@Req() request: RequestWithUser) { return this.service.listRetentionPolicies(request.tenant!.id); }
+
+  @Post('compliance/retention-policies')
+  @RequirePermissions('applications.update')
+  saveRetentionPolicy(@Req() request: RequestWithUser, @Body() dto: UpsertOnboardingRetentionPolicyDto) {
+    request.auditAction = 'ONBOARDING_RETENTION_POLICY_SAVED';
+    return this.service.upsertRetentionPolicy(request.tenant!.id, request.user.sub, dto);
+  }
+
+  @Get('compliance/signature-evidence')
+  @RequirePermissions('applications.read')
+  signatureEvidence(@Query('countryCode') countryCode?: string) { return this.service.signatureEvidenceProfile(countryCode); }
 
   @Get('flows')
   @RequirePermissions('applications.read')
@@ -76,6 +134,13 @@ export class OnboardingController {
   applyTemplate(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ApplyOnboardingTemplateDto) {
     request.auditAction = 'ONBOARDING_TEMPLATE_APPLIED';
     return this.service.applyTemplate(request.tenant!.id, id, request.user, dto);
+  }
+
+  @Post('flows/bulk-apply-template')
+  @RequirePermissions('applications.update')
+  bulkApplyTemplate(@Req() request: RequestWithUser, @Body() dto: BulkApplyOnboardingTemplateDto) {
+    request.auditAction = 'ONBOARDING_TEMPLATE_BULK_APPLIED';
+    return this.service.applyTemplateBulk(request.tenant!.id, request.user, dto);
   }
 
   @Patch('tasks/:id')
@@ -171,4 +236,36 @@ export class OnboardingController {
     request.auditAction = 'ONBOARDING_FLOW_COMPLETED';
     return this.service.completeFlow(request.tenant!.id, id, request.user);
   }
+
+  @Post('flows/:id/legal-holds')
+  @RequirePermissions('applications.update')
+  placeLegalHold(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: CreateOnboardingLegalHoldDto) {
+    request.auditAction = 'ONBOARDING_LEGAL_HOLD_PLACED';
+    return this.service.placeLegalHold(request.tenant!.id, id, request.user, dto);
+  }
+
+  @Post('legal-holds/:id/release')
+  @RequirePermissions('applications.update')
+  releaseLegalHold(@Req() request: RequestWithUser, @Param('id') id: string) {
+    request.auditAction = 'ONBOARDING_LEGAL_HOLD_RELEASED';
+    return this.service.releaseLegalHold(request.tenant!.id, id, request.user);
+  }
+
+  @Get('flows/:id/export')
+  @RequirePermissions('applications.read')
+  exportDossier(@Req() request: RequestWithUser, @Param('id') id: string) {
+    request.auditAction = 'ONBOARDING_DOSSIER_EXPORTED';
+    return this.service.exportFlowDossier(request.tenant!.id, id, request.user);
+  }
+}
+
+@Controller('candidate/preboarding')
+@UseGuards(CandidateAuthGuard)
+export class CandidatePreboardingController {
+  constructor(private readonly service: CandidatePreboardingService) {}
+  @Get() overview(@Req() request: CandidateRequest) { return this.service.overview(request.candidate.sub); }
+  @Patch('tasks/:id/complete') complete(@Req() request: CandidateRequest, @Param('id') id: string) { return this.service.completeTask(request.candidate.sub, id); }
+  @Post('documents')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024, files: 1 } }))
+  upload(@Req() request: CandidateRequest, @UploadedFile() file: Express.Multer.File, @Body('taskId') taskId?: string, @Body('category') category?: string) { return this.service.uploadDocument(request.candidate.sub, taskId, category ?? 'OTHER', file); }
 }

@@ -3,7 +3,7 @@ import { OperationalEventType, Prisma, UserStatus, WorkflowOwnerType, WorkflowTa
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
-import { ApplyOnboardingTemplateDto, CreateOnboardingTemplateDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto } from './dto/onboarding.dto';
+import { ApplyOnboardingTemplateDto, ApproveOnboardingTemplateDto, CreateOnboardingLegalHoldDto, CreateOnboardingLibraryItemDto, CreateOnboardingTemplateDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, ReviseOnboardingTemplateDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto, UpsertOnboardingRetentionPolicyDto } from './dto/onboarding.dto';
 import { OnboardingDocumentStorageService } from './onboarding-document-storage.service';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
 import { TrainingLearningPathService } from '../training/training-learning-path.service';
@@ -70,7 +70,8 @@ export class OnboardingService {
       return tx.onboardingTemplate.create({
         data: {
           tenantId, name: dto.name.trim(), description: dto.description?.trim(), version: (latest?.version ?? 0) + 1,
-          isDefault: dto.isDefault ?? false, createdById: actorId,
+          // New content is intentionally a draft. A second actor can approve it before it affects a hire.
+          status: 'DRAFT', effectiveFrom: new Date(), isDefault: false, createdById: actorId,
           tasks: { create: dto.tasks.map((task, index) => ({
             tenantId, taskKey: task.taskKey.trim(), taskType: task.taskType, title: task.title.trim(),
             description: task.description?.trim(), ownerType: task.ownerType ?? WorkflowOwnerType.SYSTEM, ownerId: task.ownerId,
@@ -95,6 +96,72 @@ export class OnboardingService {
         include: { tasks: { orderBy: { sortOrder: 'asc' } } },
       });
     });
+  }
+
+  async reviseTemplate(tenantId: string, actorId: string, id: string, dto: ReviseOnboardingTemplateDto) {
+    const current = await this.prisma.onboardingTemplate.findFirst({ where: { id, tenantId } });
+    if (!current) throw new NotFoundException('Onboarding template not found');
+    this.validateDependencies(dto.tasks);
+    await this.validateOwners(tenantId, dto.tasks);
+    return this.prisma.$transaction(async (tx) => {
+      const latest = await tx.onboardingTemplate.findFirst({ where: { tenantId, name: current.name }, orderBy: { version: 'desc' } });
+      return tx.onboardingTemplate.create({
+        data: {
+          tenantId, name: current.name, description: dto.description?.trim() ?? current.description,
+          version: (latest?.version ?? current.version) + 1, status: 'DRAFT', isActive: true, isDefault: false,
+          effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(), createdById: actorId, supersedesId: current.id,
+          tasks: { create: dto.tasks.map((task, index) => ({ tenantId, taskKey: task.taskKey.trim(), taskType: task.taskType, title: task.title.trim(), description: task.description?.trim(), ownerType: task.ownerType ?? WorkflowOwnerType.SYSTEM, ownerId: task.ownerId, dueOffsetDays: task.dueOffsetDays, dependsOnKeys: task.dependsOnKeys ?? [], required: task.required ?? true, sortOrder: task.sortOrder ?? index })) },
+        }, include: { tasks: { orderBy: { sortOrder: 'asc' } } },
+      });
+    });
+  }
+
+  async approveTemplate(tenantId: string, actorId: string, id: string, dto: ApproveOnboardingTemplateDto) {
+    const template = await this.prisma.onboardingTemplate.findFirst({ where: { id, tenantId }, include: { tasks: true } });
+    if (!template) throw new NotFoundException('Onboarding template not found');
+    if (template.status === 'PUBLISHED') throw new ConflictException('La plantilla ya está publicada');
+    if (template.createdById === actorId) throw new ForbiddenException('Otra persona debe aprobar la plantilla para mantener la segregación de funciones');
+    if (!template.tasks.length) throw new BadRequestException('Una plantilla sin tareas no puede publicarse');
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault) await tx.onboardingTemplate.updateMany({ where: { tenantId, isDefault: true }, data: { isDefault: false } });
+      return tx.onboardingTemplate.update({ where: { id }, data: { status: 'PUBLISHED', approvedAt: new Date(), approvedById: actorId, effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : template.effectiveFrom, isDefault: dto.isDefault ?? template.isDefault }, include: { tasks: { orderBy: { sortOrder: 'asc' } } } });
+    });
+  }
+
+  listLibrary(tenantId: string) { return this.prisma.onboardingLibraryItem.findMany({ where: { tenantId, isActive: true }, orderBy: [{ type: 'asc' }, { name: 'asc' }] }); }
+  createLibraryItem(tenantId: string, actorId: string, dto: CreateOnboardingLibraryItemDto) { return this.prisma.onboardingLibraryItem.create({ data: { tenantId, type: dto.type, name: dto.name.trim(), description: dto.description?.trim(), countryCode: dto.countryCode?.trim().toUpperCase(), content: (dto.content ?? {}) as Prisma.InputJsonValue, createdById: actorId } }); }
+  listRetentionPolicies(tenantId: string) { return this.prisma.onboardingRetentionPolicy.findMany({ where: { tenantId, isActive: true }, orderBy: [{ countryCode: 'asc' }, { documentCategory: 'asc' }] }); }
+  upsertRetentionPolicy(tenantId: string, actorId: string, dto: UpsertOnboardingRetentionPolicyDto) { return this.prisma.onboardingRetentionPolicy.upsert({ where: { tenantId_countryCode_documentCategory: { tenantId, countryCode: dto.countryCode.trim().toUpperCase(), documentCategory: dto.documentCategory.trim().toUpperCase() } }, update: { retentionDays: dto.retentionDays, legalBasis: dto.legalBasis?.trim(), isActive: true }, create: { tenantId, countryCode: dto.countryCode.trim().toUpperCase(), documentCategory: dto.documentCategory.trim().toUpperCase(), retentionDays: dto.retentionDays, legalBasis: dto.legalBasis?.trim(), createdById: actorId } }); }
+
+  async placeLegalHold(tenantId: string, flowId: string, actor: JwtPayload, dto: CreateOnboardingLegalHoldDto) {
+    const flow = await this.prisma.onboardingFlow.findFirst({ where: { id: flowId, tenantId, ...this.branchScope(actor) } });
+    if (!flow) throw new NotFoundException('Onboarding flow not found');
+    return this.prisma.onboardingLegalHold.create({ data: { tenantId, onboardingFlowId: flow.id, reason: dto.reason.trim(), reference: dto.reference?.trim(), placedById: actor.sub } });
+  }
+
+  async releaseLegalHold(tenantId: string, holdId: string, actor: JwtPayload) {
+    const hold = await this.prisma.onboardingLegalHold.findFirst({ where: { id: holdId, tenantId, status: 'ACTIVE' }, include: { onboardingFlow: true } });
+    if (!hold) throw new NotFoundException('Active legal hold not found');
+    this.assertActorCanAccessBranch(actor, hold.onboardingFlow.branchId);
+    return this.prisma.onboardingLegalHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedAt: new Date(), releasedById: actor.sub } });
+  }
+
+  async exportFlowDossier(tenantId: string, flowId: string, actor: JwtPayload) {
+    const flow = await this.prisma.onboardingFlow.findFirst({ where: { id: flowId, tenantId, ...this.branchScope(actor) }, include: { employee: true, branch: true, template: true, tasks: { orderBy: { sortOrder: 'asc' } }, documents: { orderBy: [{ category: 'asc' }, { version: 'desc' }] }, signaturePackages: { include: { participants: true, auditEvents: { orderBy: { occurredAt: 'asc' } } } }, legalHolds: { orderBy: { placedAt: 'desc' } }, workflow: { include: { operationalEvents: { orderBy: { occurredAt: 'asc' } } } } } });
+    if (!flow) throw new NotFoundException('Onboarding flow not found');
+    return { exportedAt: new Date().toISOString(), format: 'ONBOARDING_DOSSIER_V1', flow };
+  }
+
+  signatureEvidenceProfile(countryCode?: string) {
+    const country = countryCode?.trim().toUpperCase() || 'GLOBAL';
+    const profiles: Record<string, { framework: string; evidence: string[] }> = {
+      US: { framework: 'ESIGN/UETA', evidence: ['consentimiento', 'intención de firmar', 'asociación al documento', 'registro de auditoría'] },
+      EU: { framework: 'eIDAS', evidence: ['integridad del documento', 'identidad del firmante', 'sello de tiempo', 'trazabilidad'] },
+      MX: { framework: 'Código de Comercio y NOM aplicable', evidence: ['consentimiento', 'conservación del mensaje de datos', 'integridad', 'auditoría'] },
+      CO: { framework: 'Ley 527 de 1999', evidence: ['método confiable', 'identificación', 'integridad', 'auditabilidad'] },
+      GLOBAL: { framework: 'Revisión legal local requerida', evidence: ['consentimiento', 'identidad', 'integridad', 'timestamp', 'registro de auditoría'] },
+    };
+    return { countryCode: country, ...(profiles[country] ?? profiles.GLOBAL), disclaimer: 'Perfil operativo de evidencia; no sustituye asesoría legal ni certificación regulatoria local.' };
   }
 
   async listFlows(tenantId: string, actor: JwtPayload, filters: { branchId?: string; search?: string; status?: string; page?: number; pageSize?: number } = {}) {
@@ -154,7 +221,7 @@ export class OnboardingService {
   async applyTemplate(tenantId: string, flowId: string, actor: JwtPayload, dto: ApplyOnboardingTemplateDto) {
     const [flow, template] = await Promise.all([
       this.prisma.onboardingFlow.findFirst({ where: { id: flowId, tenantId, ...this.branchScope(actor) } }),
-      this.prisma.onboardingTemplate.findFirst({ where: { id: dto.templateId, tenantId, isActive: true }, include: { tasks: true } }),
+      this.prisma.onboardingTemplate.findFirst({ where: { id: dto.templateId, tenantId, isActive: true, status: 'PUBLISHED', effectiveFrom: { lte: new Date() } }, include: { tasks: true } }),
     ]);
     if (!flow || !template) throw new NotFoundException('Onboarding flow or template not found');
     await this.validateOwners(tenantId, template.tasks, flow.branchId);
@@ -182,6 +249,20 @@ export class OnboardingService {
     });
     await this.learningPaths.assignForOnboarding(tenantId, flow.id, template.id);
     return this.getFlow(tenantId, flowId, actor);
+  }
+
+  async applyTemplateBulk(tenantId: string, actor: JwtPayload, dto: ApplyOnboardingTemplateDto & { flowIds: string[] }) {
+    const flowIds = [...new Set(dto.flowIds)];
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const flowId of flowIds) {
+      try {
+        await this.applyTemplate(tenantId, flowId, actor, { templateId: dto.templateId, startDate: dto.startDate });
+        results.push({ id: flowId, ok: true });
+      } catch (error) {
+        results.push({ id: flowId, ok: false, error: error instanceof Error ? error.message : 'No fue posible aplicar la plantilla' });
+      }
+    }
+    return { requested: flowIds.length, applied: results.filter((item) => item.ok).length, failed: results.filter((item) => !item.ok), results };
   }
 
   async updateTask(tenantId: string, taskId: string, actor: JwtPayload, dto: UpdateOnboardingTaskDto) {
@@ -413,6 +494,10 @@ export class OnboardingService {
     const document = await this.prisma.employeeDocument.findFirst({ where: { id, tenantId, deletedAt: null }, include: { onboardingFlow: { select: { workflowId: true } } } });
     if (!document) throw new NotFoundException('Document not found');
     this.assertActorCanAccessBranch(actor, document.branchId);
+    if (document.onboardingFlowId) {
+      const legalHold = await this.prisma.onboardingLegalHold.findFirst({ where: { tenantId, onboardingFlowId: document.onboardingFlowId, status: 'ACTIVE' } });
+      if (legalHold) throw new ConflictException('El documento no puede eliminarse mientras exista un legal hold activo');
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.employeeDocument.update({ where: { id }, data: { deletedAt: new Date(), status: 'DELETED' } });
       if (document.onboardingFlow?.workflowId) await this.createOperationalEvent(tx, {

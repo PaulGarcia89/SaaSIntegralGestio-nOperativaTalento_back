@@ -1205,6 +1205,9 @@ model Tenant {
   onboardingTasks               OnboardingTask[]
   onboardingTemplates           OnboardingTemplate[]
   onboardingTemplateTasks       OnboardingTemplateTask[]
+  onboardingLibraryItems        OnboardingLibraryItem[]
+  onboardingRetentionPolicies   OnboardingRetentionPolicy[]
+  onboardingLegalHolds          OnboardingLegalHold[]
   employeeDocuments             EmployeeDocument[]
   signaturePackages             SignaturePackage[]
   signatureParticipants         SignatureParticipant[]
@@ -1926,6 +1929,7 @@ model OnboardingFlow {
   template          OnboardingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   documents         EmployeeDocument[]
   signaturePackages SignaturePackage[]
+  legalHolds        OnboardingLegalHold[]
 
   @@index([tenantId, branchId, status])
   @@index([employeeId])
@@ -1975,6 +1979,11 @@ model OnboardingTemplate {
   version       Int                      @default(1)
   isActive      Boolean                  @default(true)
   isDefault     Boolean                  @default(false)
+  status        String                   @default("PUBLISHED")
+  effectiveFrom DateTime                 @default(now())
+  approvedAt    DateTime?
+  approvedById  String?
+  supersedesId  String?
   createdById   String
   createdAt     DateTime                 @default(now())
   updatedAt     DateTime                 @updatedAt
@@ -1982,9 +1991,65 @@ model OnboardingTemplate {
   tasks         OnboardingTemplateTask[]
   flows         OnboardingFlow[]
   trainingRules TrainingOnboardingRule[]
+  supersedes    OnboardingTemplate?      @relation("OnboardingTemplateVersions", fields: [supersedesId], references: [id], onDelete: SetNull)
+  successors    OnboardingTemplate[]     @relation("OnboardingTemplateVersions")
 
   @@unique([tenantId, name, version])
   @@index([tenantId, isActive, isDefault])
+  @@index([tenantId, name, status, effectiveFrom])
+}
+
+model OnboardingLibraryItem {
+  id          String   @id @default(uuid())
+  tenantId    String
+  type        String
+  name        String
+  description String?
+  content     Json
+  countryCode String?
+  isActive    Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type, name])
+  @@index([tenantId, type, isActive])
+}
+
+model OnboardingRetentionPolicy {
+  id              String   @id @default(uuid())
+  tenantId        String
+  countryCode     String
+  documentCategory String
+  retentionDays   Int
+  legalBasis      String?
+  isActive        Boolean  @default(true)
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, countryCode, documentCategory])
+  @@index([tenantId, countryCode, isActive])
+}
+
+model OnboardingLegalHold {
+  id              String          @id @default(uuid())
+  tenantId        String
+  onboardingFlowId String
+  reason          String
+  reference       String?
+  status          String          @default("ACTIVE")
+  placedById      String
+  placedAt        DateTime        @default(now())
+  releasedById    String?
+  releasedAt      DateTime?
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  onboardingFlow  OnboardingFlow  @relation(fields: [onboardingFlowId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([onboardingFlowId, status])
 }
 
 model OnboardingTemplateTask {
@@ -2030,7 +2095,8 @@ model EmployeeDocument {
   replacesDocumentId   String?
   rejectionReason      String?
   deletedAt            DateTime?
-  uploadedById         String
+  uploadedById         String?
+  uploadedByCandidateAccountId String?
   expiresAt            DateTime?
   reviewedAt           DateTime?
   reviewedById         String?
@@ -2044,11 +2110,13 @@ model EmployeeDocument {
   task                 OnboardingTask?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
   replacesDocument     EmployeeDocument?  @relation("EmployeeDocumentVersions", fields: [replacesDocumentId], references: [id], onDelete: SetNull)
   replacementDocuments EmployeeDocument[] @relation("EmployeeDocumentVersions")
+  uploadedByCandidateAccount CandidateAccount? @relation(fields: [uploadedByCandidateAccountId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, storageKey])
   @@index([tenantId, employeeId, status])
   @@index([onboardingFlowId, createdAt])
   @@index([replacesDocumentId])
+  @@index([uploadedByCandidateAccountId])
 }
 
 model SignaturePackage {
@@ -3261,6 +3329,7 @@ model CandidateAccount {
   tokens             CandidateAccountToken[]
   privacyRequests    CandidatePrivacyRequest[]
   externalIdentities CandidateExternalIdentity[]
+  uploadedOnboardingDocuments EmployeeDocument[]
 }
 
 model CandidateAccountToken {

@@ -5,9 +5,10 @@ import { PublicSignaturesController, SignaturesController } from './signatures.c
 import { SignatureProviderService } from './signature-provider.service';
 import { SignaturesService } from './signatures.service';
 import { JobOffersModule } from '../job-offers/job-offers.module';
+import { EnterpriseIntegrationsModule } from '../enterprise-integrations/enterprise-integrations.module';
 
 @Module({
-  imports: [JobOffersModule],
+  imports: [JobOffersModule, EnterpriseIntegrationsModule],
   controllers: [SignaturesController, PublicSignaturesController],
   providers: [SignaturesService, SignatureProviderService, SubscriptionGuard, ModuleAccessGuard],
   exports: [SignaturesService],

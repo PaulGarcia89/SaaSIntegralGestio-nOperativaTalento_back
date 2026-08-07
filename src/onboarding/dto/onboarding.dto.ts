@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { OnboardingTaskType, WorkflowOwnerType, WorkflowTaskStatus } from '@prisma/client';
 
 export class OnboardingTemplateTaskDto {
@@ -28,6 +28,10 @@ export class ApplyOnboardingTemplateDto {
   @IsOptional() @IsDateString() startDate?: string;
 }
 
+export class BulkApplyOnboardingTemplateDto extends ApplyOnboardingTemplateDto {
+  @IsArray() @ArrayMaxSize(100) @IsUUID('4', { each: true }) flowIds!: string[];
+}
+
 export class UpdateOnboardingTaskDto {
   @IsOptional() @IsEnum(WorkflowTaskStatus) status?: WorkflowTaskStatus;
   @IsOptional() @IsInt() @Min(0) @Max(100) progressPercent?: number;
@@ -51,6 +55,35 @@ export class ReviewEmployeeDocumentDto {
 export class UpdateOnboardingTemplateStatusDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsBoolean() isDefault?: boolean;
+}
+
+export class ReviseOnboardingTemplateDto extends CreateOnboardingTemplateDto {
+  @IsOptional() @IsDateString() effectiveFrom?: string;
+}
+
+export class ApproveOnboardingTemplateDto {
+  @IsOptional() @IsDateString() effectiveFrom?: string;
+  @IsOptional() @IsBoolean() isDefault?: boolean;
+}
+
+export class CreateOnboardingLibraryItemDto {
+  @IsIn(['TASK', 'DOCUMENT', 'POLICY']) type!: 'TASK' | 'DOCUMENT' | 'POLICY';
+  @IsString() @MaxLength(160) name!: string;
+  @IsOptional() @IsString() @MaxLength(2000) description?: string;
+  @IsOptional() @IsString() @MaxLength(8) countryCode?: string;
+  @IsOptional() @IsObject() content?: Record<string, unknown>;
+}
+
+export class UpsertOnboardingRetentionPolicyDto {
+  @IsString() @MaxLength(8) countryCode!: string;
+  @IsString() @MaxLength(80) documentCategory!: string;
+  @IsInt() @Min(1) @Max(36500) retentionDays!: number;
+  @IsOptional() @IsString() @MaxLength(500) legalBasis?: string;
+}
+
+export class CreateOnboardingLegalHoldDto {
+  @IsString() @MaxLength(1000) reason!: string;
+  @IsOptional() @IsString() @MaxLength(160) reference?: string;
 }
 
 export class ReorderOnboardingTaskItemDto { @IsUUID() id!: string; @IsInt() @Min(0) sortOrder!: number; }

@@ -44,6 +44,7 @@ import { CandidateHiredDto } from '../domain-events/dto/candidate-hired.dto';
 import { SimpleDomainEventDto } from '../domain-events/dto/simple-domain-event.dto';
 import { AtsAutomationEventDto } from '../domain-events/dto/ats-automation-event.dto';
 import { DomainEventName, DOMAIN_EVENT_NAMES } from '../domain-events/domain-event.constants';
+import { EnterpriseIntegrationsService } from '../enterprise-integrations/enterprise-integrations.service';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -109,12 +110,13 @@ export class AutomationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workflowsService: WorkflowsService,
+    private readonly enterpriseIntegrations: EnterpriseIntegrationsService,
   ) {}
 
   getCatalog() {
     return {
       triggers: [
-        this.catalogTrigger(AutomationTriggerEvent.CANDIDATE_HIRED, 'Candidato contratado', 'Se formaliza una contratación desde el ATS', ['payload.jobTitle', 'payload.applicationId']),
+        this.catalogTrigger(AutomationTriggerEvent.CANDIDATE_HIRED, 'Candidato contratado', 'Se formaliza una contratación desde el ATS', ['payload.jobTitle', 'payload.applicationId', 'payload.department', 'payload.country', 'payload.contractType', 'payload.modality', 'payload.seniority']),
         this.catalogTrigger(AutomationTriggerEvent.APPLICATION_STAGE_CHANGED, 'Etapa de candidatura cambiada', 'Una postulación avanza o retrocede en el pipeline ATS', ['payload.previousStageCode', 'payload.stageCode', 'payload.status', 'payload.vacancyId']),
         this.catalogTrigger(AutomationTriggerEvent.APPLICATION_REJECTED, 'Candidatura descartada', 'Una postulación queda rechazada con motivo estructurado', ['payload.reason', 'payload.rejectionReasonId', 'payload.vacancyId']),
         this.catalogTrigger(AutomationTriggerEvent.INTERVIEW_SCHEDULED, 'Entrevista programada', 'Se confirma una entrevista en el calendario interno', ['payload.interviewId', 'payload.interviewerUserId', 'payload.startsAt', 'payload.vacancyId']),
@@ -137,13 +139,13 @@ export class AutomationService {
       actions: [
         this.catalogAction(AutomationConsequenceType.CREATE_ONBOARDING, 'Crear incorporación', 'Genera o actualiza el expediente de incorporación'),
         this.catalogAction(AutomationConsequenceType.ASSIGN_ASSET, 'Solicitar activo', 'Crea una asignación de inventario pendiente', ['itemId', 'quantity']),
-        this.catalogAction(AutomationConsequenceType.PROVISION_ACCESS, 'Provisionar accesos', 'Crea una tarea de alta de accesos'),
+        this.catalogAction(AutomationConsequenceType.PROVISION_ACCESS, 'Provisionar accesos', 'Crea una tarea de alta con destinos SCIM, Google Workspace, Microsoft 365 o ITSM', ['connectors']),
         this.catalogAction(AutomationConsequenceType.ACTIVATE_TRAINING, 'Asignar capacitación', 'Activa un curso o ruta de aprendizaje', ['courseId', 'curriculumId', 'dueDate']),
         this.catalogAction(AutomationConsequenceType.CREATE_POLICY_CHECK, 'Crear verificación', 'Abre una tarea de cumplimiento', ['title', 'policyCode', 'dueDate']),
         this.catalogAction(AutomationConsequenceType.MARK_WORKFLOW_STAGE, 'Completar etapa', 'Marca una etapa del flujo maestro como completada', ['stepKey']),
         this.catalogAction(AutomationConsequenceType.NOTIFY_ACTOR, 'Notificar responsable', 'Crea una notificación interna', ['title', 'message']),
         this.catalogAction(AutomationConsequenceType.ARCHIVE_RECORD, 'Archivar empleado', 'Marca el registro laboral como inactivo', ['message']),
-        this.catalogAction(AutomationConsequenceType.REVOKE_ACCESS, 'Revocar accesos', 'Crea una tarea de cierre de accesos'),
+        this.catalogAction(AutomationConsequenceType.REVOKE_ACCESS, 'Revocar accesos', 'Crea una tarea de cierre con destinos SCIM, Google Workspace, Microsoft 365 o ITSM', ['connectors']),
       ],
       scopes: [
         { value: AutomationScope.TENANT, label: 'Toda la empresa' },
@@ -1001,6 +1003,7 @@ export class AutomationService {
   ) {
     const workflow = await this.requireWorkflow(tx, context);
 
+    const destinations = this.enterpriseIntegrations.accessDestinations(consequence.payload?.connectors);
     await tx.accessTask.create({
       data: {
         tenantId: workflow.tenantId,
@@ -1009,7 +1012,7 @@ export class AutomationService {
         employeeId: workflow.employeeId!,
         taskType: 'PROVISION',
         permissions: this.toJson(consequence.payload ?? {}),
-        metadata: this.toJson({ source: 'automation' }),
+        metadata: this.toJson({ source: 'automation', destinations, externalDispatchStatus: destinations.length ? 'PENDING_CONFIGURATION_OR_DISPATCH' : 'MANUAL_REVIEW' }),
       },
     });
 
@@ -1207,6 +1210,7 @@ export class AutomationService {
   ) {
     const workflow = await this.requireWorkflow(tx, context);
 
+    const destinations = this.enterpriseIntegrations.accessDestinations(consequence.payload?.connectors);
     await tx.accessTask.create({
       data: {
         tenantId: workflow.tenantId,
@@ -1214,7 +1218,7 @@ export class AutomationService {
         workflowId: workflow.id,
         employeeId: workflow.employeeId!,
         taskType: 'CLOSE',
-        metadata: this.toJson(consequence.payload ?? {}),
+        metadata: this.toJson({ ...(consequence.payload ?? {}), destinations, externalDispatchStatus: destinations.length ? 'PENDING_CONFIGURATION_OR_DISPATCH' : 'MANUAL_REVIEW' }),
       },
     });
 

@@ -1,6 +1,9 @@
 name: ATS Railway scale gate
 
 on:
+  schedule:
+    # Sunday 09:30 UTC. This job performs read-only authentication and load checks.
+    - cron: "30 9 * * 0"
   workflow_dispatch:
     inputs:
       virtual_users:
@@ -26,7 +29,7 @@ jobs:
       ATS_CERT_PASSWORD: ${{ secrets.ATS_PRODUCTION_CERT_PASSWORD }}
       ATS_CERT_REPORT_PATH: ats-railway-security-report.json
       ATS_LOAD_BASE_URL: ${{ vars.ATS_PRODUCTION_BACKEND_URL }}
-      ATS_LOAD_VUS: ${{ inputs.virtual_users }}
+      ATS_LOAD_VUS: ${{ inputs.virtual_users || '10' }}
       ATS_LOAD_MAX_P95_MS: "1500"
     steps:
       - uses: actions/checkout@v4
