@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { CandidatePreboardingController, OnboardingController } from './onboarding.controller';
@@ -11,11 +12,12 @@ import { CandidatePreboardingService } from './candidate-preboarding.service';
 import { OnboardingAnalyticsService } from './onboarding-analytics.service';
 import { OnboardingRetentionService } from './onboarding-retention.service';
 import { OnboardingPerformanceService } from './onboarding-performance.service';
+import { CandidateAuthGuard } from '../applications/candidate-auth.guard';
 
 @Module({
-  imports: [TrainingModule, ApplicationsModule],
+  imports: [JwtModule.register({}), TrainingModule, ApplicationsModule],
   controllers: [OnboardingController, CandidatePreboardingController],
-  providers: [OnboardingService, OnboardingDocumentStorageService, OnboardingAutomationService, OnboardingAnalyticsService, OnboardingRetentionService, OnboardingPerformanceService, CandidatePreboardingService, SubscriptionGuard, ModuleAccessGuard],
+  providers: [OnboardingService, OnboardingDocumentStorageService, OnboardingAutomationService, OnboardingAnalyticsService, OnboardingRetentionService, OnboardingPerformanceService, CandidatePreboardingService, CandidateAuthGuard, SubscriptionGuard, ModuleAccessGuard],
   exports: [OnboardingService],
 })
 export class OnboardingModule {}
