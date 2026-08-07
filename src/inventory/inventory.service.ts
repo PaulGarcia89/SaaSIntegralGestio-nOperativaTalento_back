@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InventoryAssetStatus, InventoryEvidenceType, InventoryMovementType, Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
-import { AssignInventoryAssetDto, CreateInventoryAssetDto, CreateInventoryItemDto, InventoryOperationDto, ListInventoryAssetsDto, TransferInventoryAssetDto, ValidateInventoryReturnDto } from './dto/inventory.dto';
+import { AdjustInventoryStockDto, AssignInventoryAssetDto, CountInventoryStockDto, CreateInventoryAssetDto, CreateInventoryItemDto, CreateInventoryLocationDto, CreateInventoryMaintenanceDto, CreateInventorySupplierDto, CreatePurchaseOrderDto, InventoryOperationDto, ListInventoryAssetsDto, ListInventoryWarehouseDto, ReceivePurchaseOrderDto, ResolveInventoryMaintenanceDto, TransferInventoryAssetDto, UpdateInventoryStockPolicyDto, ValidateInventoryReturnDto } from './dto/inventory.dto';
 import { InventoryEvidenceStorageService } from './inventory-evidence-storage.service';
 import { PlanLimitsService } from '../plan-limits/plan-limits.service';
 
@@ -40,9 +40,47 @@ export class InventoryService {
     });
   }
 
+  async listMyAssets(tenantId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId }, select: { email: true } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    const employee = await this.prisma.employee.findFirst({ where: { tenantId, email: { equals: user.email, mode: 'insensitive' } }, select: { id: true } });
+    if (!employee) return [];
+    return this.prisma.inventoryAsset.findMany({ where: { tenantId, employeeId: employee.id, status: { in: [InventoryAssetStatus.RESERVED, InventoryAssetStatus.ASSIGNED, InventoryAssetStatus.RETURN_PENDING] } }, include: assetInclude, orderBy: { updatedAt: 'desc' } });
+  }
+
+  async analytics(tenantId: string, branchId?: string) {
+    const assetWhere = { tenantId, branchId };
+    const stockWhere = { tenantId, branchId };
+    const [assets, stocks, openMaintenance, orders] = await Promise.all([
+      this.prisma.inventoryAsset.groupBy({ by: ['status'], where: assetWhere, _count: { _all: true } }),
+      this.prisma.inventoryStock.findMany({ where: stockWhere, select: { qtyLocal: true, minQty: true, reorderPoint: true } }),
+      this.prisma.inventoryMaintenanceTicket.count({ where: { tenantId, status: 'OPEN' } }),
+      this.prisma.inventoryPurchaseOrder.count({ where: { tenantId, branchId, status: { in: ['DRAFT', 'APPROVED', 'PARTIALLY_RECEIVED'] } } }),
+    ]);
+    const byStatus = Object.fromEntries(assets.map(item => [item.status, item._count._all]));
+    const reorder = stocks.filter(stock => stock.qtyLocal <= stock.reorderPoint).length;
+    const belowMinimum = stocks.filter(stock => stock.qtyLocal < stock.minQty).length;
+    return { assets: { total: assets.reduce((sum, item) => sum + item._count._all, 0), available: byStatus.AVAILABLE ?? 0, assigned: byStatus.ASSIGNED ?? 0, maintenance: byStatus.MAINTENANCE ?? 0, returnPending: byStatus.RETURN_PENDING ?? 0 }, stock: { references: stocks.length, reorder, belowMinimum }, operations: { openMaintenance, purchaseOrdersInProgress: orders } };
+  }
+
+  async auditTrail(tenantId: string, branchId?: string, page = 1, pageSize = 25) {
+    const where = { tenantId, branchId, action: { startsWith: 'INVENTORY_' } };
+    const [items, total] = await Promise.all([
+      this.prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, select: { id: true, action: true, email: true, actorRole: true, route: true, statusCode: true, createdAt: true, correlationId: true } }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+    return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
   async getAsset(tenantId: string, id: string) {
     const asset = await this.prisma.inventoryAsset.findFirst({ where: { id, tenantId }, include: { ...assetInclude, movements: { include: { fromBranch: true, toBranch: true, employee: true, evidences: { select: { id: true, type: true, originalName: true, mimeType: true, sizeBytes: true, sha256: true, createdAt: true } } }, orderBy: { occurredAt: 'desc' } } } });
     if (!asset) throw new NotFoundException('Asset not found');
+    return asset;
+  }
+
+  async findAssetByTag(tenantId: string, assetTag: string) {
+    const asset = await this.prisma.inventoryAsset.findFirst({ where: { tenantId, assetTag: assetTag.trim().toUpperCase() }, include: assetInclude });
+    if (!asset) throw new NotFoundException('Activo no encontrado');
     return asset;
   }
 
@@ -112,6 +150,75 @@ export class InventoryService {
     if (!evidence) throw new NotFoundException('Evidence not found');
     return { evidence, buffer: await this.storage.read(evidence.storageKey) };
   }
+
+  listLocations(tenantId: string, branchId?: string) { return this.prisma.inventoryLocation.findMany({ where: { tenantId, branchId, isActive: true }, orderBy: [{ branchId: 'asc' }, { name: 'asc' }] }); }
+  async createLocation(tenantId: string, dto: CreateInventoryLocationDto) { await this.assertBranch(tenantId, dto.branchId); return this.prisma.inventoryLocation.create({ data: { tenantId, branchId: dto.branchId, code: dto.code.trim().toUpperCase(), name: dto.name.trim(), type: dto.type?.trim().toUpperCase() || 'STORAGE' } }); }
+
+  async warehouse(tenantId: string, query: ListInventoryWarehouseDto) {
+    const page = query.page ?? 1; const pageSize = query.pageSize ?? 20;
+    const where: Prisma.InventoryStockWhereInput = { tenantId, branchId: query.branchId, ...(query.search ? { item: { OR: [{ name: { contains: query.search, mode: 'insensitive' } }, { sku: { contains: query.search, mode: 'insensitive' } }] } } : {}) };
+    const [items, total] = await this.prisma.$transaction([this.prisma.inventoryStock.findMany({ where, include: { item: true, branch: true }, orderBy: [{ qtyLocal: 'asc' }, { updatedAt: 'desc' }], skip: (page - 1) * pageSize, take: pageSize }), this.prisma.inventoryStock.count({ where })]);
+    return { items: items.map((stock) => ({ ...stock, needsReorder: stock.qtyLocal <= stock.reorderPoint, belowMinimum: stock.qtyLocal < stock.minQty })), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  async adjustStock(tenantId: string, actorUserId: string, dto: AdjustInventoryStockDto) {
+    await this.assertCatalogAndBranch(tenantId, dto.itemId, dto.branchId);
+    if (dto.locationId) { const location = await this.prisma.inventoryLocation.findFirst({ where: { id: dto.locationId, tenantId, branchId: dto.branchId, isActive: true } }); if (!location) throw new BadRequestException('Ubicación de inventario inválida'); }
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.inventoryStock.findUnique({ where: { itemId_branchId: { itemId: dto.itemId, branchId: dto.branchId } } });
+      const balance = (current?.qtyLocal ?? 0) + dto.quantity; if (balance < 0) throw new BadRequestException('El ajuste dejaría el stock en negativo');
+      const stock = await tx.inventoryStock.upsert({ where: { itemId_branchId: { itemId: dto.itemId, branchId: dto.branchId } }, create: { tenantId, itemId: dto.itemId, branchId: dto.branchId, qtyLocal: balance }, update: { qtyLocal: balance } });
+      await tx.inventoryItem.update({ where: { id: dto.itemId }, data: { qtyGlobal: { increment: dto.quantity } } });
+      await tx.inventoryStockMovement.create({ data: { tenantId, itemId: dto.itemId, branchId: dto.branchId, locationId: dto.locationId, type: 'ADJUSTMENT', quantity: dto.quantity, balanceAfter: balance, reason: dto.reason, actorUserId } });
+      return stock;
+    });
+  }
+
+  async countStock(tenantId: string, actorUserId: string, dto: CountInventoryStockDto) {
+    await this.assertCatalogAndBranch(tenantId, dto.itemId, dto.branchId);
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.inventoryStock.findUnique({ where: { itemId_branchId: { itemId: dto.itemId, branchId: dto.branchId } } });
+      const expectedQty = current?.qtyLocal ?? 0;
+      const variance = dto.countedQty - expectedQty;
+      const count = await tx.inventoryStockCount.create({ data: { tenantId, itemId: dto.itemId, branchId: dto.branchId, expectedQty, countedQty: dto.countedQty, variance, notes: dto.notes, countedById: actorUserId } });
+      if (variance) {
+        await tx.inventoryStock.upsert({ where: { itemId_branchId: { itemId: dto.itemId, branchId: dto.branchId } }, create: { tenantId, itemId: dto.itemId, branchId: dto.branchId, qtyLocal: dto.countedQty }, update: { qtyLocal: dto.countedQty } });
+        await tx.inventoryItem.update({ where: { id: dto.itemId }, data: { qtyGlobal: { increment: variance } } });
+        await tx.inventoryStockMovement.create({ data: { tenantId, itemId: dto.itemId, branchId: dto.branchId, type: 'COUNT_RECONCILIATION', quantity: variance, balanceAfter: dto.countedQty, reason: `Conciliación de conteo ${count.id}`, actorUserId } });
+      }
+      return count;
+    });
+  }
+
+  async updateStockPolicy(tenantId: string, dto: UpdateInventoryStockPolicyDto) {
+    await this.assertCatalogAndBranch(tenantId, dto.itemId, dto.branchId);
+    if (dto.maxQty !== undefined && dto.maxQty < dto.reorderPoint) throw new BadRequestException('El máximo no puede ser menor que el punto de reposición');
+    return this.prisma.inventoryStock.upsert({
+      where: { itemId_branchId: { itemId: dto.itemId, branchId: dto.branchId } },
+      create: { tenantId, itemId: dto.itemId, branchId: dto.branchId, qtyLocal: 0, minQty: dto.minQty, reorderPoint: dto.reorderPoint, maxQty: dto.maxQty },
+      update: { minQty: dto.minQty, reorderPoint: dto.reorderPoint, maxQty: dto.maxQty },
+    });
+  }
+
+  async exportMovements(tenantId: string, branchId?: string) { return this.prisma.inventoryStockMovement.findMany({ where: { tenantId, branchId }, orderBy: { occurredAt: 'desc' }, take: 10000 }); }
+
+  listSuppliers(tenantId: string) { return this.prisma.inventorySupplier.findMany({ where: { tenantId, isActive: true }, orderBy: { name: 'asc' } }); }
+  createSupplier(tenantId: string, dto: CreateInventorySupplierDto) { return this.prisma.inventorySupplier.create({ data: { tenantId, name: dto.name.trim(), email: dto.email?.trim(), phone: dto.phone?.trim(), taxId: dto.taxId?.trim() } }); }
+  listPurchaseOrders(tenantId: string, branchId?: string) { return this.prisma.inventoryPurchaseOrder.findMany({ where: { tenantId, branchId }, include: { lines: true }, orderBy: { createdAt: 'desc' } }); }
+  async createPurchaseOrder(tenantId: string, actorUserId: string, dto: CreatePurchaseOrderDto) {
+    await this.assertBranch(tenantId, dto.branchId);
+    if (!dto.lines?.length) throw new BadRequestException('La orden debe contener al menos una línea');
+    const supplier = await this.prisma.inventorySupplier.findFirst({ where: { id: dto.supplierId, tenantId, isActive: true } }); if (!supplier) throw new BadRequestException('Proveedor inválido');
+    for (const line of dto.lines) { await this.assertCatalogAndBranch(tenantId, line.itemId, dto.branchId); if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.unitCost < 0) throw new BadRequestException('Línea de compra inválida'); }
+    const total = dto.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
+    if (dto.budgetAmount !== undefined && total > dto.budgetAmount) throw new BadRequestException('La orden supera el presupuesto declarado');
+    return this.prisma.inventoryPurchaseOrder.create({ data: { tenantId, branchId: dto.branchId, supplierId: dto.supplierId, code: dto.code.trim().toUpperCase(), currency: dto.currency?.toUpperCase() || 'USD', budgetAmount: dto.budgetAmount, totalAmount: total, notes: dto.notes, requestedById: actorUserId, lines: { create: dto.lines.map((line) => ({ itemId: line.itemId, quantity: line.quantity, unitCost: line.unitCost })) } }, include: { lines: true } });
+  }
+  async approvePurchaseOrder(tenantId: string, id: string, actorUserId: string) { const order = await this.prisma.inventoryPurchaseOrder.findFirst({ where: { id, tenantId } }); if (!order) throw new NotFoundException('Orden no encontrada'); if (order.status !== 'DRAFT') throw new ConflictException('Solo se pueden aprobar borradores'); return this.prisma.inventoryPurchaseOrder.update({ where: { id }, data: { status: 'APPROVED', approvedById: actorUserId, approvedAt: new Date() }, include: { lines: true } }); }
+  async receivePurchaseOrder(tenantId: string, id: string, actorUserId: string, dto: ReceivePurchaseOrderDto) { const order = await this.prisma.inventoryPurchaseOrder.findFirst({ where: { id, tenantId }, include: { lines: true } }); if (!order) throw new NotFoundException('Orden no encontrada'); if (!['APPROVED', 'PARTIALLY_RECEIVED'].includes(order.status)) throw new ConflictException('La orden debe estar aprobada'); return this.prisma.$transaction(async tx => { for (const receipt of dto.lines) { const line = order.lines.find(item => item.id === receipt.lineId); if (!line || !Number.isInteger(receipt.quantity) || receipt.quantity < 1 || line.receivedQty + receipt.quantity > line.quantity) throw new BadRequestException('Recepción inválida'); const balance = (await tx.inventoryStock.findUnique({ where: { itemId_branchId: { itemId: line.itemId, branchId: order.branchId } } }))?.qtyLocal ?? 0; await tx.inventoryPurchaseOrderLine.update({ where: { id: line.id }, data: { receivedQty: { increment: receipt.quantity } } }); await tx.inventoryStock.upsert({ where: { itemId_branchId: { itemId: line.itemId, branchId: order.branchId } }, create: { tenantId, itemId: line.itemId, branchId: order.branchId, qtyLocal: balance + receipt.quantity }, update: { qtyLocal: balance + receipt.quantity } }); await tx.inventoryItem.update({ where: { id: line.itemId }, data: { qtyGlobal: { increment: receipt.quantity } } }); await tx.inventoryStockMovement.create({ data: { tenantId, itemId: line.itemId, branchId: order.branchId, type: 'PURCHASE_RECEIPT', quantity: receipt.quantity, balanceAfter: balance + receipt.quantity, reason: `Recepción ${order.code}`, actorUserId } }); } const fresh = await tx.inventoryPurchaseOrder.findUniqueOrThrow({ where: { id }, include: { lines: true } }); const complete = fresh.lines.every(line => line.receivedQty >= line.quantity); return tx.inventoryPurchaseOrder.update({ where: { id }, data: { status: complete ? 'RECEIVED' : 'PARTIALLY_RECEIVED', receivedAt: complete ? new Date() : undefined }, include: { lines: true } }); }); }
+  listMaintenance(tenantId: string) { return this.prisma.inventoryMaintenanceTicket.findMany({ where: { tenantId }, include: { asset: { include: { item: true, branch: true } } }, orderBy: [{ status: 'asc' }, { dueAt: 'asc' }] }); }
+  async createMaintenance(tenantId: string, actorUserId: string, dto: CreateInventoryMaintenanceDto) { const asset = await this.requireAsset(tenantId, dto.assetId); return this.prisma.$transaction(async tx => { const ticket = await tx.inventoryMaintenanceTicket.create({ data: { tenantId, assetId: asset.id, type: dto.type.trim().toUpperCase(), title: dto.title.trim(), description: dto.description, dueAt: dto.dueAt ? new Date(dto.dueAt) : undefined, costAmount: dto.costAmount, currency: dto.currency?.toUpperCase() || 'USD', vendor: dto.vendor, createdById: actorUserId } }); await tx.inventoryAsset.update({ where: { id: asset.id }, data: { status: InventoryAssetStatus.MAINTENANCE } }); await tx.inventoryMovement.create({ data: { tenantId, assetId: asset.id, type: InventoryMovementType.SENT_TO_MAINTENANCE, fromBranchId: asset.branchId, toBranchId: asset.branchId, actorUserId, notes: dto.title } }); return ticket; }); }
+  async resolveMaintenance(tenantId: string, id: string, actorUserId: string, dto: ResolveInventoryMaintenanceDto) { const ticket = await this.prisma.inventoryMaintenanceTicket.findFirst({ where: { id, tenantId } }); if (!ticket || ticket.status !== 'OPEN') throw new NotFoundException('Mantenimiento abierto no encontrado'); return this.prisma.$transaction(async tx => { const updated = await tx.inventoryMaintenanceTicket.update({ where: { id }, data: { status: 'RESOLVED', resolvedAt: new Date(), resolvedById: actorUserId, costAmount: dto.costAmount ?? ticket.costAmount, description: dto.notes ? `${ticket.description ?? ''}\n${dto.notes}`.trim() : ticket.description } }); await tx.inventoryAsset.update({ where: { id: ticket.assetId }, data: { status: InventoryAssetStatus.AVAILABLE } }); return updated; }); }
 
   private async simpleTransition(tenantId: string, id: string, actorUserId: string, type: InventoryMovementType, dto: InventoryOperationDto, allowed: InventoryAssetStatus[], data: Prisma.InventoryAssetUncheckedUpdateInput, requestId?: string) {
     const asset = await this.requireAsset(tenantId, id);

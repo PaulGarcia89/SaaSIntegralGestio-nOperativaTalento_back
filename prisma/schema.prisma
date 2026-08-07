@@ -2582,6 +2582,8 @@ model InventoryItem {
   sku                  String
   name                 String
   qtyGlobal            Int                   @default(0)
+  isSerialized         Boolean               @default(true)
+  unitOfMeasure        String                @default("unidad")
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2601,6 +2603,9 @@ model InventoryStock {
   itemId    String
   branchId  String
   qtyLocal  Int           @default(0)
+  minQty    Int           @default(0)
+  maxQty    Int?
+  reorderPoint Int        @default(0)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2610,6 +2615,101 @@ model InventoryStock {
   @@unique([itemId, branchId])
   @@index([tenantId, branchId])
   @@index([tenantId, itemId])
+}
+
+model InventoryLocation {
+  id          String   @id @default(uuid())
+  tenantId    String
+  branchId    String
+  code        String
+  name        String
+  type        String   @default("STORAGE")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, branchId, code])
+  @@index([tenantId, branchId, isActive])
+}
+
+model InventoryStockMovement {
+  id           String   @id @default(uuid())
+  tenantId     String
+  itemId       String
+  branchId     String
+  locationId   String?
+  type         String
+  quantity     Int
+  balanceAfter Int
+  reason       String?
+  actorUserId  String
+  occurredAt   DateTime @default(now())
+
+  @@index([tenantId, itemId, occurredAt])
+  @@index([tenantId, branchId, occurredAt])
+}
+
+model InventoryStockCount {
+  id            String   @id @default(uuid())
+  tenantId      String
+  itemId        String
+  branchId      String
+  expectedQty   Int
+  countedQty    Int
+  variance      Int
+  notes         String?
+  countedById   String
+  countedAt     DateTime @default(now())
+
+  @@index([tenantId, branchId, countedAt])
+  @@index([tenantId, itemId, countedAt])
+}
+
+model InventorySupplier {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  email     String?
+  phone     String?
+  taxId     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+}
+
+model InventoryPurchaseOrder {
+  id              String   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  supplierId      String
+  code            String
+  status          String   @default("DRAFT")
+  currency        String   @default("USD")
+  budgetAmount    Decimal? @db.Decimal(14, 2)
+  totalAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  notes           String?
+  requestedById   String
+  approvedById    String?
+  approvedAt      DateTime?
+  receivedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lines           InventoryPurchaseOrderLine[]
+  @@unique([tenantId, code])
+  @@index([tenantId, branchId, status])
+}
+
+model InventoryPurchaseOrderLine {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  itemId          String
+  quantity        Int
+  receivedQty     Int      @default(0)
+  unitCost        Decimal  @db.Decimal(14, 2)
+  purchaseOrder   InventoryPurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  @@index([purchaseOrderId])
 }
 
 model InventoryAsset {
@@ -2637,12 +2737,35 @@ model InventoryAsset {
   workflowAssignment   InventoryAssignment?    @relation(fields: [workflowAssignmentId], references: [id], onDelete: SetNull)
   movements            InventoryMovement[]
   evidences            InventoryEvidence[]
+  maintenanceTickets   InventoryMaintenanceTicket[]
 
   @@unique([tenantId, assetTag])
   @@unique([tenantId, serialNumber])
   @@index([tenantId, branchId, status])
   @@index([tenantId, employeeId, status])
   @@index([tenantId, itemId])
+}
+
+model InventoryMaintenanceTicket {
+  id          String   @id @default(uuid())
+  tenantId    String
+  assetId     String
+  type        String
+  status      String   @default("OPEN")
+  title       String
+  description String?
+  dueAt       DateTime?
+  resolvedAt  DateTime?
+  costAmount  Decimal? @db.Decimal(14, 2)
+  currency    String   @default("USD")
+  vendor      String?
+  createdById String
+  resolvedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  asset       InventoryAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  @@index([tenantId, status, dueAt])
+  @@index([tenantId, assetId])
 }
 
 model InventoryMovement {

@@ -14,6 +14,7 @@ import {
   ListTrainingImprovementsDto,
   UpdateTrainingImprovementDto,
   UpsertTrainingCompliancePolicyDto,
+  CaptureTrainingIntelligenceDto,
 } from './dto/training-analytics.dto';
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingAnalyticsService } from './training-analytics.service';
@@ -47,6 +48,13 @@ export class TrainingAnalyticsController {
   @RequirePermissions('training.analytics.read')
   intelligence(@Req() request: RequestWithUser) {
     return this.service.intelligence(request.tenant!.id);
+  }
+
+  @Post('intelligence')
+  @RequirePermissions('training.compliance.manage')
+  captureIntelligence(@Req() request: RequestWithUser, @Body() dto: CaptureTrainingIntelligenceDto) {
+    request.auditAction = 'TRAINING_INTELLIGENCE_CAPTURED';
+    return this.service.captureIntelligence(request.tenant!.id, request.user.sub, dto);
   }
 
   @Get('improvements')

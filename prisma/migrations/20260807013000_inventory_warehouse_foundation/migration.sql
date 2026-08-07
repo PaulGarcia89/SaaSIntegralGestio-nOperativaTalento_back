@@ -1,0 +1,14 @@
+ALTER TABLE "InventoryItem" ADD COLUMN "isSerialized" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "InventoryItem" ADD COLUMN "unitOfMeasure" TEXT NOT NULL DEFAULT 'unidad';
+ALTER TABLE "InventoryStock" ADD COLUMN "minQty" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "InventoryStock" ADD COLUMN "maxQty" INTEGER;
+ALTER TABLE "InventoryStock" ADD COLUMN "reorderPoint" INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE "InventoryLocation" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "branchId" TEXT NOT NULL, "code" TEXT NOT NULL, "name" TEXT NOT NULL, "type" TEXT NOT NULL DEFAULT 'STORAGE', "isActive" BOOLEAN NOT NULL DEFAULT true, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "InventoryLocation_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "InventoryLocation_tenantId_branchId_code_key" ON "InventoryLocation"("tenantId", "branchId", "code");
+CREATE INDEX "InventoryLocation_tenantId_branchId_isActive_idx" ON "InventoryLocation"("tenantId", "branchId", "isActive");
+CREATE TABLE "InventoryStockMovement" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "itemId" TEXT NOT NULL, "branchId" TEXT NOT NULL, "locationId" TEXT, "type" TEXT NOT NULL, "quantity" INTEGER NOT NULL, "balanceAfter" INTEGER NOT NULL, "reason" TEXT, "actorUserId" TEXT NOT NULL, "occurredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "InventoryStockMovement_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "InventoryStockMovement_tenantId_itemId_occurredAt_idx" ON "InventoryStockMovement"("tenantId", "itemId", "occurredAt");
+CREATE INDEX "InventoryStockMovement_tenantId_branchId_occurredAt_idx" ON "InventoryStockMovement"("tenantId", "branchId", "occurredAt");
+CREATE TABLE "InventoryStockCount" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "itemId" TEXT NOT NULL, "branchId" TEXT NOT NULL, "expectedQty" INTEGER NOT NULL, "countedQty" INTEGER NOT NULL, "variance" INTEGER NOT NULL, "notes" TEXT, "countedById" TEXT NOT NULL, "countedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "InventoryStockCount_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "InventoryStockCount_tenantId_branchId_countedAt_idx" ON "InventoryStockCount"("tenantId", "branchId", "countedAt");
+CREATE INDEX "InventoryStockCount_tenantId_itemId_countedAt_idx" ON "InventoryStockCount"("tenantId", "itemId", "countedAt");

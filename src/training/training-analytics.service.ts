@@ -14,6 +14,7 @@ import {
   ListTrainingImprovementsDto,
   UpdateTrainingImprovementDto,
   UpsertTrainingCompliancePolicyDto,
+  CaptureTrainingIntelligenceDto,
 } from './dto/training-analytics.dto';
 
 @Injectable()
@@ -145,6 +146,18 @@ export class TrainingAnalyticsService {
     const averageRating = feedback.length ? Number((feedback.reduce((total, item) => total + item.rating, 0) / feedback.length).toFixed(1)) : null;
     const averageNps = feedback.filter((item) => item.npsScore !== null).length ? Number((feedback.filter((item) => item.npsScore !== null).reduce((total, item) => total + (item.npsScore ?? 0), 0) / feedback.filter((item) => item.npsScore !== null).length).toFixed(1)) : null;
     return { competencyProfiles: profiles.length, assessments: assessments.length, gaps: gaps.sort((a, b) => b.gap - a.gap).slice(0, 100), careerPlans: { total: plans.length, active: plans.filter((plan) => plan.status === 'ACTIVE').length }, feedback: { responses: feedback.length, averageRating, averageNps }, roi: { measurements: roi.length, cost: roiSummary.cost, benefit: roiSummary.benefit, roiPercent: roiSummary.cost ? Math.round((roiSummary.benefit - roiSummary.cost) / roiSummary.cost * 100) : null }, forecasts: forecasts.slice(0, 100) };
+  }
+
+  async captureIntelligence(tenantId: string, actorId: string, dto: CaptureTrainingIntelligenceDto) {
+    const data = dto.payload;
+    const text = (key: string, required = true) => { const value = typeof data[key] === 'string' ? data[key].trim() : ''; if (required && !value) throw new BadRequestException(`Falta ${key}`); return value || undefined; };
+    const number = (key: string, required = true) => { const value = Number(data[key]); if (required && (!Number.isFinite(value) || value < 0)) throw new BadRequestException(`${key} debe ser un número válido`); return Number.isFinite(value) ? value : undefined; };
+    if (dto.type === 'ROLE_PROFILE') return this.prisma.trainingRoleCompetencyProfile.create({ data: { tenantId, branchId: text('branchId', false), jobTitle: text('jobTitle')!, competencyId: text('competencyId')!, targetLevel: text('targetLevel') as any, weight: number('weight', false) ?? 1, isRequired: data.isRequired !== false } });
+    if (dto.type === 'ASSESSMENT') return this.prisma.trainingCompetencyAssessment.create({ data: { tenantId, userId: text('userId')!, competencyId: text('competencyId')!, assessorId: actorId, source: text('source', false) ?? 'MANUAL', score: number('score')!, targetScore: number('targetScore', false), evidence: data.evidence as Prisma.InputJsonValue | undefined } });
+    if (dto.type === 'CAREER_PLAN') return this.prisma.trainingCareerPlan.create({ data: { tenantId, userId: text('userId')!, ownerId: actorId, targetRole: text('targetRole')!, title: text('title')!, targetDate: text('targetDate', false) ? new Date(text('targetDate', false)!) : undefined } });
+    if (dto.type === 'FEEDBACK_360') return this.prisma.trainingFeedback360.create({ data: { tenantId, courseId: text('courseId', false), subjectUserId: text('subjectUserId', false), respondentId: actorId, kind: text('kind', false) ?? 'COURSE', rating: number('rating')!, npsScore: number('npsScore', false), dimensions: data.dimensions as Prisma.InputJsonValue | undefined, comment: text('comment', false), isAnonymous: data.isAnonymous === true } });
+    if (dto.type === 'ROI') return this.prisma.trainingRoiMeasurement.create({ data: { tenantId, courseId: text('courseId', false), periodStart: new Date(text('periodStart')!), periodEnd: new Date(text('periodEnd')!), participantCount: number('participantCount', false) ?? 0, costAmount: number('costAmount', false) ?? 0, benefitAmount: number('benefitAmount', false) ?? 0, currency: text('currency', false) ?? 'USD', productivityDelta: number('productivityDelta', false), qualityDelta: number('qualityDelta', false), retentionDelta: number('retentionDelta', false), evidence: data.evidence as Prisma.InputJsonValue | undefined, createdById: actorId } });
+    return this.prisma.trainingForecastSnapshot.create({ data: { tenantId, courseId: text('courseId', false), cohortKey: text('cohortKey')!, dueDate: text('dueDate', false) ? new Date(text('dueDate', false)!) : undefined, assigned: number('assigned', false) ?? 0, completed: number('completed', false) ?? 0, projectedCompletionRate: number('projectedCompletionRate', false) ?? 0, projectedOverdue: number('projectedOverdue', false) ?? 0, benchmark: data.benchmark as Prisma.InputJsonValue | undefined } });
   }
 
   async effectiveness(tenantId: string, query: TrainingAnalyticsQueryDto) {

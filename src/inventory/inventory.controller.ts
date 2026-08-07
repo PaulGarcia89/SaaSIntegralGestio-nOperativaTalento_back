@@ -11,7 +11,7 @@ import { ScopeGuard } from '../common/guards/scope.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
-import { AssignInventoryAssetDto, CreateInventoryAssetDto, CreateInventoryItemDto, InventoryOperationDto, ListInventoryAssetsDto, TransferInventoryAssetDto, ValidateInventoryReturnDto } from './dto/inventory.dto';
+import { AdjustInventoryStockDto, AssignInventoryAssetDto, CountInventoryStockDto, CreateInventoryAssetDto, CreateInventoryItemDto, CreateInventoryLocationDto, CreateInventoryMaintenanceDto, CreateInventorySupplierDto, CreatePurchaseOrderDto, InventoryOperationDto, ListInventoryAssetsDto, ListInventoryWarehouseDto, ReceivePurchaseOrderDto, ResolveInventoryMaintenanceDto, TransferInventoryAssetDto, UpdateInventoryStockPolicyDto, ValidateInventoryReturnDto } from './dto/inventory.dto';
 import { InventoryService } from './inventory.service';
 
 const fileOptions = {
@@ -32,6 +32,43 @@ export class InventoryController {
   @Get('catalog') @RequirePermissions('inventory.read')
   catalog(@Req() request: RequestWithUser) { return this.service.listItems(request.tenant!.id); }
 
+  @Get('analytics') @RequirePermissions('inventory.read')
+  analytics(@Req() request: RequestWithUser, @Query('branchId') branchId?: string) { return this.service.analytics(request.tenant!.id, branchId); }
+
+  @Get('audit-trail') @RequirePermissions('inventory.manage')
+  auditTrail(@Req() request: RequestWithUser, @Query('branchId') branchId?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.service.auditTrail(request.tenant!.id, branchId, Number(page) || 1, Math.min(Number(pageSize) || 25, 100)); }
+
+  @Get('locations') @RequirePermissions('inventory.read')
+  locations(@Req() request: RequestWithUser, @Query('branchId') branchId?: string) { return this.service.listLocations(request.tenant!.id, branchId); }
+
+  @Post('locations') @RequirePermissions('inventory.manage')
+  createLocation(@Req() request: RequestWithUser, @Body() dto: CreateInventoryLocationDto) { request.auditAction = 'INVENTORY_LOCATION_CREATED'; return this.service.createLocation(request.tenant!.id, dto); }
+
+  @Get('warehouse') @RequirePermissions('inventory.read')
+  warehouse(@Req() request: RequestWithUser, @Query() query: ListInventoryWarehouseDto) { return this.service.warehouse(request.tenant!.id, query); }
+
+  @Post('warehouse/adjustments') @RequirePermissions('inventory.manage')
+  adjust(@Req() request: RequestWithUser, @Body() dto: AdjustInventoryStockDto) { request.auditAction = 'INVENTORY_STOCK_ADJUSTED'; return this.service.adjustStock(request.tenant!.id, request.user.sub, dto); }
+
+  @Post('warehouse/counts') @RequirePermissions('inventory.manage')
+  count(@Req() request: RequestWithUser, @Body() dto: CountInventoryStockDto) { request.auditAction = 'INVENTORY_STOCK_COUNTED'; return this.service.countStock(request.tenant!.id, request.user.sub, dto); }
+
+  @Patch('warehouse/policy') @RequirePermissions('inventory.manage')
+  updateStockPolicy(@Req() request: RequestWithUser, @Body() dto: UpdateInventoryStockPolicyDto) { request.auditAction = 'INVENTORY_STOCK_POLICY_UPDATED'; return this.service.updateStockPolicy(request.tenant!.id, dto); }
+
+  @Get('suppliers') @RequirePermissions('inventory.read') suppliers(@Req() request: RequestWithUser) { return this.service.listSuppliers(request.tenant!.id); }
+  @Post('suppliers') @RequirePermissions('inventory.manage') supplier(@Req() request: RequestWithUser, @Body() dto: CreateInventorySupplierDto) { request.auditAction = 'INVENTORY_SUPPLIER_CREATED'; return this.service.createSupplier(request.tenant!.id, dto); }
+  @Get('purchase-orders') @RequirePermissions('inventory.read') purchaseOrders(@Req() request: RequestWithUser, @Query('branchId') branchId?: string) { return this.service.listPurchaseOrders(request.tenant!.id, branchId); }
+  @Post('purchase-orders') @RequirePermissions('inventory.manage') purchaseOrder(@Req() request: RequestWithUser, @Body() dto: CreatePurchaseOrderDto) { request.auditAction = 'INVENTORY_PURCHASE_ORDER_CREATED'; return this.service.createPurchaseOrder(request.tenant!.id, request.user.sub, dto); }
+  @Post('purchase-orders/:id/approve') @RequirePermissions('inventory.manage') approvePurchaseOrder(@Req() request: RequestWithUser, @Param('id') id: string) { request.auditAction = 'INVENTORY_PURCHASE_ORDER_APPROVED'; return this.service.approvePurchaseOrder(request.tenant!.id, id, request.user.sub); }
+  @Post('purchase-orders/:id/receive') @RequirePermissions('inventory.manage') receivePurchaseOrder(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ReceivePurchaseOrderDto) { request.auditAction = 'INVENTORY_PURCHASE_ORDER_RECEIVED'; return this.service.receivePurchaseOrder(request.tenant!.id, id, request.user.sub, dto); }
+  @Get('maintenance') @RequirePermissions('inventory.read') maintenance(@Req() request: RequestWithUser) { return this.service.listMaintenance(request.tenant!.id); }
+  @Post('maintenance') @RequirePermissions('inventory.manage') createMaintenance(@Req() request: RequestWithUser, @Body() dto: CreateInventoryMaintenanceDto) { request.auditAction = 'INVENTORY_MAINTENANCE_CREATED'; return this.service.createMaintenance(request.tenant!.id, request.user.sub, dto); }
+  @Post('maintenance/:id/resolve') @RequirePermissions('inventory.manage') resolveMaintenance(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ResolveInventoryMaintenanceDto) { request.auditAction = 'INVENTORY_MAINTENANCE_RESOLVED'; return this.service.resolveMaintenance(request.tenant!.id, id, request.user.sub, dto); }
+
+  @Get('warehouse/movements/export') @RequirePermissions('inventory.read')
+  async exportMovements(@Req() request: RequestWithUser, @Query('branchId') branchId: string | undefined, @Res() response: Response) { const rows = await this.service.exportMovements(request.tenant!.id, branchId); const escape = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`; const csv = ["fecha,tipo,itemId,sucursalId,cantidad,saldo,motivo,actor", ...rows.map((row) => [row.occurredAt.toISOString(), row.type, row.itemId, row.branchId, row.quantity, row.balanceAfter, row.reason, row.actorUserId].map(escape).join(','))].join('\n'); response.setHeader('Content-Type', 'text/csv; charset=utf-8'); response.setHeader('Content-Disposition', 'attachment; filename="movimientos-inventario.csv"'); response.send(csv); }
+
   @Post('catalog') @RequirePermissions('inventory.manage')
   createCatalog(@Req() request: RequestWithUser, @Body() dto: CreateInventoryItemDto) {
     request.auditAction = 'INVENTORY_CATALOG_ITEM_CREATED';
@@ -40,6 +77,12 @@ export class InventoryController {
 
   @Get('assets') @RequirePermissions('inventory.read')
   assets(@Req() request: RequestWithUser, @Query() query: ListInventoryAssetsDto) { return this.service.listAssets(request.tenant!.id, query); }
+
+  @Get('my-assets') @RequirePermissions('inventory.read')
+  myAssets(@Req() request: RequestWithUser) { return this.service.listMyAssets(request.tenant!.id, request.user.sub); }
+
+  @Get('assets/lookup/:assetTag') @RequirePermissions('inventory.read')
+  lookupAsset(@Req() request: RequestWithUser, @Param('assetTag') assetTag: string) { return this.service.findAssetByTag(request.tenant!.id, assetTag); }
 
   @Get('assets/:id') @RequirePermissions('inventory.read')
   asset(@Req() request: RequestWithUser, @Param('id') id: string) { return this.service.getAsset(request.tenant!.id, id); }

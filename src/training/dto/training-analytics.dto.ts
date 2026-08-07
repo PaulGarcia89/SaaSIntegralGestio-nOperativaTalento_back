@@ -9,6 +9,7 @@ import {
   IsEnum,
   IsString,
   IsUUID,
+  IsObject,
   Max,
   MaxLength,
   Min,
@@ -133,4 +134,12 @@ export class UpdateTrainingImprovementDto {
   @IsString()
   @MaxLength(2000)
   outcomeNotes?: string;
+}
+
+export class CaptureTrainingIntelligenceDto {
+  @IsEnum(['ROLE_PROFILE', 'ASSESSMENT', 'CAREER_PLAN', 'FEEDBACK_360', 'ROI', 'FORECAST'] as const)
+  type!: 'ROLE_PROFILE' | 'ASSESSMENT' | 'CAREER_PLAN' | 'FEEDBACK_360' | 'ROI' | 'FORECAST';
+
+  @IsObject()
+  payload!: Record<string, unknown>;
 }
