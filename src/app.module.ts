@@ -46,6 +46,7 @@ import { PlanLimitsModule } from './plan-limits/plan-limits.module';
 import { JobOffersModule } from './job-offers/job-offers.module';
 import { AtsFileStorageModule } from './common/files/ats-file-storage.module';
 import { EnterpriseIntegrationsModule } from './enterprise-integrations/enterprise-integrations.module';
+import { ProductivityModule } from './productivity/productivity.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { EnterpriseIntegrationsModule } from './enterprise-integrations/enterpri
     PrismaModule,
     AtsFileStorageModule,
     EnterpriseIntegrationsModule,
+    ProductivityModule,
     PlanLimitsModule,
     AccessControlModule,
     PlatformModule,

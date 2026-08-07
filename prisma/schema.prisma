@@ -2364,6 +2364,104 @@ model ProductivityReview {
   @@index([employeeId])
 }
 
+model ProductivityCamera {
+  id              String   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  name            String
+  description     String?
+  sourceType      String   @default("RTSP")
+  streamUrlEncrypted String?
+  status          String   @default("OFFLINE")
+  lastHeartbeatAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([tenantId, branchId, status])
+}
+
+model ProductivityZone {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  branchId           String
+  cameraId           String
+  name               String
+  description        String?
+  polygonCoordinates Json
+  zoneType           String
+  status             String   @default("ACTIVE")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  @@index([tenantId, cameraId, status])
+}
+
+model ProductivityEvent {
+  id              String   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  cameraId        String
+  zoneId          String?
+  employeeId      String?
+  idempotencyKey  String
+  eventType       String
+  startedAt       DateTime
+  endedAt         DateTime?
+  durationSeconds Int?
+  confidence      Float?
+  metadata        Json?
+  source          String   @default("CV_SERVICE")
+  createdAt       DateTime @default(now())
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, branchId, startedAt])
+  @@index([tenantId, zoneId, startedAt])
+}
+
+model ProductivitySummary {
+  id              String   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  zoneId          String?
+  employeeId      String?
+  date            DateTime
+  activeSeconds   Int      @default(0)
+  idleSeconds     Int      @default(0)
+  taskCount       Int      @default(0)
+  averageTaskDuration Float?
+  productivityScore Float?
+  confidence      Float?
+  calculatedAt    DateTime @default(now())
+  @@index([tenantId, branchId, date])
+}
+
+model ProductivityAlertRule {
+  id          String   @id @default(uuid())
+  tenantId    String
+  branchId    String?
+  zoneId      String?
+  name        String
+  ruleType    String
+  threshold   Int
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([tenantId, enabled])
+}
+
+model ProductivityAlert {
+  id          String   @id @default(uuid())
+  tenantId    String
+  branchId    String
+  cameraId    String?
+  zoneId      String?
+  ruleId      String?
+  status      String   @default("OPEN")
+  title       String
+  description String
+  createdAt   DateTime @default(now())
+  acknowledgedAt DateTime?
+  closedAt    DateTime?
+  @@index([tenantId, branchId, status, createdAt])
+}
+
 model PerformanceObjective {
   id              String          @id @default(uuid())
   tenantId        String

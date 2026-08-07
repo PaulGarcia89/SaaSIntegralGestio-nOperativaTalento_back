@@ -1,0 +1,2 @@
+import { Module } from '@nestjs/common'; import { ModuleAccessGuard } from '../common/guards/module-access.guard'; import { SubscriptionGuard } from '../common/guards/subscription.guard'; import { ProductivityController, ProductivityInternalController } from './productivity.controller'; import { ProductivityService } from './productivity.service';
+@Module({controllers:[ProductivityController,ProductivityInternalController],providers:[ProductivityService,SubscriptionGuard,ModuleAccessGuard]}) export class ProductivityModule {}
