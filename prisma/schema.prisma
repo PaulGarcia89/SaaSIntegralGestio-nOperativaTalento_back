@@ -2024,6 +2024,9 @@ model OnboardingRetentionPolicy {
   documentCategory String
   retentionDays   Int
   legalBasis      String?
+  legalReviewStatus String @default("DRAFT")
+  reviewedById    String?
+  reviewedAt      DateTime?
   isActive        Boolean  @default(true)
   createdById     String
   createdAt       DateTime @default(now())

@@ -11,7 +11,7 @@ import { ScopeGuard } from '../common/guards/scope.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
-import { ApplyOnboardingTemplateDto, ApproveOnboardingTemplateDto, BulkApplyOnboardingTemplateDto, CreateOnboardingLegalHoldDto, CreateOnboardingLibraryItemDto, CreateOnboardingTemplateDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, ReviseOnboardingTemplateDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto, UpsertOnboardingRetentionPolicyDto } from './dto/onboarding.dto';
+import { ApplyOnboardingTemplateDto, ApproveOnboardingRetentionPolicyDto, ApproveOnboardingTemplateDto, BulkApplyOnboardingTemplateDto, CreateOnboardingLegalHoldDto, CreateOnboardingLibraryItemDto, CreateOnboardingTemplateDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, ReviseOnboardingTemplateDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto, UpsertOnboardingRetentionPolicyDto } from './dto/onboarding.dto';
 import { OnboardingService } from './onboarding.service';
 import { OnboardingAutomationService } from './onboarding-automation.service';
 import { CandidatePreboardingService } from './candidate-preboarding.service';
@@ -100,6 +100,13 @@ export class OnboardingController {
   saveRetentionPolicy(@Req() request: RequestWithUser, @Body() dto: UpsertOnboardingRetentionPolicyDto) {
     request.auditAction = 'ONBOARDING_RETENTION_POLICY_SAVED';
     return this.service.upsertRetentionPolicy(request.tenant!.id, request.user.sub, dto);
+  }
+
+  @Post('compliance/retention-policies/:id/approve')
+  @RequirePermissions('applications.update')
+  approveRetentionPolicy(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: ApproveOnboardingRetentionPolicyDto) {
+    request.auditAction = 'ONBOARDING_RETENTION_POLICY_APPROVED';
+    return this.service.approveRetentionPolicy(request.tenant!.id, request.user.sub, id, dto);
   }
 
   @Get('compliance/signature-evidence')

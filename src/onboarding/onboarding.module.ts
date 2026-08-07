@@ -9,11 +9,12 @@ import { TrainingModule } from '../training/training.module';
 import { ApplicationsModule } from '../applications/applications.module';
 import { CandidatePreboardingService } from './candidate-preboarding.service';
 import { OnboardingAnalyticsService } from './onboarding-analytics.service';
+import { OnboardingRetentionService } from './onboarding-retention.service';
 
 @Module({
   imports: [TrainingModule, ApplicationsModule],
   controllers: [OnboardingController, CandidatePreboardingController],
-  providers: [OnboardingService, OnboardingDocumentStorageService, OnboardingAutomationService, OnboardingAnalyticsService, CandidatePreboardingService, SubscriptionGuard, ModuleAccessGuard],
+  providers: [OnboardingService, OnboardingDocumentStorageService, OnboardingAutomationService, OnboardingAnalyticsService, OnboardingRetentionService, CandidatePreboardingService, SubscriptionGuard, ModuleAccessGuard],
   exports: [OnboardingService],
 })
 export class OnboardingModule {}

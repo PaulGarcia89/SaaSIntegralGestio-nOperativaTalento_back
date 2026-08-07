@@ -86,6 +86,10 @@ export class CreateOnboardingLegalHoldDto {
   @IsOptional() @IsString() @MaxLength(160) reference?: string;
 }
 
+export class ApproveOnboardingRetentionPolicyDto {
+  @IsOptional() @IsString() @MaxLength(500) reviewNote?: string;
+}
+
 export class ReorderOnboardingTaskItemDto { @IsUUID() id!: string; @IsInt() @Min(0) sortOrder!: number; }
 export class ReorderOnboardingTasksDto {
   @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => ReorderOnboardingTaskItemDto)
