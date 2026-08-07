@@ -47,6 +47,7 @@ const permissionCatalog = [
   'training.analytics.read', 'training.compliance.manage', 'training.reports.export',
   'training.integrations.manage',
   'inventory.read', 'inventory.manage',
+  'productivity.view', 'productivity.manage',
   'users.read', 'users.create', 'users.update', 'users.delete',
   'employees.read', 'employees.create', 'employees.update', 'employees.delete',
   'roles.read', 'roles.create', 'roles.update', 'roles.delete',
