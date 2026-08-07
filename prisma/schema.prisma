@@ -1116,6 +1116,8 @@ model Tenant {
   employeeReferrals             EmployeeReferral[]
   recruitmentSourceCosts        RecruitmentSourceCost[]
   hiringQualityReviews          HiringQualityReview[]
+  performanceObjectives         PerformanceObjective[]
+  performanceEvaluations        PerformanceEvaluation[]
   branches                      Branch[]
   employees                     Employee[]
   employeeBranches              EmployeeBranch[]
@@ -1283,6 +1285,8 @@ model User {
   triggeredWorkflows                 MasterWorkflow[]                  @relation("WorkflowTriggeredBy")
   operationalEvents                  OperationalEvent[]                @relation("OperationalEventActor")
   productivityReviews                ProductivityReview[]              @relation("ProductivityReviewActor")
+  createdPerformanceObjectives        PerformanceObjective[]           @relation("PerformanceObjectiveCreator")
+  completedPerformanceEvaluations     PerformanceEvaluation[]          @relation("PerformanceEvaluationEvaluator")
   createdAutomationRules             AutomationRule[]                  @relation("AutomationRuleCreatedBy")
   automationExecutions               AutomationExecution[]             @relation("AutomationExecutionActor")
   automationAuditLogs                AutomationAuditLog[]              @relation("AutomationAuditActor")
@@ -1828,6 +1832,8 @@ model MasterWorkflow {
   workflowTrainingAssignments WorkflowTrainingAssignment[]
   accessTasks                 AccessTask[]
   productivityReviews         ProductivityReview[]
+  performanceObjectives       PerformanceObjective[]
+  performanceEvaluations      PerformanceEvaluation[]
   operationalEvents           OperationalEvent[]
   onboardingTasks             OnboardingTask[]
   blockers                    WorkflowBlocker[]
@@ -2358,6 +2364,55 @@ model ProductivityReview {
   @@index([employeeId])
 }
 
+model PerformanceObjective {
+  id              String          @id @default(uuid())
+  tenantId        String
+  branchId        String
+  workflowId      String
+  employeeId      String
+  createdByUserId String?
+  title           String
+  description     String?
+  targetValue     Int             @default(100)
+  currentValue    Int             @default(0)
+  weight          Int             @default(1)
+  dueDate         DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow        MasterWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdByUser   User?           @relation("PerformanceObjectiveCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, branchId, employeeId])
+  @@index([workflowId, dueDate])
+}
+
+model PerformanceEvaluation {
+  id              String          @id @default(uuid())
+  tenantId        String
+  branchId        String
+  workflowId      String
+  employeeId      String
+  evaluatorUserId String?
+  periodDays      Int
+  score           Int
+  notes           String?
+  completedAt     DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow        MasterWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  evaluatorUser   User?           @relation("PerformanceEvaluationEvaluator", fields: [evaluatorUserId], references: [id], onDelete: SetNull)
+
+  @@unique([workflowId, periodDays])
+  @@index([tenantId, branchId, employeeId])
+}
+
 model OperationalEvent {
   id            String               @id @default(uuid())
   tenantId      String
@@ -2433,6 +2488,8 @@ model Branch {
   workflowTrainingAssignments   WorkflowTrainingAssignment[]
   accessTasks                   AccessTask[]
   productivityReviews           ProductivityReview[]
+  performanceObjectives         PerformanceObjective[]
+  performanceEvaluations        PerformanceEvaluation[]
   operationalEvents             OperationalEvent[]
   WorkflowBlocker               WorkflowBlocker[]
   automationRules               AutomationRule[]
@@ -2490,6 +2547,8 @@ model Employee {
   inventoryMovements          InventoryMovement[]
   trainingActivations         TrainingActivation[]
   hiringQualityReviews        HiringQualityReview[]
+  performanceObjectives       PerformanceObjective[]
+  performanceEvaluations      PerformanceEvaluation[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, sourceCandidateId])

@@ -90,6 +90,21 @@ export class ApproveOnboardingRetentionPolicyDto {
   @IsOptional() @IsString() @MaxLength(500) reviewNote?: string;
 }
 
+export class CreatePerformanceObjectiveDto {
+  @IsString() @MaxLength(160) title!: string;
+  @IsOptional() @IsString() @MaxLength(2000) description?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(1000000) targetValue?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(1000000) currentValue?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(100) weight?: number;
+  @IsOptional() @IsDateString() dueDate?: string;
+}
+
+export class CreatePerformanceEvaluationDto {
+  @IsInt() @IsIn([30, 60, 90]) periodDays!: number;
+  @IsInt() @Min(0) @Max(100) score!: number;
+  @IsOptional() @IsString() @MaxLength(4000) notes?: string;
+}
+
 export class ReorderOnboardingTaskItemDto { @IsUUID() id!: string; @IsInt() @Min(0) sortOrder!: number; }
 export class ReorderOnboardingTasksDto {
   @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => ReorderOnboardingTaskItemDto)

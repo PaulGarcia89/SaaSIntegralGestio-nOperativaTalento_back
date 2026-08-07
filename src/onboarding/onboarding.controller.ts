@@ -11,12 +11,13 @@ import { ScopeGuard } from '../common/guards/scope.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
-import { ApplyOnboardingTemplateDto, ApproveOnboardingRetentionPolicyDto, ApproveOnboardingTemplateDto, BulkApplyOnboardingTemplateDto, CreateOnboardingLegalHoldDto, CreateOnboardingLibraryItemDto, CreateOnboardingTemplateDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, ReviseOnboardingTemplateDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto, UpsertOnboardingRetentionPolicyDto } from './dto/onboarding.dto';
+import { ApplyOnboardingTemplateDto, ApproveOnboardingRetentionPolicyDto, ApproveOnboardingTemplateDto, BulkApplyOnboardingTemplateDto, CreateOnboardingLegalHoldDto, CreateOnboardingLibraryItemDto, CreateOnboardingTemplateDto, CreatePerformanceEvaluationDto, CreatePerformanceObjectiveDto, OnboardingTemplateTaskDto, ReorderOnboardingTasksDto, ReviewEmployeeDocumentDto, ReviseOnboardingTemplateDto, UpdateEmployeeDocumentLifecycleDto, UpdateOnboardingTaskDto, UpdateOnboardingTemplateStatusDto, UpsertOnboardingRetentionPolicyDto } from './dto/onboarding.dto';
 import { OnboardingService } from './onboarding.service';
 import { OnboardingAutomationService } from './onboarding-automation.service';
 import { CandidatePreboardingService } from './candidate-preboarding.service';
 import { CandidateAuthGuard, CandidateRequest } from '../applications/candidate-auth.guard';
 import { OnboardingAnalyticsService } from './onboarding-analytics.service';
+import { OnboardingPerformanceService } from './onboarding-performance.service';
 
 const allowedDocumentTypes = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 
@@ -24,7 +25,7 @@ const allowedDocumentTypes = new Set(['application/pdf', 'image/jpeg', 'image/pn
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
 @RequireModule(ModuleCode.ONBOARDING)
 export class OnboardingController {
-  constructor(private readonly service: OnboardingService, private readonly automation: OnboardingAutomationService, private readonly analytics: OnboardingAnalyticsService) {}
+  constructor(private readonly service: OnboardingService, private readonly automation: OnboardingAutomationService, private readonly analytics: OnboardingAnalyticsService, private readonly performance: OnboardingPerformanceService) {}
 
   @Get('analytics')
   @RequirePermissions('applications.read')
@@ -134,6 +135,26 @@ export class OnboardingController {
   @RequirePermissions('applications.read')
   flow(@Req() request: RequestWithUser, @Param('id') id: string) {
     return this.service.getFlow(request.tenant!.id, id, request.user);
+  }
+
+  @Get('flows/:id/performance')
+  @RequirePermissions('applications.read')
+  performanceOverview(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.performance.overview(request.tenant!.id, request.user, id);
+  }
+
+  @Post('flows/:id/performance/objectives')
+  @RequirePermissions('applications.update')
+  createPerformanceObjective(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: CreatePerformanceObjectiveDto) {
+    request.auditAction = 'ONBOARDING_PERFORMANCE_OBJECTIVE_CREATED';
+    return this.performance.createObjective(request.tenant!.id, request.user, id, dto);
+  }
+
+  @Post('flows/:id/performance/evaluations')
+  @RequirePermissions('applications.update')
+  recordPerformanceEvaluation(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: CreatePerformanceEvaluationDto) {
+    request.auditAction = 'ONBOARDING_PERFORMANCE_EVALUATION_RECORDED';
+    return this.performance.recordEvaluation(request.tenant!.id, request.user, id, dto);
   }
 
   @Post('flows/:id/apply-template')

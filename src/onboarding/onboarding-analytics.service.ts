@@ -20,7 +20,8 @@ export class OnboardingAnalyticsService {
       include: {
         branch: { select: { id: true, name: true } }, template: { select: { id: true, name: true, version: true } },
         candidate: { select: { accountId: true } },
-        employee: { select: { jobTitle: true, productivityReviews: { where: { status: 'COMPLETED', completedAt: { not: null } }, select: { completedAt: true } } } },
+        employee: { select: { jobTitle: true } },
+        workflow: { select: { performanceEvaluations: { where: { score: { gte: 70 } }, select: { completedAt: true } } } },
         tasks: { select: { title: true, taskType: true, ownerType: true, ownerId: true, status: true, createdAt: true, updatedAt: true, completedAt: true, dueDate: true, required: true, blockingReason: true } },
         documents: { where: { deletedAt: null, status: { not: 'SUPERSEDED' } }, select: { status: true } },
       },
@@ -48,7 +49,7 @@ export class OnboardingAnalyticsService {
     const comparison = (key: (flow: typeof flows[number]) => string) => Object.entries(flows.reduce<Record<string, { total: number; completed: number; hours: number[] }>>((acc, flow) => { const label = key(flow) || 'Sin definir'; const entry = acc[label] ??= { total: 0, completed: 0, hours: [] }; entry.total++; if (flow.status === WorkflowTaskStatus.COMPLETED) entry.completed++; if (flow.completedAt) entry.hours.push((flow.completedAt.getTime() - flow.startedAt.getTime()) / 3_600_000); return acc; }, {})).map(([label, value]) => ({ label, total: value.total, completionRate: value.total ? Math.round(value.completed / value.total * 100) : 0, averageCompletionHours: average(value.hours) })).sort((a, b) => b.total - a.total);
     const requiredDocumentTasks = flows.flatMap((flow) => flow.tasks.filter((task) => task.required && task.taskType === 'DOCUMENT_COLLECTION'));
     const approvedDocuments = flows.flatMap((flow) => flow.documents).filter((document) => document.status === 'APPROVED').length;
-    const productivityHours = completed.flatMap((flow) => flow.employee.productivityReviews.map((review) => review.completedAt ? (review.completedAt.getTime() - flow.startedAt.getTime()) / 3_600_000 : null).filter((value): value is number => value !== null));
+    const productivityHours = completed.flatMap((flow) => flow.workflow.performanceEvaluations.map((evaluation) => (evaluation.completedAt.getTime() - flow.startedAt.getTime()) / 3_600_000));
     return {
       summary: { totalFlows: flows.length, completionRate: flows.length ? Math.round(completed.length / flows.length * 100) : 0, documentComplianceRate: requiredDocumentTasks.length ? Math.min(100, Math.round(approvedDocuments / requiredDocumentTasks.length * 100)) : 0, averageTimeToProductivityHours: average(productivityHours), atRisk: risks.filter((risk) => risk.level !== 'LOW').length },
       timeByStage: byTask, timeByResponsible: byOwner, risks: risks.filter((risk) => risk.level !== 'LOW').sort((a, b) => b.score - a.score).slice(0, 50),
