@@ -43,6 +43,12 @@ export class TrainingAnalyticsController {
     return this.service.effectiveness(request.tenant!.id, query);
   }
 
+  @Get('intelligence')
+  @RequirePermissions('training.analytics.read')
+  intelligence(@Req() request: RequestWithUser) {
+    return this.service.intelligence(request.tenant!.id);
+  }
+
   @Get('improvements')
   @RequirePermissions('training.analytics.read')
   improvements(@Req() request: RequestWithUser, @Query() query: ListTrainingImprovementsDto) {

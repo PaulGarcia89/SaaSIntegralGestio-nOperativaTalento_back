@@ -5710,3 +5710,123 @@ model TrainingAnalyticsSnapshot {
 
   @@index([tenantId, userId, generatedAt])
 }
+
+// Learning intelligence records remain tenant-scoped and never aggregate identifiable data across companies.
+model TrainingRoleCompetencyProfile {
+  id           String   @id @default(uuid())
+  tenantId     String
+  branchId     String?
+  jobTitle     String
+  competencyId String
+  targetLevel  TrainingCompetencyLevel
+  weight       Int      @default(1)
+  isRequired   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([tenantId, branchId, jobTitle, competencyId])
+  @@index([tenantId, jobTitle])
+}
+
+model TrainingCompetencyAssessment {
+  id           String   @id @default(uuid())
+  tenantId     String
+  userId       String
+  competencyId String
+  assessorId   String?
+  source       String   @default("MANUAL")
+  score        Int
+  targetScore  Int?
+  evidence     Json?
+  assessedAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, userId, competencyId, assessedAt])
+}
+
+model TrainingCareerPlan {
+  id             String   @id @default(uuid())
+  tenantId       String
+  userId         String
+  ownerId        String?
+  targetRole     String
+  title          String
+  status         String   @default("ACTIVE")
+  targetDate     DateTime?
+  progressPercent Int     @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, userId, status])
+}
+
+model TrainingCareerPlanStep {
+  id          String   @id @default(uuid())
+  tenantId    String
+  planId      String
+  courseId    String?
+  competencyId String?
+  title       String
+  status      String   @default("PENDING")
+  dueAt       DateTime?
+  completedAt DateTime?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, planId, sortOrder])
+}
+
+model TrainingFeedback360 {
+  id            String   @id @default(uuid())
+  tenantId      String
+  courseId      String?
+  subjectUserId String?
+  respondentId  String?
+  kind          String   @default("COURSE")
+  rating        Int
+  npsScore      Int?
+  dimensions    Json?
+  comment       String?
+  isAnonymous   Boolean  @default(false)
+  submittedAt   DateTime @default(now())
+
+  @@index([tenantId, courseId, submittedAt])
+  @@index([tenantId, subjectUserId, submittedAt])
+}
+
+model TrainingRoiMeasurement {
+  id              String   @id @default(uuid())
+  tenantId        String
+  courseId        String?
+  periodStart     DateTime
+  periodEnd       DateTime
+  participantCount Int    @default(0)
+  costAmount      Decimal @default(0) @db.Decimal(14, 2)
+  benefitAmount   Decimal @default(0) @db.Decimal(14, 2)
+  currency        String  @default("USD")
+  productivityDelta Decimal? @db.Decimal(8, 2)
+  qualityDelta      Decimal? @db.Decimal(8, 2)
+  retentionDelta    Decimal? @db.Decimal(8, 2)
+  evidence        Json?
+  createdById     String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, courseId, periodStart])
+}
+
+model TrainingForecastSnapshot {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  courseId             String?
+  cohortKey            String
+  dueDate              DateTime?
+  assigned             Int      @default(0)
+  completed            Int      @default(0)
+  projectedCompletionRate Int   @default(0)
+  projectedOverdue     Int      @default(0)
+  benchmark            Json?
+  generatedAt          DateTime @default(now())
+
+  @@index([tenantId, courseId, generatedAt])
+  @@index([tenantId, cohortKey, generatedAt])
+}

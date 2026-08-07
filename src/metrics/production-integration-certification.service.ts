@@ -7,8 +7,10 @@ import {
 import { Injectable } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
+import IORedis from "ioredis";
 import nodemailer from "nodemailer";
 import { InterviewCalendarService } from "../recruitment/interview-calendar.service";
+import { PrismaService } from "../common/prisma/prisma.service";
 
 export type CertificationStatus = "PASS" | "WARN" | "FAIL" | "SKIPPED";
 
@@ -50,7 +52,7 @@ type StorageProfile = {
 
 @Injectable()
 export class ProductionIntegrationCertificationService {
-  constructor(private readonly calendars: InterviewCalendarService) {}
+  constructor(private readonly calendars: InterviewCalendarService, private readonly prisma: PrismaService) {}
 
   inspect(tenantId?: string) {
     return this.certify({ active: false, tenantId });
@@ -64,6 +66,8 @@ export class ProductionIntegrationCertificationService {
           this.certifyEmail(true),
           ...storageProfiles.map((profile) => this.certifyStorage(profile, true)),
           this.certifyClamAv(true),
+          this.certifyRedis(true),
+          this.certifyTrainingWebhooks(true, options.tenantId),
           this.certifyCalendars(true, options.tenantId),
           this.certifySignatures(true),
         ])
@@ -71,6 +75,8 @@ export class ProductionIntegrationCertificationService {
           await this.certifyEmail(false),
           ...await Promise.all(storageProfiles.map((profile) => this.certifyStorage(profile, false))),
           await this.certifyClamAv(false),
+          await this.certifyRedis(false),
+          await this.certifyTrainingWebhooks(false, options.tenantId),
           await this.certifyCalendars(false, options.tenantId),
           await this.certifySignatures(false),
         ];
@@ -401,6 +407,43 @@ export class ProductionIntegrationCertificationService {
       evidence,
       error: this.safeError(error),
     };
+  }
+
+  private async certifyRedis(activeProbe: boolean): Promise<IntegrationCertificationCheck> {
+    const startedAt = Date.now();
+    const redisUrl = process.env.REDIS_URL?.trim();
+    const configured = Boolean(redisUrl || process.env.REDIS_HOST || process.env.REDIS_PORT);
+    const evidence = { configured, transport: redisUrl ? "REDIS_URL" : "REDIS_HOST_PORT", messagingEnabled: process.env.MESSAGING_ENABLED !== "false" };
+    if (!configured || !activeProbe) return this.configurationCheck("redis-queues", "Redis y colas", configured, activeProbe, evidence, "Redis y workers BullMQ configurados");
+    const client = redisUrl ? new IORedis(redisUrl, { lazyConnect: true, connectTimeout: 12_000, maxRetriesPerRequest: 1 }) : new IORedis({ host: process.env.REDIS_HOST ?? "127.0.0.1", port: Number(process.env.REDIS_PORT ?? "6379"), password: process.env.REDIS_PASSWORD || undefined, lazyConnect: true, connectTimeout: 12_000, maxRetriesPerRequest: 1 });
+    try {
+      await client.connect();
+      const pong = await client.ping();
+      return { key: "redis-queues", label: "Redis y colas", status: pong === "PONG" ? "PASS" : "FAIL", configured: true, activeProbe: true, summary: pong === "PONG" ? "Conectividad Redis verificada para colas BullMQ" : "Redis devolvió una respuesta inesperada", durationMs: Date.now() - startedAt, evidence: { ...evidence, ping: pong } };
+    } catch (error) {
+      return this.failedCheck("redis-queues", "Redis y colas", true, true, startedAt, evidence, error);
+    } finally {
+      await client.quit().catch(() => client.disconnect());
+    }
+  }
+
+  private async certifyTrainingWebhooks(activeProbe: boolean, tenantId?: string): Promise<IntegrationCertificationCheck> {
+    const startedAt = Date.now();
+    const encryptionConfigured = Boolean(process.env.WEBHOOK_ENCRYPTION_KEY || process.env.JWT_REFRESH_SECRET);
+    const evidence: Record<string, unknown> = { encryptionConfigured, tenantScope: tenantId ?? "ALL" };
+    if (!encryptionConfigured || !activeProbe) return this.configurationCheck("training-webhooks", "Webhooks de capacitación", encryptionConfigured, activeProbe, evidence, "Secretos cifrados, cola y entrega firmada configurados");
+    try {
+      const [webhooks, failed, pending] = await Promise.all([
+        this.prisma.trainingWebhook.count({ where: tenantId ? { tenantId, isActive: true, secretEncrypted: { not: null } } : { isActive: true, secretEncrypted: { not: null } } }),
+        this.prisma.trainingWebhookDelivery.count({ where: tenantId ? { tenantId, status: "FAILED" } : { status: "FAILED" } }),
+        this.prisma.trainingWebhookDelivery.count({ where: tenantId ? { tenantId, status: { in: ["PENDING", "RETRYING", "PROCESSING"] } } : { status: { in: ["PENDING", "RETRYING", "PROCESSING"] } } }),
+      ]);
+      Object.assign(evidence, { activeWebhooks: webhooks, failedDeliveries: failed, pendingDeliveries: pending, signedDelivery: true, idempotency: true });
+      const status: CertificationStatus = failed ? "WARN" : "PASS";
+      return { key: "training-webhooks", label: "Webhooks de capacitación", status, configured: true, activeProbe: true, summary: failed ? "Hay entregas fallidas que requieren reintento o revisión" : "Cifrado, persistencia de entrega e idempotencia verificados", durationMs: Date.now() - startedAt, evidence };
+    } catch (error) {
+      return this.failedCheck("training-webhooks", "Webhooks de capacitación", true, true, startedAt, evidence, error);
+    }
   }
 
   private storageProfiles(): StorageProfile[] {

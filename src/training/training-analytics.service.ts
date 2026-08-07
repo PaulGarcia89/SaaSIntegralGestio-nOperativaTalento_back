@@ -129,6 +129,24 @@ export class TrainingAnalyticsService {
     };
   }
 
+  async intelligence(tenantId: string) {
+    const [profiles, assessments, plans, feedback, roi, forecasts] = await Promise.all([
+      this.prisma.trainingRoleCompetencyProfile.findMany({ where: { tenantId }, orderBy: { updatedAt: 'desc' }, take: 500 }),
+      this.prisma.trainingCompetencyAssessment.findMany({ where: { tenantId }, orderBy: { assessedAt: 'desc' }, take: 1000 }),
+      this.prisma.trainingCareerPlan.findMany({ where: { tenantId }, orderBy: { updatedAt: 'desc' }, take: 500 }),
+      this.prisma.trainingFeedback360.findMany({ where: { tenantId }, orderBy: { submittedAt: 'desc' }, take: 1000 }),
+      this.prisma.trainingRoiMeasurement.findMany({ where: { tenantId }, orderBy: { periodEnd: 'desc' }, take: 200 }),
+      this.prisma.trainingForecastSnapshot.findMany({ where: { tenantId }, orderBy: { generatedAt: 'desc' }, take: 200 }),
+    ]);
+    const latestAssessment = new Map<string, typeof assessments[number]>();
+    for (const assessment of assessments) latestAssessment.set(`${assessment.userId}:${assessment.competencyId}`, assessment);
+    const gaps = profiles.flatMap((profile) => [...latestAssessment.values()].filter((assessment) => assessment.competencyId === profile.competencyId && assessment.score < (assessment.targetScore ?? 70)).map((assessment) => ({ userId: assessment.userId, competencyId: assessment.competencyId, score: assessment.score, targetScore: assessment.targetScore ?? 70, gap: (assessment.targetScore ?? 70) - assessment.score })));
+    const roiSummary = roi.reduce((total, item) => ({ cost: total.cost + Number(item.costAmount), benefit: total.benefit + Number(item.benefitAmount) }), { cost: 0, benefit: 0 });
+    const averageRating = feedback.length ? Number((feedback.reduce((total, item) => total + item.rating, 0) / feedback.length).toFixed(1)) : null;
+    const averageNps = feedback.filter((item) => item.npsScore !== null).length ? Number((feedback.filter((item) => item.npsScore !== null).reduce((total, item) => total + (item.npsScore ?? 0), 0) / feedback.filter((item) => item.npsScore !== null).length).toFixed(1)) : null;
+    return { competencyProfiles: profiles.length, assessments: assessments.length, gaps: gaps.sort((a, b) => b.gap - a.gap).slice(0, 100), careerPlans: { total: plans.length, active: plans.filter((plan) => plan.status === 'ACTIVE').length }, feedback: { responses: feedback.length, averageRating, averageNps }, roi: { measurements: roi.length, cost: roiSummary.cost, benefit: roiSummary.benefit, roiPercent: roiSummary.cost ? Math.round((roiSummary.benefit - roiSummary.cost) / roiSummary.cost * 100) : null }, forecasts: forecasts.slice(0, 100) };
+  }
+
   async effectiveness(tenantId: string, query: TrainingAnalyticsQueryDto) {
     const now = new Date();
     const courses = await this.prisma.trainingCourse.findMany({
