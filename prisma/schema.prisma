@@ -463,6 +463,12 @@ enum PlanCode {
   ENTERPRISE
 }
 
+enum CompanyRegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum ModuleCode {
   ATS
   ONBOARDING
@@ -1234,6 +1240,34 @@ model Tenant {
   assetAssignments              AssetAssignment[]
   trainingActivations           TrainingActivation[]
   platformTenantAccesses        PlatformTenantAccess[]
+}
+
+model CompanyRegistrationRequest {
+  id                  String                    @id @default(uuid())
+  companyName         String
+  branchName          String
+  branchLocation      String
+  adminName           String
+  adminEmail          String
+  passwordHash        String
+  plan                PlanCode
+  status              CompanyRegistrationStatus @default(PENDING)
+  termsVersion        String
+  privacyVersion      String
+  termsAcceptedAt     DateTime
+  privacyAcceptedAt   DateTime
+  marketingConsent    Boolean                   @default(false)
+  requestIpHash       String?
+  idempotencyKey      String                    @unique
+  reviewedByUserId    String?
+  reviewNotes         String?
+  reviewedAt          DateTime?
+  approvedTenantId    String?                   @unique
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([adminEmail, status])
 }
 
 model User {

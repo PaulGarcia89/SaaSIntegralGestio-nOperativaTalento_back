@@ -47,6 +47,7 @@ import { JobOffersModule } from './job-offers/job-offers.module';
 import { AtsFileStorageModule } from './common/files/ats-file-storage.module';
 import { EnterpriseIntegrationsModule } from './enterprise-integrations/enterprise-integrations.module';
 import { ProductivityModule } from './productivity/productivity.module';
+import { CompanyRegistrationsModule } from './company-registrations/company-registrations.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { ProductivityModule } from './productivity/productivity.module';
     AtsFileStorageModule,
     EnterpriseIntegrationsModule,
     ProductivityModule,
+    CompanyRegistrationsModule,
     PlanLimitsModule,
     AccessControlModule,
     PlatformModule,
