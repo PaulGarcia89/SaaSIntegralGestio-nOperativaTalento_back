@@ -7,6 +7,7 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
+import { BulkCreateEmployeesDto } from './dto/bulk-create-employees.dto';
 import { ListEmployeesDto } from './dto/list-employees.dto';
 import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
@@ -44,6 +45,58 @@ export class EmployeesService {
     });
 
     return this.findOne(employee.id, this.buildSystemActor(tenantId), tenantId);
+  }
+
+  async bulkCreate(tenantId: string, dto: BulkCreateEmployeesDto) {
+    const emails = dto.employees.map((employee) => employee.email.trim().toLowerCase());
+    const duplicateEmails = [...new Set(emails.filter((email, index) => emails.indexOf(email) !== index))];
+    if (duplicateEmails.length) {
+      throw new BadRequestException(`Duplicate emails in import: ${duplicateEmails.join(', ')}`);
+    }
+
+    const branchIds = [...new Set(dto.employees.map((employee) => employee.primaryBranchId))];
+    const branches = await this.prisma.branch.findMany({
+      where: { id: { in: branchIds }, tenantId },
+      select: { id: true },
+    });
+    if (branches.length !== branchIds.length) {
+      throw new BadRequestException('Every imported employee must belong to a branch in the current company');
+    }
+
+    const existing = await this.prisma.employee.findMany({
+      where: { tenantId, email: { in: emails, mode: 'insensitive' } },
+      select: { email: true },
+    });
+    if (existing.length) {
+      throw new BadRequestException(`Employees already exist: ${existing.map((employee) => employee.email).join(', ')}`);
+    }
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const employees = [] as Array<{ id: string; email: string }>;
+      for (const input of dto.employees) {
+        const employee = await tx.employee.create({
+          data: {
+            tenantId,
+            name: input.name.trim(),
+            email: input.email.trim().toLowerCase(),
+            status: input.status,
+          },
+        });
+        await tx.employeeBranch.create({
+          data: {
+            tenantId,
+            employeeId: employee.id,
+            branchId: input.primaryBranchId,
+            role: input.primaryRole.trim(),
+            isPrimary: true,
+          },
+        });
+        employees.push({ id: employee.id, email: employee.email });
+      }
+      return employees;
+    });
+
+    return { created: created.length, employees: created };
   }
 
   async findAll(tenantId: string, activeBranchId: string, query: ListEmployeesDto) {

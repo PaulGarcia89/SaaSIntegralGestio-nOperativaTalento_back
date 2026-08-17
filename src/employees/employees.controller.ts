@@ -7,6 +7,7 @@ import { ScopeGuard } from '../common/guards/scope.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { CurrentBranch } from '../common/decorators/current-branch.decorator';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
+import { BulkCreateEmployeesDto } from './dto/bulk-create-employees.dto';
 import { ListEmployeesDto } from './dto/list-employees.dto';
 import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
@@ -27,6 +28,12 @@ export class EmployeesController {
   @RequirePermissions('employees.create')
   create(@Req() request: RequestWithUser, @Body() dto: CreateEmployeeDto) {
     return this.employeesService.create(request.tenant!.id, dto);
+  }
+
+  @Post('bulk')
+  @RequirePermissions('employees.create')
+  bulkCreate(@Req() request: RequestWithUser, @Body() dto: BulkCreateEmployeesDto) {
+    return this.employeesService.bulkCreate(request.tenant!.id, dto);
   }
 
   @Get()
