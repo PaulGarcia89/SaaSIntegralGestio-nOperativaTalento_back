@@ -281,14 +281,9 @@ export class AuthContextService {
       ...payload.enabledModules.map((moduleCode) => `module.${moduleCode.toLowerCase()}`),
     ]);
 
-    if (
-      payload.isSuperAdmin ||
-      payload.permissions.some((permission) =>
-        ['tenants.', 'users.', 'roles.', 'subscriptions.', 'modules.'].some((prefix) =>
-          permission.startsWith(prefix),
-        ),
-      )
-    ) {
+    const canAccessGlobalGovernance = payload.isSuperAdmin && payload.isGlobalContext;
+
+    if (canAccessGlobalGovernance) {
       featureFlags.add('module.admin');
     }
 
@@ -320,6 +315,7 @@ export class AuthContextService {
       plan: tenantCapabilities.plan,
       subscription: tenantCapabilities.subscription,
       featureFlags: [...featureFlags],
+      canAccessGlobalGovernance,
       preferences: {},
       menu: tenantCapabilities.navigation,
       tenant: payload.activeTenantId
