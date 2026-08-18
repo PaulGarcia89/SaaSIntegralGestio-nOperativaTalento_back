@@ -7,5 +7,5 @@ SELECT r."id", p."id"
 FROM "Role" r
 JOIN "Permission" p
   ON p."code" IN ('employees.read', 'employees.create', 'employees.update')
-WHERE r."code" IN ('SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN', 'BRANCH_ADMIN')
+WHERE r."code" IN ('SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN', 'BRANCH_ADMIN', 'ADMIN')
 ON CONFLICT ("roleId", "permissionId") DO NOTHING;
