@@ -726,15 +726,17 @@ export class TrainingAdminService {
     ) {
       throw new ConflictException('Only draft or archived courses can be deleted');
     }
-    const dependencies = await this.prisma.trainingCourse.findUnique({
-      where: { id: courseId },
-      select: { _count: { select: { assignments: true, progressRecords: true } } },
-    });
-    if (
-      (dependencies?._count.assignments ?? 0) > 0 ||
-      (dependencies?._count.progressRecords ?? 0) > 0
-    ) {
-      throw new ConflictException('The course has assignments or progress and cannot be deleted');
+    if (course.status === TrainingCourseStatus.ARCHIVED) {
+      const dependencies = await this.prisma.trainingCourse.findUnique({
+        where: { id: courseId },
+        select: { _count: { select: { assignments: true, progressRecords: true } } },
+      });
+      if (
+        (dependencies?._count.assignments ?? 0) > 0 ||
+        (dependencies?._count.progressRecords ?? 0) > 0
+      ) {
+        throw new ConflictException('The course has assignments or progress and cannot be deleted');
+      }
     }
     await this.prisma.trainingCourse.delete({ where: { id: courseId } });
     return { deleted: true, id: courseId };

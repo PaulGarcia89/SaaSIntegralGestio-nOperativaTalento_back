@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { TrainingCourseStatus } from '@prisma/client';
 import { allowedTrainingCourseTransitions, TrainingAdminService } from './training-admin.service';
 
@@ -181,5 +181,52 @@ describe('training course content authoring', () => {
     expect(prisma.trainingContentBlock.create).toHaveBeenCalledWith({ data: expect.objectContaining({
       lessonId: 'lesson-1', title: 'Demo (copia)', content, sortOrder: 2,
     }) });
+  });
+});
+
+describe('training course deletion', () => {
+  const actor = { sub: 'author-1', tenantId: 'tenant-1', activeTenantId: 'tenant-1', isSuperAdmin: false } as any;
+
+  it('deletes a draft course and lets database cascades remove its dependencies', async () => {
+    const prisma = {
+      trainingCourse: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'course-1',
+          tenantId: 'tenant-1',
+          status: TrainingCourseStatus.DRAFT,
+        }),
+        delete: jest.fn().mockResolvedValue({ id: 'course-1' }),
+      },
+    };
+    const service = new TrainingAdminService(prisma as any, {} as any);
+
+    await expect(service.deleteCourse('tenant-1', actor, 'course-1')).resolves.toEqual({
+      deleted: true,
+      id: 'course-1',
+    });
+    expect(prisma.trainingCourse.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.trainingCourse.delete).toHaveBeenCalledWith({ where: { id: 'course-1' } });
+  });
+
+  it('keeps archived courses with assignments or progress protected', async () => {
+    const prisma = {
+      trainingCourse: {
+        findUnique: jest.fn()
+          .mockResolvedValueOnce({
+            id: 'course-1',
+            tenantId: 'tenant-1',
+            status: TrainingCourseStatus.ARCHIVED,
+          })
+          .mockResolvedValueOnce({
+            _count: { assignments: 1, progressRecords: 0 },
+          }),
+        delete: jest.fn(),
+      },
+    };
+    const service = new TrainingAdminService(prisma as any, {} as any);
+
+    await expect(service.deleteCourse('tenant-1', actor, 'course-1'))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.trainingCourse.delete).not.toHaveBeenCalled();
   });
 });
