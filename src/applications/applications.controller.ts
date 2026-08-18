@@ -51,6 +51,12 @@ export class ApplicationsController {
     return this.applicationsService.exportForTenant(user, request.tenant!.id, query);
   }
 
+  @Get('conversion-metrics')
+  @RequirePermissions('applications.read')
+  conversionMetrics(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload) {
+    return this.applicationsService.conversionMetrics(user, request.tenant!.id);
+  }
+
   @Patch('bulk/status')
   @RequirePermissions('applications.bulk_update')
   bulkUpdateStatus(

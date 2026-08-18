@@ -12,7 +12,7 @@ export class PublicApplicationsController {
 
   @Get('draft')
   getDraft(@Param('vacancyId') vacancyId: string, @Req() request: CandidateRequest, @Res({ passthrough: true }) response: Response) {
-    return this.applicationsService.getPublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', response);
+    return this.applicationsService.getPublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', response, request.ip);
   }
 
   @Put('draft')
@@ -22,12 +22,12 @@ export class PublicApplicationsController {
     @Body() body: PublicApplicationDraftDto,
     @Res({ passthrough: true }) response: Response,
   ) {
-    return this.applicationsService.savePublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', body.value, response);
+    return this.applicationsService.savePublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', body.value, response, request.ip);
   }
 
   @Delete('draft')
   deleteDraft(@Param('vacancyId') vacancyId: string, @Req() request: CandidateRequest, @Res({ passthrough: true }) response: Response) {
-    return this.applicationsService.deletePublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', response);
+    return this.applicationsService.deletePublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', response, request.ip);
   }
 
   @Post()

@@ -145,6 +145,7 @@ describe('ApplicationsService custom vacancy stages', () => {
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue(created),
       },
+      candidateConversionEvent: { upsert: jest.fn() },
     };
     const prisma = {
       vacancy: {
@@ -154,6 +155,13 @@ describe('ApplicationsService custom vacancy stages', () => {
           applicationFormSchema: null,
           stages: [initialStage],
         }),
+      },
+      publicRequestRateLimit: {
+        deleteMany: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
       },
       $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     };

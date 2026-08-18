@@ -28,4 +28,9 @@ export class BulkUpdateApplicationsDto {
   @IsString()
   @MaxLength(2000)
   reason?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  notes?: string;
 }

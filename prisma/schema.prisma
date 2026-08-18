@@ -422,6 +422,7 @@ enum ApplicationTimelineEventType {
   SLA_ESCALATED
   SLA_REASSIGNED
   RECRUITER_ASSIGNED
+  APPLICATION_UPDATED
   OFFER_CREATED
   OFFER_APPROVED
   OFFER_SENT
@@ -1141,6 +1142,7 @@ model Tenant {
   reportSavedFilters            ReportSavedFilter[]
   rejectionReasons              RecruitmentRejectionReason[]
   applications                  VacancyApplication[]
+  candidateConversionEvents     CandidateConversionEvent[]
   applicationInterviews         ApplicationInterview[]
   interviewScorecards           InterviewScorecard[]
   scorecardTemplates            ScorecardTemplate[]
@@ -1588,6 +1590,33 @@ model PublicApplicationDraft {
   vacancy    Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
 
   @@index([vacancyId, expiresAt])
+}
+
+model PublicRequestRateLimit {
+  id              String   @id @default(uuid())
+  keyHash         String   @unique
+  hits            Int      @default(0)
+  windowStartedAt DateTime
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+model CandidateConversionEvent {
+  id        String   @id @default(uuid())
+  eventKey  String   @unique
+  tenantId  String
+  vacancyId String
+  kind      String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy   Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, vacancyId, kind, createdAt])
 }
 
 model NotificationDelivery {
@@ -3069,6 +3098,7 @@ model Vacancy {
   jobBoardPostings       JobBoardPosting[]
   employeeReferrals      EmployeeReferral[]
   publicApplicationDrafts PublicApplicationDraft[]
+  candidateConversionEvents CandidateConversionEvent[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
@@ -3726,6 +3756,7 @@ model CandidateAccount {
   candidates                  Candidate[]
   tokens                      CandidateAccountToken[]
   privacyRequests             CandidatePrivacyRequest[]
+  supportRequests             CandidateSupportRequest[]
   externalIdentities          CandidateExternalIdentity[]
   uploadedOnboardingDocuments EmployeeDocument[]
 }
@@ -3755,6 +3786,20 @@ model CandidatePrivacyRequest {
   processedAt DateTime?
   updatedAt   DateTime                      @updatedAt
   account     CandidateAccount              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status, requestedAt])
+}
+
+model CandidateSupportRequest {
+  id          String   @id @default(uuid())
+  accountId   String
+  subject     String
+  message     String
+  status      String   @default("OPEN")
+  response    String?
+  requestedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  account     CandidateAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@index([accountId, status, requestedAt])
 }

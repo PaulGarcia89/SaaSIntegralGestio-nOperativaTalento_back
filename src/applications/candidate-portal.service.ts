@@ -4,7 +4,7 @@ import AdmZip from 'adm-zip';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
 import { TrainingAntivirusService } from '../training/training-antivirus.service';
-import { CreateCandidatePrivacyRequestDto } from './dto/candidate-self-service.dto';
+import { CreateCandidatePrivacyRequestDto, CreateCandidateSupportRequestDto } from './dto/candidate-self-service.dto';
 import { InterviewCalendarService } from '../recruitment/interview-calendar.service';
 
 @Injectable()
@@ -39,7 +39,7 @@ export class CandidatePortalService {
       select: { email: true },
     });
     if (!account) throw new NotFoundException('Candidate account not found');
-    const [communications, resumes, signatureDocuments, privacyRequests] = await Promise.all([
+    const [communications, resumes, signatureDocuments, privacyRequests, supportRequests] = await Promise.all([
       this.prisma.atsMessage.findMany({
         where: {
           audience: AtsCommunicationAudience.CANDIDATE,
@@ -47,7 +47,7 @@ export class CandidatePortalService {
         },
         select: {
           id: true, applicationId: true, type: true, subject: true, body: true,
-          status: true, deliveredAt: true, createdAt: true,
+          status: true, deliveredAt: true, readAt: true, createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
         take: 200,
@@ -72,6 +72,7 @@ export class CandidatePortalService {
         where: { accountId },
         orderBy: { requestedAt: 'desc' },
       }),
+      this.prisma.candidateSupportRequest.findMany({ where: { accountId }, orderBy: { requestedAt: 'desc' } }),
     ]);
     return {
       communications,
@@ -79,6 +80,7 @@ export class CandidatePortalService {
       resumes,
       signatureDocuments,
       privacyRequests,
+      supportRequests,
     };
   }
 
@@ -143,6 +145,16 @@ export class CandidatePortalService {
       where: { id: request.id },
       data: { status: CandidatePrivacyRequestStatus.CANCELLED, processedAt: new Date() },
     });
+  }
+
+  async markCommunicationRead(accountId: string, messageId: string) {
+    const message = await this.prisma.atsMessage.findFirst({ where: { id: messageId, audience: AtsCommunicationAudience.CANDIDATE, application: { candidate: this.candidateIdentityWhere(accountId) } }, select: { id: true } });
+    if (!message) throw new NotFoundException('Communication not found');
+    return this.prisma.atsMessage.update({ where: { id: message.id }, data: { readAt: new Date() }, select: { id: true, readAt: true } });
+  }
+
+  createSupportRequest(accountId: string, dto: CreateCandidateSupportRequestDto) {
+    return this.prisma.candidateSupportRequest.create({ data: { accountId, subject: dto.subject.trim(), message: dto.message.trim() } });
   }
 
   async parseResume(file: Express.Multer.File) {

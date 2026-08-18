@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -96,10 +98,6 @@ const PUBLIC_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PUBLIC_LIMIT_WINDOW_MS = 60 * 1000;
 const PUBLIC_LIMIT_MAX = 20;
 
-type PublicHitBucket = { count: number; resetAt: number };
-
-const publicHitBuckets = new Map<string, PublicHitBucket>();
-
 @Injectable()
 export class ApplicationsService {
   constructor(
@@ -112,9 +110,34 @@ export class ApplicationsService {
 
   listReferrals(user: JwtPayload, tenantId: string) { return this.prisma.employeeReferral.findMany({ where: { tenantId, referrerUserId: user.sub }, include: { vacancy: { select: { id: true, title: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }); }
 
-  async getPublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, response: Response) {
-    this.assertPublicRateLimit(`draft:get:${vacancyId}:${this.resolveClientKey(cookieHeader, response)}`);
+  async conversionMetrics(actor: JwtPayload, tenantId: string) {
+    const vacancies = await this.prisma.vacancy.findMany({
+      where: { tenantId, ...(actor.isSuperAdmin || actor.scope !== AccessScope.BRANCH ? {} : { branchId: { in: actor.allowedBranchIds } }) },
+      select: { id: true, title: true },
+    });
+    if (!vacancies.length) return { totals: { started: 0, paused: 0, resumed: 0, submitted: 0, completionRate: 0, resumeRate: 0 }, vacancies: [] };
+    const rows = await this.prisma.candidateConversionEvent.groupBy({
+      by: ["vacancyId", "kind"],
+      where: { tenantId, vacancyId: { in: vacancies.map((vacancy) => vacancy.id) } },
+      _count: { _all: true },
+    });
+    const byVacancy = new Map(vacancies.map((vacancy) => [vacancy.id, { vacancyId: vacancy.id, title: vacancy.title, started: 0, paused: 0, resumed: 0, submitted: 0 }]));
+    rows.forEach((row) => {
+      const metric = byVacancy.get(row.vacancyId);
+      if (!metric) return;
+      if (row.kind === "DRAFT_STARTED") metric.started = row._count._all;
+      if (row.kind === "DRAFT_PAUSED") metric.paused = row._count._all;
+      if (row.kind === "DRAFT_RESUMED") metric.resumed = row._count._all;
+      if (row.kind === "APPLICATION_SUBMITTED") metric.submitted = row._count._all;
+    });
+    const items = [...byVacancy.values()].map((item) => ({ ...item, completionRate: this.percentage(item.submitted, item.started), resumeRate: this.percentage(item.resumed, item.paused) })).sort((a, b) => b.started - a.started);
+    const totals = items.reduce((total, item) => ({ started: total.started + item.started, paused: total.paused + item.paused, resumed: total.resumed + item.resumed, submitted: total.submitted + item.submitted }), { started: 0, paused: 0, resumed: 0, submitted: 0 });
+    return { totals: { ...totals, completionRate: this.percentage(totals.submitted, totals.started), resumeRate: this.percentage(totals.resumed, totals.paused) }, vacancies: items };
+  }
+
+  async getPublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, response: Response, clientIp?: string) {
     const resolvedToken = this.resolvePublicDraftToken(token, cookieHeader, response);
+    await this.assertPublicRateLimit(`draft:get:${vacancyId}:${this.resolveClientKey(resolvedToken, clientIp)}`);
     const tokenHash = this.hashDraftToken(resolvedToken);
     const draft = await this.prisma.publicApplicationDraft.findFirst({ where: { vacancyId, tokenHash } });
     if (!draft) return { token: resolvedToken, value: null, expiresAt: null };
@@ -125,22 +148,31 @@ export class ApplicationsService {
     return { token: resolvedToken, value: draft.payload, expiresAt: draft.expiresAt };
   }
 
-  async savePublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, value: unknown, response: Response) {
-    this.assertPublicRateLimit(`draft:put:${vacancyId}:${this.resolveClientKey(cookieHeader, response)}`);
+  async savePublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, value: unknown, response: Response, clientIp?: string) {
     const resolvedToken = this.resolvePublicDraftToken(token, cookieHeader, response);
+    await this.assertPublicRateLimit(`draft:put:${vacancyId}:${this.resolveClientKey(resolvedToken, clientIp)}`);
     const tokenHash = this.hashDraftToken(resolvedToken);
     const expiresAt = new Date(Date.now() + PUBLIC_DRAFT_TTL_MS);
+    const [existing, vacancy] = await Promise.all([
+      this.prisma.publicApplicationDraft.findUnique({ where: { tokenHash } }),
+      this.prisma.vacancy.findUnique({ where: { id: vacancyId }, select: { tenantId: true } }),
+    ]);
+    if (!vacancy) throw new NotFoundException("Vacancy not found");
     await this.prisma.publicApplicationDraft.upsert({
       where: { tokenHash },
       update: { vacancyId, payload: value as Prisma.InputJsonValue, expiresAt },
       create: { vacancyId, tokenHash, payload: value as Prisma.InputJsonValue, expiresAt },
     });
+    const previous = existing?.payload as { pausedAt?: string } | undefined;
+    const progress = value as { pausedAt?: string; resumedAt?: string; step?: number };
+    const kind = !existing ? "DRAFT_STARTED" : previous?.pausedAt && !progress.pausedAt ? "DRAFT_RESUMED" : progress.pausedAt && progress.pausedAt !== previous?.pausedAt ? "DRAFT_PAUSED" : null;
+    if (kind) await this.recordConversionEvent(vacancy.tenantId, vacancyId, `${tokenHash}:${kind}:${kind === "DRAFT_STARTED" ? "initial" : progress.pausedAt ?? progress.resumedAt ?? Date.now()}`, kind, { step: progress.step ?? 0 });
     return { token: resolvedToken, expiresAt };
   }
 
-  async deletePublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, response: Response) {
-    this.assertPublicRateLimit(`draft:delete:${vacancyId}:${this.resolveClientKey(cookieHeader, response)}`);
+  async deletePublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, response: Response, clientIp?: string) {
     const resolvedToken = this.resolvePublicDraftToken(token, cookieHeader, response);
+    await this.assertPublicRateLimit(`draft:delete:${vacancyId}:${this.resolveClientKey(resolvedToken, clientIp)}`);
     const tokenHash = this.hashDraftToken(resolvedToken);
     await this.prisma.publicApplicationDraft.deleteMany({ where: { vacancyId, tokenHash } });
     return { ok: true };
@@ -160,7 +192,7 @@ export class ApplicationsService {
     resume?: Express.Multer.File,
     consentContext?: { ip?: string; userAgent?: string },
   ) {
-    this.assertPublicRateLimit(`apply:${vacancyId}:${consentContext?.ip ?? "unknown"}`);
+    await this.assertPublicRateLimit(`apply:${vacancyId}:${this.hashDraftToken(consentContext?.ip ?? "unknown")}`);
     if (
       dto.email.trim().toLowerCase() !== authenticatedEmail.trim().toLowerCase()
     ) {
@@ -378,6 +410,11 @@ export class ApplicationsService {
           actorId: candidateAccountId,
         });
 
+        await tx.candidateConversionEvent.upsert({
+          where: { eventKey: `application:${created.id}:submitted` },
+          update: {},
+          create: { eventKey: `application:${created.id}:submitted`, tenantId: vacancy.tenantId, vacancyId, kind: "APPLICATION_SUBMITTED" },
+        });
         return this.serializeApplication(created);
       });
     } catch (error) {
@@ -395,21 +432,46 @@ export class ApplicationsService {
     return resolved;
   }
 
-  private resolveClientKey(cookieHeader: string, response: Response) {
-    return this.hashDraftToken(this.readCookie(cookieHeader, PUBLIC_DRAFT_COOKIE) ?? response.getHeader('x-draft-token')?.toString() ?? 'anon');
+  private resolveClientKey(token: string, clientIp?: string) {
+    return this.hashDraftToken(`${token}:${clientIp ?? "unknown"}`);
   }
 
-  private assertPublicRateLimit(key: string) {
-    const now = Date.now();
-    const bucket = publicHitBuckets.get(key);
-    if (!bucket || bucket.resetAt <= now) {
-      publicHitBuckets.set(key, { count: 1, resetAt: now + PUBLIC_LIMIT_WINDOW_MS });
+  private async assertPublicRateLimit(key: string): Promise<void> {
+    const now = new Date();
+    const activeSince = new Date(now.getTime() - PUBLIC_LIMIT_WINDOW_MS);
+    const keyHash = this.hashDraftToken(key);
+    await this.prisma.publicRequestRateLimit.deleteMany({ where: { expiresAt: { lte: now } } });
+    const incremented = await this.prisma.publicRequestRateLimit.updateMany({
+      where: { keyHash, windowStartedAt: { gte: activeSince }, hits: { lt: PUBLIC_LIMIT_MAX } },
+      data: { hits: { increment: 1 } },
+    });
+    if (incremented.count) return;
+    const existing = await this.prisma.publicRequestRateLimit.findUnique({ where: { keyHash } });
+    if (!existing) {
+      try {
+        await this.prisma.publicRequestRateLimit.create({ data: { keyHash, hits: 1, windowStartedAt: now, expiresAt: new Date(now.getTime() + PUBLIC_LIMIT_WINDOW_MS * 2) } });
+        return;
+      } catch {
+        return this.assertPublicRateLimit(key);
+      }
+    }
+    if (existing.windowStartedAt < activeSince) {
+      await this.prisma.publicRequestRateLimit.update({ where: { keyHash }, data: { hits: 1, windowStartedAt: now, expiresAt: new Date(now.getTime() + PUBLIC_LIMIT_WINDOW_MS * 2) } });
       return;
     }
-    if (bucket.count >= PUBLIC_LIMIT_MAX) {
-      throw new BadRequestException('Has realizado demasiados intentos. Espera un momento y vuelve a intentarlo.');
-    }
-    bucket.count += 1;
+    throw new HttpException('Has realizado demasiados intentos. Espera un momento y vuelve a intentarlo.', HttpStatus.TOO_MANY_REQUESTS);
+  }
+
+  private async recordConversionEvent(tenantId: string, vacancyId: string, eventKey: string, kind: string, metadata?: Record<string, unknown>) {
+    await this.prisma.candidateConversionEvent.upsert({
+      where: { eventKey },
+      update: {},
+      create: { eventKey, tenantId, vacancyId, kind, metadata: metadata as Prisma.InputJsonValue | undefined },
+    });
+  }
+
+  private percentage(value: number, total: number) {
+    return total ? Math.round((value / total) * 1000) / 10 : 0;
   }
 
   private hashDraftToken(token: string) {
@@ -523,14 +585,14 @@ export class ApplicationsService {
     };
     const authorized = await this.prisma.vacancyApplication.findMany({
       where,
-      select: { id: true, assignedRecruiterId: true },
+      select: { id: true, assignedRecruiterId: true, notes: true },
     });
     if (authorized.length !== ids.length) {
       throw new NotFoundException("One or more applications were not found");
     }
 
-    if (!dto.status && !dto.currentStageId && !dto.assignedRecruiterId) {
-      throw new BadRequestException("A stage, status or recruiter assignment is required");
+    if (!dto.status && !dto.currentStageId && !dto.assignedRecruiterId && dto.notes === undefined) {
+      throw new BadRequestException("A stage, status, recruiter assignment or note is required");
     }
     if (dto.assignedRecruiterId) {
       await this.assertRecruiterCanAccessApplications(dto.assignedRecruiterId, tenantId, ids);
@@ -560,6 +622,27 @@ export class ApplicationsService {
           rejectionReasonId: dto.rejectionReasonId,
         });
       }
+    }
+    if (dto.notes !== undefined) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const application of authorized) {
+          if (application.notes === dto.notes) continue;
+          await tx.vacancyApplication.update({
+            where: { id: application.id },
+            data: { notes: dto.notes },
+          });
+          await this.createTimelineEvent(tx, {
+            tenantId,
+            applicationId: application.id,
+            type: PrismaApplicationTimelineEventType.APPLICATION_UPDATED,
+            actor,
+            previousValue: { notes: application.notes },
+            newValue: { notes: dto.notes },
+            note: 'Nota interna actualizada mediante acción masiva',
+            source: 'ATS_BULK',
+          });
+        }
+      });
     }
     return { updated: authorized.length };
   }

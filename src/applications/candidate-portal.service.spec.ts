@@ -15,6 +15,7 @@ describe('CandidatePortalService', () => {
     signatureParticipant: { findMany: jest.fn() },
     vacancyApplication: { findFirst: jest.fn() },
     candidatePrivacyRequest: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
+    candidateSupportRequest: { findMany: jest.fn(), create: jest.fn() },
     $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
   };
   const files = { validateResume: jest.fn() };
@@ -37,14 +38,16 @@ describe('CandidatePortalService', () => {
     prisma.candidateResumeFile.findMany.mockResolvedValue([]);
     prisma.signatureParticipant.findMany.mockResolvedValue([]);
     prisma.candidatePrivacyRequest.findMany.mockResolvedValue([]);
+    prisma.candidateSupportRequest.findMany.mockResolvedValue([]);
 
-    await service.overview('account-1');
+    const overview = await service.overview('account-1');
 
     expect(prisma.atsMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         audience: AtsCommunicationAudience.CANDIDATE,
       }),
     }));
+    expect(overview.supportRequests).toEqual([]);
   });
 
   it('withdraws only the owner application and creates immutable timeline evidence', async () => {

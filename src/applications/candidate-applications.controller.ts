@@ -4,7 +4,7 @@ import { Response } from 'express';
 import { ApplicationsService } from './applications.service';
 import { CandidateAuthGuard, CandidateRequest } from './candidate-auth.guard';
 import { CandidatePortalService } from './candidate-portal.service';
-import { CreateCandidatePrivacyRequestDto, WithdrawCandidateApplicationDto } from './dto/candidate-self-service.dto';
+import { CreateCandidatePrivacyRequestDto, CreateCandidateSupportRequestDto, WithdrawCandidateApplicationDto } from './dto/candidate-self-service.dto';
 
 @Controller('candidate/applications')
 @UseGuards(CandidateAuthGuard)
@@ -41,6 +41,16 @@ export class CandidateApplicationsController {
   @Post('privacy-requests/:id/cancel')
   cancelPrivacy(@Req() request: CandidateRequest, @Param('id') id: string) {
     return this.portal.cancelPrivacy(request.candidate.sub, id);
+  }
+
+  @Post('communications/:id/read')
+  markCommunicationRead(@Req() request: CandidateRequest, @Param('id') id: string) {
+    return this.portal.markCommunicationRead(request.candidate.sub, id);
+  }
+
+  @Post('support-requests')
+  createSupportRequest(@Req() request: CandidateRequest, @Body() dto: CreateCandidateSupportRequestDto) {
+    return this.portal.createSupportRequest(request.candidate.sub, dto);
   }
 
   @Post('resume/parse')
