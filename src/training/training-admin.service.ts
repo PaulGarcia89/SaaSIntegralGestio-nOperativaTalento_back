@@ -718,7 +718,7 @@ export class TrainingAdminService {
   }
 
   async deleteCourse(tenantId: string, actor: JwtPayload, courseId: string) {
-    const course = await this.assertWritableCourse(tenantId, actor, courseId);
+    const course = await this.assertDeletableCourse(tenantId, actor, courseId);
     if (
       ![TrainingCourseStatus.DRAFT, TrainingCourseStatus.ARCHIVED].some(
         (status) => status === course.status,
@@ -1049,6 +1049,27 @@ export class TrainingAdminService {
     if (
       (course.tenantId === null && !this.canManageGlobal(actor)) ||
       (course.tenantId !== null && course.tenantId !== tenantId && !this.canManageGlobal(actor))
+    ) {
+      throw new ForbiddenException('Course is outside the active tenant scope');
+    }
+    return course;
+  }
+
+  private async assertDeletableCourse(tenantId: string, actor: JwtPayload, courseId: string) {
+    const course = await this.prisma.trainingCourse.findUnique({ where: { id: courseId } });
+    if (!course) throw new NotFoundException('Course not found');
+
+    const canDeleteOwnGlobalDraft =
+      course.tenantId === null &&
+      course.status === TrainingCourseStatus.DRAFT &&
+      course.createdById === actor.sub;
+
+    if (
+      !canDeleteOwnGlobalDraft &&
+      ((course.tenantId === null && !this.canManageGlobal(actor)) ||
+        (course.tenantId !== null &&
+          course.tenantId !== tenantId &&
+          !this.canManageGlobal(actor)))
     ) {
       throw new ForbiddenException('Course is outside the active tenant scope');
     }

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { TrainingCourseStatus } from '@prisma/client';
 import { allowedTrainingCourseTransitions, TrainingAdminService } from './training-admin.service';
 
@@ -206,6 +206,46 @@ describe('training course deletion', () => {
     });
     expect(prisma.trainingCourse.findUnique).toHaveBeenCalledTimes(1);
     expect(prisma.trainingCourse.delete).toHaveBeenCalledWith({ where: { id: 'course-1' } });
+  });
+
+  it('lets an author delete their own legacy global draft', async () => {
+    const prisma = {
+      trainingCourse: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'course-1',
+          tenantId: null,
+          createdById: actor.sub,
+          status: TrainingCourseStatus.DRAFT,
+        }),
+        delete: jest.fn().mockResolvedValue({ id: 'course-1' }),
+      },
+    };
+    const service = new TrainingAdminService(prisma as any, {} as any);
+
+    await expect(service.deleteCourse('tenant-1', actor, 'course-1')).resolves.toEqual({
+      deleted: true,
+      id: 'course-1',
+    });
+    expect(prisma.trainingCourse.delete).toHaveBeenCalledWith({ where: { id: 'course-1' } });
+  });
+
+  it('does not let a tenant administrator delete another author global draft', async () => {
+    const prisma = {
+      trainingCourse: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'course-1',
+          tenantId: null,
+          createdById: 'author-2',
+          status: TrainingCourseStatus.DRAFT,
+        }),
+        delete: jest.fn(),
+      },
+    };
+    const service = new TrainingAdminService(prisma as any, {} as any);
+
+    await expect(service.deleteCourse('tenant-1', actor, 'course-1'))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.trainingCourse.delete).not.toHaveBeenCalled();
   });
 
   it('keeps archived courses with assignments or progress protected', async () => {
