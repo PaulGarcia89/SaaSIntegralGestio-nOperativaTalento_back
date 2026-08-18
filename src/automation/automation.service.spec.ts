@@ -52,7 +52,7 @@ describe('AutomationService no-code governance', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.$transaction.mockImplementation(async (operations: Array<Promise<unknown>>) => Promise.all(operations));
-    service = new AutomationService(prisma as never, workflows as never);
+    service = new AutomationService(prisma as never, workflows as never, {} as never);
   });
 
   it('simulates conditions without creating executions or audit records', async () => {

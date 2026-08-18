@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -10,6 +10,7 @@ import { Request, Response } from 'express';
 import { UpdateActiveBranchDto } from './dto/update-active-branch.dto';
 import { UpdateActiveTenantDto } from './dto/update-active-tenant.dto';
 import { StartImpersonationDto } from './dto/start-impersonation.dto';
+import { CreateWorkspaceViewDto, UpdateWorkspaceViewDto } from './dto/workspace-view.dto';
 import {
   clearRefreshTokenCookie,
   extractRefreshTokenFromRequest,
@@ -62,6 +63,52 @@ export class AuthController {
   @AuditAction('AUTH_ME')
   me(@CurrentUser() user: JwtPayload) {
     return this.authService.getCurrentUser(user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('preferences')
+  @AuditAction('AUTH_PREFERENCES_LIST')
+  preferences(@CurrentUser() user: JwtPayload) {
+    return this.authService.getPreferences(user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('preferences/:namespace')
+  @AuditAction('AUTH_PREFERENCES_UPDATE')
+  updatePreferences(
+    @CurrentUser() user: JwtPayload,
+    @Param('namespace') namespace: string,
+    @Body() body: { value: unknown },
+  ) {
+    return this.authService.updatePreference(user, namespace, body.value);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('workspace-views')
+  @AuditAction('WORKSPACE_VIEWS_LIST')
+  workspaceViews(@CurrentUser() user: JwtPayload, @Query('module') module: string, @Query('screen') screen: string, @Query('workspaceKey') workspaceKey?: string) {
+    return this.authService.listWorkspaceViews(user, module, screen, workspaceKey);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('workspace-views')
+  @AuditAction('WORKSPACE_VIEW_CREATE')
+  createWorkspaceView(@CurrentUser() user: JwtPayload, @Body() body: CreateWorkspaceViewDto) {
+    return this.authService.createWorkspaceView(user, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('workspace-views/:id')
+  @AuditAction('WORKSPACE_VIEW_UPDATE')
+  updateWorkspaceView(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: UpdateWorkspaceViewDto) {
+    return this.authService.updateWorkspaceView(user, id, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('workspace-views/:id')
+  @AuditAction('WORKSPACE_VIEW_DELETE')
+  deleteWorkspaceView(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.authService.deleteWorkspaceView(user, id);
   }
 
   @UseGuards(JwtAuthGuard)

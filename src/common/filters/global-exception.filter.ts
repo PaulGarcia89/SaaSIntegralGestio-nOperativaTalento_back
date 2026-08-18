@@ -16,10 +16,13 @@ import {
 import { Request, Response } from 'express';
 import { ErrorCode } from '../errors/error-code.enum';
 import { RequestWithUser } from '../types/request-with-user.type';
+import { OperationalAlertService } from '../observability/operational-alert.service';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
+
+  constructor(private readonly alerts: OperationalAlertService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const context = host.switchToHttp();
@@ -38,8 +41,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       },
     };
 
-    this.logger.error(
-      JSON.stringify({
+    const trace = {
         type: 'exception',
         tenantId: request.tenant?.id ?? request.user?.tenantId ?? null,
         branchId: request.branch?.id ?? request.user?.activeBranchId ?? null,
@@ -50,8 +52,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         code: payload.code,
         message: payload.message,
         requestId: request.requestId ?? null,
-      }),
-    );
+        fingerprint: `${payload.status}:${payload.code}:${request.method}:${request.route?.path ?? request.path}`,
+        ...(exception instanceof Error && payload.status >= 500 ? { stack: exception.stack } : {}),
+      };
+    this.logger.error(JSON.stringify(trace));
+    this.alerts.report({
+      fingerprint: trace.fingerprint,
+      requestId: trace.requestId,
+      route: trace.route,
+      method: trace.method,
+      statusCode: trace.statusCode,
+      tenantId: trace.tenantId,
+      message: trace.message,
+    });
 
     if (payload.retryAfter !== undefined) {
       response.setHeader('Retry-After', String(payload.retryAfter));

@@ -18,7 +18,7 @@ describe('TalentCrmService', () => {
         ]),
       },
     };
-    const service = new TalentCrmService(prisma as never);
+    const service = new TalentCrmService(prisma as never, {} as never);
 
     const result = await service.findDuplicates(actor, 'tenant-1', { minimumScore: 45 });
 
@@ -42,7 +42,7 @@ describe('TalentCrmService', () => {
       },
       $transaction: jest.fn(),
     };
-    const service = new TalentCrmService(prisma as never);
+    const service = new TalentCrmService(prisma as never, {} as never);
 
     await expect(service.mergeCandidates(actor, 'tenant-1', {
       sourceCandidateId: 'source', targetCandidateId: 'target', reason: 'Coincidencia validada manualmente',
@@ -62,7 +62,7 @@ describe('TalentCrmService', () => {
         ]),
       },
     };
-    const service = new TalentCrmService(prisma as never);
+    const service = new TalentCrmService(prisma as never, {} as never);
 
     const result = await service.findDuplicates(actor, 'tenant-1', { minimumScore: 45 });
 
@@ -80,7 +80,7 @@ describe('TalentCrmService', () => {
         ]),
       },
     };
-    const service = new TalentCrmService(prisma as never);
+    const service = new TalentCrmService(prisma as never, {} as never);
 
     const result = await service.findDuplicates(actor, 'tenant-1', { minimumScore: 45 });
 

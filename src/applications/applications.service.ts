@@ -29,6 +29,8 @@ import { AtsPrivateFileService } from "../common/files/ats-private-file.service"
 import { TrainingAntivirusService } from "../training/training-antivirus.service";
 import { AtsCommunicationsService } from "../ats-communications/ats-communications.service";
 import { DomainEventsService } from '../domain-events/domain-events.service';
+import { createHash } from 'crypto';
+import { Response } from 'express';
 
 const applicationInclude = {
   candidate: {
@@ -89,6 +91,15 @@ type ApplicationWithRelations = Prisma.VacancyApplicationGetPayload<{
   include: typeof applicationInclude;
 }>;
 
+const PUBLIC_DRAFT_COOKIE = 'public_application_draft';
+const PUBLIC_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PUBLIC_LIMIT_WINDOW_MS = 60 * 1000;
+const PUBLIC_LIMIT_MAX = 20;
+
+type PublicHitBucket = { count: number; resetAt: number };
+
+const publicHitBuckets = new Map<string, PublicHitBucket>();
+
 @Injectable()
 export class ApplicationsService {
   constructor(
@@ -100,6 +111,40 @@ export class ApplicationsService {
   ) {}
 
   listReferrals(user: JwtPayload, tenantId: string) { return this.prisma.employeeReferral.findMany({ where: { tenantId, referrerUserId: user.sub }, include: { vacancy: { select: { id: true, title: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }); }
+
+  async getPublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, response: Response) {
+    this.assertPublicRateLimit(`draft:get:${vacancyId}:${this.resolveClientKey(cookieHeader, response)}`);
+    const resolvedToken = this.resolvePublicDraftToken(token, cookieHeader, response);
+    const tokenHash = this.hashDraftToken(resolvedToken);
+    const draft = await this.prisma.publicApplicationDraft.findFirst({ where: { vacancyId, tokenHash } });
+    if (!draft) return { token: resolvedToken, value: null, expiresAt: null };
+    if (draft.expiresAt.getTime() <= Date.now()) {
+      await this.prisma.publicApplicationDraft.deleteMany({ where: { id: draft.id } });
+      return { token: resolvedToken, value: null, expiresAt: null };
+    }
+    return { token: resolvedToken, value: draft.payload, expiresAt: draft.expiresAt };
+  }
+
+  async savePublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, value: unknown, response: Response) {
+    this.assertPublicRateLimit(`draft:put:${vacancyId}:${this.resolveClientKey(cookieHeader, response)}`);
+    const resolvedToken = this.resolvePublicDraftToken(token, cookieHeader, response);
+    const tokenHash = this.hashDraftToken(resolvedToken);
+    const expiresAt = new Date(Date.now() + PUBLIC_DRAFT_TTL_MS);
+    await this.prisma.publicApplicationDraft.upsert({
+      where: { tokenHash },
+      update: { vacancyId, payload: value as Prisma.InputJsonValue, expiresAt },
+      create: { vacancyId, tokenHash, payload: value as Prisma.InputJsonValue, expiresAt },
+    });
+    return { token: resolvedToken, expiresAt };
+  }
+
+  async deletePublicDraft(vacancyId: string, token: string | undefined, cookieHeader: string, response: Response) {
+    this.assertPublicRateLimit(`draft:delete:${vacancyId}:${this.resolveClientKey(cookieHeader, response)}`);
+    const resolvedToken = this.resolvePublicDraftToken(token, cookieHeader, response);
+    const tokenHash = this.hashDraftToken(resolvedToken);
+    await this.prisma.publicApplicationDraft.deleteMany({ where: { vacancyId, tokenHash } });
+    return { ok: true };
+  }
 
   async createReferral(user: JwtPayload, tenantId: string, dto: CreateEmployeeReferralDto) {
     const vacancy = await this.prisma.vacancy.findFirst({ where: { id: dto.vacancyId, tenantId, status: 'OPEN', ...(user.scope === AccessScope.BRANCH && !user.isSuperAdmin ? { branchId: { in: user.allowedBranchIds } } : {}) }, select: { id: true } });
@@ -115,6 +160,7 @@ export class ApplicationsService {
     resume?: Express.Multer.File,
     consentContext?: { ip?: string; userAgent?: string },
   ) {
+    this.assertPublicRateLimit(`apply:${vacancyId}:${consentContext?.ip ?? "unknown"}`);
     if (
       dto.email.trim().toLowerCase() !== authenticatedEmail.trim().toLowerCase()
     ) {
@@ -339,6 +385,39 @@ export class ApplicationsService {
         await this.files.delete(storedResume.storageKey);
       throw error;
     }
+  }
+
+  private resolvePublicDraftToken(token: string | undefined, cookieHeader: string, response: Response) {
+    const cookieToken = this.readCookie(cookieHeader, PUBLIC_DRAFT_COOKIE);
+    const resolved = (token ?? cookieToken ?? randomBytes(24).toString('hex')).trim();
+    const encoded = encodeURIComponent(resolved);
+    response.setHeader('Set-Cookie', `${PUBLIC_DRAFT_COOKIE}=${encoded}; Max-Age=${PUBLIC_DRAFT_TTL_MS / 1000}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    return resolved;
+  }
+
+  private resolveClientKey(cookieHeader: string, response: Response) {
+    return this.hashDraftToken(this.readCookie(cookieHeader, PUBLIC_DRAFT_COOKIE) ?? response.getHeader('x-draft-token')?.toString() ?? 'anon');
+  }
+
+  private assertPublicRateLimit(key: string) {
+    const now = Date.now();
+    const bucket = publicHitBuckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      publicHitBuckets.set(key, { count: 1, resetAt: now + PUBLIC_LIMIT_WINDOW_MS });
+      return;
+    }
+    if (bucket.count >= PUBLIC_LIMIT_MAX) {
+      throw new BadRequestException('Has realizado demasiados intentos. Espera un momento y vuelve a intentarlo.');
+    }
+    bucket.count += 1;
+  }
+
+  private hashDraftToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private readCookie(cookieHeader: string, name: string) {
+    return cookieHeader.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
   }
 
   async listForCandidate(candidateAccountId: string) {

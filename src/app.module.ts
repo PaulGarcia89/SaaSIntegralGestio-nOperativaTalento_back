@@ -21,6 +21,7 @@ import { VacanciesModule } from './vacancies/vacancies.module';
 import { ApplicationsModule } from './applications/applications.module';
 import { TrainingModule } from './training/training.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { OperationalAlertService } from './common/observability/operational-alert.service';
 import { RequestLoggingMiddleware } from './common/logging/request-logging.middleware';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { PlatformModule } from './platform/platform.module';
@@ -95,6 +96,7 @@ import { CompanyRegistrationsModule } from './company-registrations/company-regi
     WorkflowMasterModule,
   ],
   providers: [
+    OperationalAlertService,
     {
       provide: APP_INTERCEPTOR,
       useClass: ActivityTrackingInterceptor,

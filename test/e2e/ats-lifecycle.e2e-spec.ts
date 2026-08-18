@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import request from 'supertest';
 
 import { AtsE2eHarness, createAtsE2eHarness } from './ats-e2e-harness';
 
@@ -74,6 +75,16 @@ describe('ATS E2E - ciclo completo de contratacion', () => {
     expect(vacancy.tenantId).toBe(harness.tenants.tenantA);
     expect(vacancy.branchId).toBe(harness.branches.branchA1);
     expect(vacancy.stages).toHaveLength(5);
+
+    const publicDraftClient = request.agent(harness.app.getHttpServer());
+    await publicDraftClient
+      .put(`/api/public/vacancies/${vacancy.id}/applications/draft`)
+      .send({ value: { step: 3, form: { fullName: 'Candidata Integral E2E', email: 'draft@example.test', phone: '+1 555 010 2020', city: 'Miami', dynamicResponses: { disponibilidad: 'Inmediata' } } } })
+      .expect(200);
+    const restoredDraft = await publicDraftClient
+      .get(`/api/public/vacancies/${vacancy.id}/applications/draft`)
+      .expect(200);
+    expect(restoredDraft.body.value).toMatchObject({ step: 3, form: { email: 'draft@example.test', dynamicResponses: { disponibilidad: 'Inmediata' } } });
 
     const candidateEmail = `ats.lifecycle.${randomUUID()}@example.test`;
     const candidateName = 'Candidata Integral E2E';

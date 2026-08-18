@@ -11,6 +11,8 @@ describe('AtsAnalyticsService', () => {
     vacancyApplication: { findMany: jest.fn() },
     applicationInterview: { findMany: jest.fn() },
     jobOffer: { findMany: jest.fn() },
+    recruitmentSourceCost: { findMany: jest.fn() },
+    hiringQualityReview: { findMany: jest.fn() },
   };
   const service = new AtsAnalyticsService(prisma as never);
   const actor = {
@@ -35,6 +37,8 @@ describe('AtsAnalyticsService', () => {
     prisma.jobOffer.findMany.mockResolvedValue([
       { status: 'ACCEPTED', createdAt: new Date('2026-07-10T00:00:00Z'), updatedAt: new Date('2026-07-12T00:00:00Z'), acceptedAt: new Date('2026-07-12T00:00:00Z'), rejectedAt: null, expiredAt: null, approvals: [{ status: 'APPROVED', decidedAt: new Date('2026-07-11T00:00:00Z') }], versions: [{ source: 'EMPLOYER' }] },
     ]);
+    prisma.recruitmentSourceCost.findMany.mockResolvedValue([]);
+    prisma.hiringQualityReview.findMany.mockResolvedValue([]);
     prisma.vacancyApplication.findMany
       .mockResolvedValueOnce([
         application('app-1', ApplicationStatus.HIRED, 'LinkedIn'),

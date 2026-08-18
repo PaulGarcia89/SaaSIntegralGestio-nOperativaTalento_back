@@ -14,6 +14,8 @@ const application = {
 
 describe('JobOffersService', () => {
   it('creates version one with separate financial and managerial approvals', async () => {
+    const employmentStartDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const validUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
     const created = { id: 'offer-1', currentVersion: 1, status: 'PENDING_APPROVAL' };
     const tx = {
       jobOffer: { create: jest.fn().mockResolvedValue(created), findUniqueOrThrow: jest.fn().mockResolvedValue(created) },
@@ -28,7 +30,7 @@ describe('JobOffersService', () => {
 
     await service.create('tenant-1', actor, application.id, {
       salaryAmount: 60000, currency: 'usd', periodicity: 'ANNUAL', benefits: ['Seguro'],
-      jobTitle: 'Analista', employmentStartDate: '2026-09-01T12:00:00.000Z', validUntil: '2026-08-15T23:59:59.000Z',
+      jobTitle: 'Analista', employmentStartDate, validUntil,
     } as any);
 
     const data = tx.jobOffer.create.mock.calls[0][0].data;

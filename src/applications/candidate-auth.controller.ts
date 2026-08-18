@@ -16,13 +16,13 @@ export class CandidateAuthController {
   constructor(private readonly auth: CandidateAuthService) {}
 
   @Post('register')
-  register(@Body() dto: CandidateRegisterDto) {
-    return this.auth.register(dto);
+  async register(@Body() dto: CandidateRegisterDto, @Res({ passthrough: true }) response: Response) {
+    return this.withSessionCookie(response, await this.auth.register(dto));
   }
 
   @Post('login')
-  login(@Body() dto: CandidateLoginDto) {
-    return this.auth.login(dto);
+  async login(@Body() dto: CandidateLoginDto, @Res({ passthrough: true }) response: Response) {
+    return this.withSessionCookie(response, await this.auth.login(dto));
   }
 
   @Post('forgot-password')
@@ -30,9 +30,16 @@ export class CandidateAuthController {
     return this.auth.forgotPassword(dto.email);
   }
 
+  @Post('logout')
+  logout(@Res({ passthrough: true }) response: Response) {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    response.setHeader('Set-Cookie', `candidate_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${secure}`);
+    return { loggedOut: true };
+  }
+
   @Post('reset-password')
-  resetPassword(@Body() dto: CandidateResetPasswordDto) {
-    return this.auth.resetPassword(dto.token, dto.password);
+  async resetPassword(@Body() dto: CandidateResetPasswordDto, @Res({ passthrough: true }) response: Response) {
+    return this.withSessionCookie(response, await this.auth.resetPassword(dto.token, dto.password));
   }
 
   @Get('profile')
@@ -63,7 +70,13 @@ export class CandidateAuthController {
   }
 
   @Post('social/exchange')
-  exchangeSocial(@Body() dto: CandidateSocialExchangeDto) {
-    return this.auth.exchangeSocial(dto.token);
+  async exchangeSocial(@Body() dto: CandidateSocialExchangeDto, @Res({ passthrough: true }) response: Response) {
+    return this.withSessionCookie(response, await this.auth.exchangeSocial(dto.token));
+  }
+
+  private withSessionCookie<T extends { accessToken: string; expiresIn: number }>(response: Response, session: T) {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    response.setHeader('Set-Cookie', `candidate_session=${encodeURIComponent(session.accessToken)}; Max-Age=${session.expiresIn}; Path=/; HttpOnly; SameSite=Lax${secure}`);
+    return session;
   }
 }

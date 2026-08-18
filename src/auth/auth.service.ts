@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpStatus,
   Injectable,
   NotFoundException,
@@ -7,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { Request } from 'express';
 import { AppException } from '../common/errors/app-exception';
@@ -17,6 +19,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { AuthContextService } from '../common/auth/auth-context.service';
 import { SessionTokenPayload } from '../common/interfaces/session-token-payload.interface';
+import { CreateWorkspaceViewDto, UpdateWorkspaceViewDto } from './dto/workspace-view.dto';
 
 @Injectable()
 export class AuthService {
@@ -181,6 +184,52 @@ export class AuthService {
 
   async getCurrentUser(payload: JwtPayload) {
     return this.authContextService.serializeAuthUser(payload);
+  }
+
+  async getPreferences(payload: JwtPayload) {
+    return this.authContextService.loadPreferences(payload.userId, payload.activeTenantId ?? payload.tenantId);
+  }
+
+  async updatePreference(payload: JwtPayload, namespace: string, value: unknown) {
+    if (!namespace.trim()) {
+      throw new BadRequestException('Preference namespace is required');
+    }
+    return this.authContextService.upsertPreference(
+      payload.userId,
+      payload.activeTenantId ?? payload.tenantId,
+      namespace.trim(),
+      value as never,
+    );
+  }
+
+  async listWorkspaceViews(payload: JwtPayload, module: string, screen: string, workspaceKey?: string) {
+    if (!module?.trim() || !screen?.trim()) throw new BadRequestException('Module and screen are required');
+    const tenantId = payload.activeTenantId ?? payload.tenantId;
+    return this.prisma.workspaceView.findMany({
+      where: { tenantId, module: module.trim(), screen: screen.trim(), workspaceKey: workspaceKey?.trim() || null, OR: [{ userId: payload.sub }, { isShared: true }] },
+      orderBy: [{ isDefault: 'desc' }, { isShared: 'desc' }, { updatedAt: 'desc' }],
+    });
+  }
+
+  async createWorkspaceView(payload: JwtPayload, input: CreateWorkspaceViewDto) {
+    if (!input.module?.trim() || !input.screen?.trim() || !input.name?.trim()) throw new BadRequestException('Module, screen and name are required');
+    const tenantId = payload.activeTenantId ?? payload.tenantId;
+    if (input.isDefault) await this.prisma.workspaceView.updateMany({ where: { tenantId, userId: payload.sub, module: input.module.trim(), screen: input.screen.trim(), workspaceKey: input.workspaceKey?.trim() || null }, data: { isDefault: false } });
+    return this.prisma.workspaceView.create({ data: { tenantId, userId: payload.sub, module: input.module.trim(), screen: input.screen.trim(), workspaceKey: input.workspaceKey?.trim() || null, name: input.name.trim().slice(0, 80), config: input.config as Prisma.InputJsonValue, isShared: input.isShared ?? false, isDefault: input.isDefault ?? false } });
+  }
+
+  async updateWorkspaceView(payload: JwtPayload, id: string, input: UpdateWorkspaceViewDto) {
+    const view = await this.prisma.workspaceView.findFirst({ where: { id, tenantId: payload.activeTenantId ?? payload.tenantId, userId: payload.sub } });
+    if (!view) throw new NotFoundException('Workspace view not found');
+    if (!input.name?.trim()) throw new BadRequestException('View name is required');
+    if (input.isDefault) await this.prisma.workspaceView.updateMany({ where: { tenantId: view.tenantId, userId: payload.sub, module: view.module, screen: view.screen, workspaceKey: view.workspaceKey, id: { not: id } }, data: { isDefault: false } });
+    return this.prisma.workspaceView.update({ where: { id }, data: { name: input.name.trim().slice(0, 80), config: input.config as Prisma.InputJsonValue, isShared: input.isShared ?? false, isDefault: input.isDefault ?? false } });
+  }
+
+  async deleteWorkspaceView(payload: JwtPayload, id: string) {
+    const result = await this.prisma.workspaceView.deleteMany({ where: { id, tenantId: payload.activeTenantId ?? payload.tenantId, userId: payload.sub } });
+    if (!result.count) throw new NotFoundException('Workspace view not found');
+    return { deleted: true };
   }
 
   async updateActiveBranch(payload: JwtPayload, branchId: string) {

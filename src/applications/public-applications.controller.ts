@@ -1,12 +1,34 @@
-import { Body, Controller, Param, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApplicationsService } from './applications.service';
 import { CreatePublicApplicationDto } from './dto/create-public-application.dto';
 import { CandidateAuthGuard, CandidateRequest } from './candidate-auth.guard';
+import { Response } from 'express';
+import { PublicApplicationDraftDto } from './dto/public-application-draft.dto';
 
 @Controller('public/vacancies/:vacancyId/applications')
 export class PublicApplicationsController {
   constructor(private readonly applicationsService: ApplicationsService) {}
+
+  @Get('draft')
+  getDraft(@Param('vacancyId') vacancyId: string, @Req() request: CandidateRequest, @Res({ passthrough: true }) response: Response) {
+    return this.applicationsService.getPublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', response);
+  }
+
+  @Put('draft')
+  saveDraft(
+    @Param('vacancyId') vacancyId: string,
+    @Req() request: CandidateRequest,
+    @Body() body: PublicApplicationDraftDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    return this.applicationsService.savePublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', body.value, response);
+  }
+
+  @Delete('draft')
+  deleteDraft(@Param('vacancyId') vacancyId: string, @Req() request: CandidateRequest, @Res({ passthrough: true }) response: Response) {
+    return this.applicationsService.deletePublicDraft(vacancyId, request.headers['x-draft-token'] as string | undefined, request.headers.cookie ?? '', response);
+  }
 
   @Post()
   @UseGuards(CandidateAuthGuard)

@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { SubscriptionStatus, UserStatus } from '@prisma/client';
+import { Prisma, SubscriptionStatus, UserStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
 import {
@@ -273,6 +273,7 @@ export class AuthContextService {
           ]).then(([users, branches, employees]) => ({ users, branches, employees }))
         : Promise.resolve({ users: 0, branches: 0, employees: 0 }),
     ]);
+    const preferences = await this.loadPreferences(payload.sub, payload.activeTenantId);
 
     const featureFlags = new Set<string>([
       'module.dashboard',
@@ -316,7 +317,7 @@ export class AuthContextService {
       subscription: tenantCapabilities.subscription,
       featureFlags: [...featureFlags],
       canAccessGlobalGovernance,
-      preferences: {},
+      preferences,
       menu: tenantCapabilities.navigation,
       tenant: payload.activeTenantId
         ? {
@@ -351,6 +352,39 @@ export class AuthContextService {
       lastName: payload.lastName,
       isSuperAdmin: payload.isSuperAdmin,
     };
+  }
+
+  async loadPreferences(userId: string, tenantId: string | null) {
+    const rows = await this.prisma.userPreference.findMany({
+      where: {
+        userId,
+        OR: [{ tenantId: null }, ...(tenantId ? [{ tenantId }] : [])],
+      },
+      orderBy: [{ updatedAt: 'desc' }],
+    });
+
+    return rows.reduce<Record<string, unknown>>((acc, row) => {
+      acc[row.namespace] = row.value;
+      return acc;
+    }, {});
+  }
+
+  async upsertPreference(userId: string, tenantId: string | null, namespace: string, value: Prisma.InputJsonValue) {
+    const existing = await this.prisma.userPreference.findFirst({
+      where: { userId, tenantId, namespace },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return this.prisma.userPreference.update({
+        where: { id: existing.id },
+        data: { value },
+      });
+    }
+
+    return this.prisma.userPreference.create({
+      data: { tenantId, userId, namespace, value },
+    });
   }
 
   private resolvePlanLimits(planCode?: string | null) {

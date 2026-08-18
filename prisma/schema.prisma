@@ -1136,6 +1136,8 @@ model Tenant {
   vacancyLocations              VacancyLocation[]
   vacancyChanges                VacancyChangeEvent[]
   applicationSavedViews         ApplicationSavedView[]
+  workspaceViews                WorkspaceView[]
+  userPreferences               UserPreference[]
   reportSavedFilters            ReportSavedFilter[]
   rejectionReasons              RecruitmentRejectionReason[]
   applications                  VacancyApplication[]
@@ -1329,6 +1331,8 @@ model User {
   supervisedEmployees                Employee[]                        @relation("EmployeeSupervisor")
   vacancyResponsibilities            VacancyResponsible[]
   applicationSavedViews              ApplicationSavedView[]
+  workspaceViews                     WorkspaceView[]
+  userPreferences                    UserPreference[]
   reportSavedFilters                 ReportSavedFilter[]
   assignedApplications               VacancyApplication[]              @relation("ApplicationAssignedRecruiter")
   scheduledInterviews                ApplicationInterview[]            @relation("ScheduledInterviewer")
@@ -1535,6 +1539,55 @@ model NotificationPreference {
 
   @@unique([tenantId, userId, category])
   @@index([tenantId, userId])
+}
+
+model UserPreference {
+  id        String   @id @default(uuid())
+  tenantId  String?
+  userId    String
+  namespace String
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, namespace])
+  @@index([userId, namespace])
+}
+
+model WorkspaceView {
+  id           String   @id @default(uuid())
+  tenantId     String
+  userId       String
+  module       String
+  screen       String
+  workspaceKey String?
+  name         String
+  config       Json
+  isShared     Boolean  @default(false)
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, module, screen, workspaceKey, name])
+  @@index([tenantId, module, screen, workspaceKey, updatedAt])
+  @@index([tenantId, userId, module, screen])
+}
+
+model PublicApplicationDraft {
+  id         String   @id @default(uuid())
+  tokenHash  String   @unique
+  vacancyId  String
+  payload    Json
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  vacancy    Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@index([vacancyId, expiresAt])
 }
 
 model NotificationDelivery {
@@ -3015,6 +3068,7 @@ model Vacancy {
   decisionCommittees     HiringDecisionCommittee[]
   jobBoardPostings       JobBoardPosting[]
   employeeReferrals      EmployeeReferral[]
+  publicApplicationDrafts PublicApplicationDraft[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])

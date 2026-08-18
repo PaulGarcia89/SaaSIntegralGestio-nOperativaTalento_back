@@ -6,6 +6,7 @@ import { CandidateTokenPayload } from './candidate-auth.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 export type CandidateRequest = Request & { candidate: CandidateTokenPayload };
+const CANDIDATE_SESSION_COOKIE = 'candidate_session';
 
 @Injectable()
 export class CandidateAuthGuard implements CanActivate {
@@ -18,11 +19,17 @@ export class CandidateAuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<CandidateRequest>();
     const authorization = request.headers.authorization;
-    if (!authorization?.startsWith('Bearer ')) {
+    const cookieToken = request.headers.cookie
+      ?.split(';')
+      .map((item) => item.trim())
+      .find((item) => item.startsWith(`${CANDIDATE_SESSION_COOKIE}=`))
+      ?.slice(CANDIDATE_SESSION_COOKIE.length + 1);
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : cookieToken;
+    if (!token) {
       throw new UnauthorizedException('Candidate authentication is required');
     }
     try {
-      request.candidate = await this.jwt.verifyAsync<CandidateTokenPayload>(authorization.slice(7), {
+      request.candidate = await this.jwt.verifyAsync<CandidateTokenPayload>(token, {
         secret:
           this.config.get<string>('CANDIDATE_JWT_SECRET') ??
           this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
