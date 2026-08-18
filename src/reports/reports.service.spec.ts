@@ -15,6 +15,12 @@ describe('ReportsService', () => {
     onboardingTask: { findMany: jest.fn() },
     trainingAssignment: { findMany: jest.fn() },
     inventoryAsset: { findMany: jest.fn() },
+    reportSavedFilter: {
+      findMany: jest.fn(),
+      upsert: jest.fn(),
+      findFirst: jest.fn(),
+      delete: jest.fn(),
+    },
   };
   const service = new ReportsService(prisma as never);
   const actor = {
@@ -67,6 +73,10 @@ describe('ReportsService', () => {
       { status: TrainingProgressStatus.COMPLETED, progressPercent: 100, dueAt: null, completedAt: new Date() },
     ]);
     prisma.inventoryAsset.findMany.mockResolvedValue([{ status: 'ASSIGNED' }]);
+    prisma.reportSavedFilter.findMany.mockResolvedValue([]);
+    prisma.reportSavedFilter.upsert.mockResolvedValue({ id: 'filter-1' });
+    prisma.reportSavedFilter.findFirst.mockResolvedValue({ id: 'filter-1' });
+    prisma.reportSavedFilter.delete.mockResolvedValue({ id: 'filter-1' });
   });
 
   it('calculates all operational domains from persisted records', async () => {
@@ -98,5 +108,46 @@ describe('ReportsService', () => {
     expect(result.mimeType).toContain('text/csv');
     expect(result.content).toContain('"ATS","Postulaciones","1"');
     expect(result.filename).toContain('2026-07-01');
+  });
+
+  it('persists saved filters within the active tenant and current user', async () => {
+    await service.saveFilter(actor, {
+      name: '  Operaciones del mes  ',
+      filters: { from: '2026-07-01', to: '2026-07-31', scope: 'tenant' },
+    });
+
+    expect(prisma.reportSavedFilter.upsert).toHaveBeenCalledWith({
+      where: {
+        tenantId_userId_name: {
+          tenantId: 'tenant-1',
+          userId: 'user-1',
+          name: 'Operaciones del mes',
+        },
+      },
+      update: {
+        filters: { from: '2026-07-01', to: '2026-07-31', scope: 'tenant' },
+      },
+      create: {
+        tenantId: 'tenant-1',
+        userId: 'user-1',
+        name: 'Operaciones del mes',
+        filters: { from: '2026-07-01', to: '2026-07-31', scope: 'tenant' },
+      },
+    });
+  });
+
+  it('lists and deletes only filters owned by the active tenant user', async () => {
+    await service.listSavedFilters(actor);
+    await service.deleteFilter(actor, 'filter-1');
+
+    expect(prisma.reportSavedFilter.findMany).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-1', userId: 'user-1' },
+      orderBy: { updatedAt: 'desc' },
+    });
+    expect(prisma.reportSavedFilter.findFirst).toHaveBeenCalledWith({
+      where: { id: 'filter-1', tenantId: 'tenant-1', userId: 'user-1' },
+      select: { id: true },
+    });
+    expect(prisma.reportSavedFilter.delete).toHaveBeenCalledWith({ where: { id: 'filter-1' } });
   });
 });

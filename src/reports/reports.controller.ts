@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -8,7 +8,7 @@ import { TenantGuard } from '../common/guards/tenant.guard';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { AtsAnalyticsQueryDto, SaveAtsAnalyticsDashboardDto, UpsertHiringQualityReviewDto, UpsertRecruitmentSourceCostDto } from './dto/ats-analytics-query.dto';
-import { Body, Post } from '@nestjs/common';
+import { SaveReportFilterDto } from './dto/save-report-filter.dto';
 import { AtsAnalyticsService } from './ats-analytics.service';
 import { ReportsService } from './reports.service';
 
@@ -30,6 +30,24 @@ export class ReportsController {
   @RequirePermissions('applications.export')
   export(@CurrentUser() actor: JwtPayload, @Query() query: ReportQueryDto) {
     return this.reports.exportCsv(actor, query);
+  }
+
+  @Get('saved-filters')
+  @RequirePermissions('metrics.read')
+  savedFilters(@CurrentUser() actor: JwtPayload) {
+    return this.reports.listSavedFilters(actor);
+  }
+
+  @Post('saved-filters')
+  @RequirePermissions('metrics.read')
+  saveFilter(@CurrentUser() actor: JwtPayload, @Body() dto: SaveReportFilterDto) {
+    return this.reports.saveFilter(actor, dto);
+  }
+
+  @Delete('saved-filters/:id')
+  @RequirePermissions('metrics.read')
+  deleteFilter(@CurrentUser() actor: JwtPayload, @Param('id') id: string) {
+    return this.reports.deleteFilter(actor, id);
   }
 
   @Get('ats-analytics')

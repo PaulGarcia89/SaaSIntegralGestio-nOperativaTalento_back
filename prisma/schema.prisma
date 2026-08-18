@@ -142,7 +142,6 @@ enum TalentRecipientStatus {
   SKIPPED
 }
 
-
 enum TalentSequenceEnrollmentStatus {
   ACTIVE
   COMPLETED
@@ -1137,6 +1136,7 @@ model Tenant {
   vacancyLocations              VacancyLocation[]
   vacancyChanges                VacancyChangeEvent[]
   applicationSavedViews         ApplicationSavedView[]
+  reportSavedFilters            ReportSavedFilter[]
   rejectionReasons              RecruitmentRejectionReason[]
   applications                  VacancyApplication[]
   applicationInterviews         ApplicationInterview[]
@@ -1243,28 +1243,28 @@ model Tenant {
 }
 
 model CompanyRegistrationRequest {
-  id                  String                    @id @default(uuid())
-  companyName         String
-  branchName          String
-  branchLocation      String
-  adminName           String
-  adminEmail          String
-  passwordHash        String
-  plan                PlanCode
-  status              CompanyRegistrationStatus @default(PENDING)
-  termsVersion        String
-  privacyVersion      String
-  termsAcceptedAt     DateTime
-  privacyAcceptedAt   DateTime
-  marketingConsent    Boolean                   @default(false)
-  requestIpHash       String?
-  idempotencyKey      String                    @unique
-  reviewedByUserId    String?
-  reviewNotes         String?
-  reviewedAt          DateTime?
-  approvedTenantId    String?                   @unique
-  createdAt           DateTime                  @default(now())
-  updatedAt           DateTime                  @updatedAt
+  id                String                    @id @default(uuid())
+  companyName       String
+  branchName        String
+  branchLocation    String
+  adminName         String
+  adminEmail        String
+  passwordHash      String
+  plan              PlanCode
+  status            CompanyRegistrationStatus @default(PENDING)
+  termsVersion      String
+  privacyVersion    String
+  termsAcceptedAt   DateTime
+  privacyAcceptedAt DateTime
+  marketingConsent  Boolean                   @default(false)
+  requestIpHash     String?
+  idempotencyKey    String                    @unique
+  reviewedByUserId  String?
+  reviewNotes       String?
+  reviewedAt        DateTime?
+  approvedTenantId  String?                   @unique
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 
   @@index([status, createdAt])
   @@index([adminEmail, status])
@@ -1319,8 +1319,8 @@ model User {
   triggeredWorkflows                 MasterWorkflow[]                  @relation("WorkflowTriggeredBy")
   operationalEvents                  OperationalEvent[]                @relation("OperationalEventActor")
   productivityReviews                ProductivityReview[]              @relation("ProductivityReviewActor")
-  createdPerformanceObjectives        PerformanceObjective[]           @relation("PerformanceObjectiveCreator")
-  completedPerformanceEvaluations     PerformanceEvaluation[]          @relation("PerformanceEvaluationEvaluator")
+  createdPerformanceObjectives       PerformanceObjective[]            @relation("PerformanceObjectiveCreator")
+  completedPerformanceEvaluations    PerformanceEvaluation[]           @relation("PerformanceEvaluationEvaluator")
   createdAutomationRules             AutomationRule[]                  @relation("AutomationRuleCreatedBy")
   automationExecutions               AutomationExecution[]             @relation("AutomationExecutionActor")
   automationAuditLogs                AutomationAuditLog[]              @relation("AutomationAuditActor")
@@ -1329,6 +1329,7 @@ model User {
   supervisedEmployees                Employee[]                        @relation("EmployeeSupervisor")
   vacancyResponsibilities            VacancyResponsible[]
   applicationSavedViews              ApplicationSavedView[]
+  reportSavedFilters                 ReportSavedFilter[]
   assignedApplications               VacancyApplication[]              @relation("ApplicationAssignedRecruiter")
   scheduledInterviews                ApplicationInterview[]            @relation("ScheduledInterviewer")
   createdInterviews                  ApplicationInterview[]            @relation("InterviewCreatedBy")
@@ -1946,27 +1947,27 @@ model HiringFlow {
 }
 
 model OnboardingFlow {
-  id                String              @id @default(uuid())
+  id                String                @id @default(uuid())
   tenantId          String
   branchId          String
-  workflowId        String              @unique
+  workflowId        String                @unique
   employeeId        String
   candidateId       String?
-  status            WorkflowTaskStatus  @default(PENDING)
+  status            WorkflowTaskStatus    @default(PENDING)
   readinessStatus   String?
-  startedAt         DateTime            @default(now())
+  startedAt         DateTime              @default(now())
   completedAt       DateTime?
   metadata          Json?
   templateId        String?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch            Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  workflow          MasterWorkflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  employee          Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  candidate         Candidate?          @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow          MasterWorkflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee          Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  candidate         Candidate?            @relation(fields: [candidateId], references: [id], onDelete: SetNull)
   tasks             OnboardingTask[]
-  template          OnboardingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  template          OnboardingTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
   documents         EmployeeDocument[]
   signaturePackages SignaturePackage[]
   legalHolds        OnboardingLegalHold[]
@@ -2058,38 +2059,38 @@ model OnboardingLibraryItem {
 }
 
 model OnboardingRetentionPolicy {
-  id              String   @id @default(uuid())
-  tenantId        String
-  countryCode     String
-  documentCategory String
-  retentionDays   Int
-  legalBasis      String?
-  legalReviewStatus String @default("DRAFT")
-  reviewedById    String?
-  reviewedAt      DateTime?
-  isActive        Boolean  @default(true)
-  createdById     String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                String    @id @default(uuid())
+  tenantId          String
+  countryCode       String
+  documentCategory  String
+  retentionDays     Int
+  legalBasis        String?
+  legalReviewStatus String    @default("DRAFT")
+  reviewedById      String?
+  reviewedAt        DateTime?
+  isActive          Boolean   @default(true)
+  createdById       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, countryCode, documentCategory])
   @@index([tenantId, countryCode, isActive])
 }
 
 model OnboardingLegalHold {
-  id              String          @id @default(uuid())
-  tenantId        String
+  id               String         @id @default(uuid())
+  tenantId         String
   onboardingFlowId String
-  reason          String
-  reference       String?
-  status          String          @default("ACTIVE")
-  placedById      String
-  placedAt        DateTime        @default(now())
-  releasedById    String?
-  releasedAt      DateTime?
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  onboardingFlow  OnboardingFlow  @relation(fields: [onboardingFlowId], references: [id], onDelete: Cascade)
+  reason           String
+  reference        String?
+  status           String         @default("ACTIVE")
+  placedById       String
+  placedAt         DateTime       @default(now())
+  releasedById     String?
+  releasedAt       DateTime?
+  tenant           Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  onboardingFlow   OnboardingFlow @relation(fields: [onboardingFlowId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, status])
   @@index([onboardingFlowId, status])
@@ -2120,40 +2121,40 @@ model OnboardingTemplateTask {
 }
 
 model EmployeeDocument {
-  id                   String             @id @default(uuid())
-  tenantId             String
-  branchId             String
-  employeeId           String
-  onboardingFlowId     String?
-  taskId               String?
-  category             String
-  originalName         String
-  storageKey           String
-  mimeType             String
-  sizeBytes            Int
-  checksum             String
-  scanStatus           String
-  status               String             @default("PENDING_REVIEW")
-  version              Int                @default(1)
-  replacesDocumentId   String?
-  rejectionReason      String?
-  deletedAt            DateTime?
-  uploadedById         String?
+  id                           String             @id @default(uuid())
+  tenantId                     String
+  branchId                     String
+  employeeId                   String
+  onboardingFlowId             String?
+  taskId                       String?
+  category                     String
+  originalName                 String
+  storageKey                   String
+  mimeType                     String
+  sizeBytes                    Int
+  checksum                     String
+  scanStatus                   String
+  status                       String             @default("PENDING_REVIEW")
+  version                      Int                @default(1)
+  replacesDocumentId           String?
+  rejectionReason              String?
+  deletedAt                    DateTime?
+  uploadedById                 String?
   uploadedByCandidateAccountId String?
-  expiresAt            DateTime?
-  reviewedAt           DateTime?
-  reviewedById         String?
-  metadata             Json?
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  tenant               Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch               Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  employee             Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  onboardingFlow       OnboardingFlow?    @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
-  task                 OnboardingTask?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  replacesDocument     EmployeeDocument?  @relation("EmployeeDocumentVersions", fields: [replacesDocumentId], references: [id], onDelete: SetNull)
-  replacementDocuments EmployeeDocument[] @relation("EmployeeDocumentVersions")
-  uploadedByCandidateAccount CandidateAccount? @relation(fields: [uploadedByCandidateAccountId], references: [id], onDelete: SetNull)
+  expiresAt                    DateTime?
+  reviewedAt                   DateTime?
+  reviewedById                 String?
+  metadata                     Json?
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
+  tenant                       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                       Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  employee                     Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  onboardingFlow               OnboardingFlow?    @relation(fields: [onboardingFlowId], references: [id], onDelete: SetNull)
+  task                         OnboardingTask?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  replacesDocument             EmployeeDocument?  @relation("EmployeeDocumentVersions", fields: [replacesDocumentId], references: [id], onDelete: SetNull)
+  replacementDocuments         EmployeeDocument[] @relation("EmployeeDocumentVersions")
+  uploadedByCandidateAccount   CandidateAccount?  @relation(fields: [uploadedByCandidateAccountId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, storageKey])
   @@index([tenantId, employeeId, status])
@@ -2399,17 +2400,18 @@ model ProductivityReview {
 }
 
 model ProductivityCamera {
-  id              String   @id @default(uuid())
-  tenantId        String
-  branchId        String
-  name            String
-  description     String?
-  sourceType      String   @default("RTSP")
+  id                 String    @id @default(uuid())
+  tenantId           String
+  branchId           String
+  name               String
+  description        String?
+  sourceType         String    @default("RTSP")
   streamUrlEncrypted String?
-  status          String   @default("OFFLINE")
-  lastHeartbeatAt DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  status             String    @default("OFFLINE")
+  lastHeartbeatAt    DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
   @@index([tenantId, branchId, status])
 }
 
@@ -2425,11 +2427,12 @@ model ProductivityZone {
   status             String   @default("ACTIVE")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+
   @@index([tenantId, cameraId, status])
 }
 
 model ProductivityEvent {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   tenantId        String
   branchId        String
   cameraId        String
@@ -2442,62 +2445,66 @@ model ProductivityEvent {
   durationSeconds Int?
   confidence      Float?
   metadata        Json?
-  source          String   @default("CV_SERVICE")
-  createdAt       DateTime @default(now())
+  source          String    @default("CV_SERVICE")
+  createdAt       DateTime  @default(now())
+
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, branchId, startedAt])
   @@index([tenantId, zoneId, startedAt])
 }
 
 model ProductivitySummary {
-  id              String   @id @default(uuid())
-  tenantId        String
-  branchId        String
-  zoneId          String?
-  employeeId      String?
-  date            DateTime
-  activeSeconds   Int      @default(0)
-  idleSeconds     Int      @default(0)
-  taskCount       Int      @default(0)
+  id                  String   @id @default(uuid())
+  tenantId            String
+  branchId            String
+  zoneId              String?
+  employeeId          String?
+  date                DateTime
+  activeSeconds       Int      @default(0)
+  idleSeconds         Int      @default(0)
+  taskCount           Int      @default(0)
   averageTaskDuration Float?
-  productivityScore Float?
-  confidence      Float?
-  calculatedAt    DateTime @default(now())
+  productivityScore   Float?
+  confidence          Float?
+  calculatedAt        DateTime @default(now())
+
   @@index([tenantId, branchId, date])
 }
 
 model ProductivityAlertRule {
-  id          String   @id @default(uuid())
-  tenantId    String
-  branchId    String?
-  zoneId      String?
-  name        String
-  ruleType    String
-  threshold   Int
-  enabled     Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  tenantId  String
+  branchId  String?
+  zoneId    String?
+  name      String
+  ruleType  String
+  threshold Int
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([tenantId, enabled])
 }
 
 model ProductivityAlert {
-  id          String   @id @default(uuid())
-  tenantId    String
-  branchId    String
-  cameraId    String?
-  zoneId      String?
-  ruleId      String?
-  status      String   @default("OPEN")
-  title       String
-  description String
-  createdAt   DateTime @default(now())
+  id             String    @id @default(uuid())
+  tenantId       String
+  branchId       String
+  cameraId       String?
+  zoneId         String?
+  ruleId         String?
+  status         String    @default("OPEN")
+  title          String
+  description    String
+  createdAt      DateTime  @default(now())
   acknowledgedAt DateTime?
-  closedAt    DateTime?
+  closedAt       DateTime?
+
   @@index([tenantId, branchId, status, createdAt])
 }
 
 model PerformanceObjective {
-  id              String          @id @default(uuid())
+  id              String         @id @default(uuid())
   tenantId        String
   branchId        String
   workflowId      String
@@ -2505,25 +2512,25 @@ model PerformanceObjective {
   createdByUserId String?
   title           String
   description     String?
-  targetValue     Int             @default(100)
-  currentValue    Int             @default(0)
-  weight          Int             @default(1)
+  targetValue     Int            @default(100)
+  currentValue    Int            @default(0)
+  weight          Int            @default(1)
   dueDate         DateTime?
   completedAt     DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch          Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  workflow        MasterWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  createdByUser   User?           @relation("PerformanceObjectiveCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow        MasterWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee        Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdByUser   User?          @relation("PerformanceObjectiveCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, branchId, employeeId])
   @@index([workflowId, dueDate])
 }
 
 model PerformanceEvaluation {
-  id              String          @id @default(uuid())
+  id              String         @id @default(uuid())
   tenantId        String
   branchId        String
   workflowId      String
@@ -2532,14 +2539,14 @@ model PerformanceEvaluation {
   periodDays      Int
   score           Int
   notes           String?
-  completedAt     DateTime        @default(now())
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch          Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  workflow        MasterWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  evaluatorUser   User?           @relation("PerformanceEvaluationEvaluator", fields: [evaluatorUserId], references: [id], onDelete: SetNull)
+  completedAt     DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  workflow        MasterWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  employee        Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  evaluatorUser   User?          @relation("PerformanceEvaluationEvaluator", fields: [evaluatorUserId], references: [id], onDelete: SetNull)
 
   @@unique([workflowId, periodDays])
   @@index([tenantId, branchId, employeeId])
@@ -2730,19 +2737,19 @@ model InventoryItem {
 }
 
 model InventoryStock {
-  id        String        @id @default(uuid())
-  tenantId  String
-  itemId    String
-  branchId  String
-  qtyLocal  Int           @default(0)
-  minQty    Int           @default(0)
-  maxQty    Int?
-  reorderPoint Int        @default(0)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  branch    Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  id           String        @id @default(uuid())
+  tenantId     String
+  itemId       String
+  branchId     String
+  qtyLocal     Int           @default(0)
+  minQty       Int           @default(0)
+  maxQty       Int?
+  reorderPoint Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item         InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
   @@unique([itemId, branchId])
   @@index([tenantId, branchId])
@@ -2750,15 +2757,15 @@ model InventoryStock {
 }
 
 model InventoryLocation {
-  id          String   @id @default(uuid())
-  tenantId    String
-  branchId    String
-  code        String
-  name        String
-  type        String   @default("STORAGE")
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  tenantId  String
+  branchId  String
+  code      String
+  name      String
+  type      String   @default("STORAGE")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([tenantId, branchId, code])
   @@index([tenantId, branchId, isActive])
@@ -2782,16 +2789,16 @@ model InventoryStockMovement {
 }
 
 model InventoryStockCount {
-  id            String   @id @default(uuid())
-  tenantId      String
-  itemId        String
-  branchId      String
-  expectedQty   Int
-  countedQty    Int
-  variance      Int
-  notes         String?
-  countedById   String
-  countedAt     DateTime @default(now())
+  id          String   @id @default(uuid())
+  tenantId    String
+  itemId      String
+  branchId    String
+  expectedQty Int
+  countedQty  Int
+  variance    Int
+  notes       String?
+  countedById String
+  countedAt   DateTime @default(now())
 
   @@index([tenantId, branchId, countedAt])
   @@index([tenantId, itemId, countedAt])
@@ -2807,66 +2814,69 @@ model InventorySupplier {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   @@unique([tenantId, name])
   @@index([tenantId, isActive])
 }
 
 model InventoryPurchaseOrder {
-  id              String   @id @default(uuid())
-  tenantId        String
-  branchId        String
-  supplierId      String
-  code            String
-  status          String   @default("DRAFT")
-  currency        String   @default("USD")
-  budgetAmount    Decimal? @db.Decimal(14, 2)
-  totalAmount     Decimal  @default(0) @db.Decimal(14, 2)
-  notes           String?
-  requestedById   String
-  approvedById    String?
-  approvedAt      DateTime?
-  receivedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  lines           InventoryPurchaseOrderLine[]
+  id            String                       @id @default(uuid())
+  tenantId      String
+  branchId      String
+  supplierId    String
+  code          String
+  status        String                       @default("DRAFT")
+  currency      String                       @default("USD")
+  budgetAmount  Decimal?                     @db.Decimal(14, 2)
+  totalAmount   Decimal                      @default(0) @db.Decimal(14, 2)
+  notes         String?
+  requestedById String
+  approvedById  String?
+  approvedAt    DateTime?
+  receivedAt    DateTime?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
+  lines         InventoryPurchaseOrderLine[]
+
   @@unique([tenantId, code])
   @@index([tenantId, branchId, status])
 }
 
 model InventoryPurchaseOrderLine {
-  id              String   @id @default(uuid())
+  id              String                 @id @default(uuid())
   purchaseOrderId String
   itemId          String
   quantity        Int
-  receivedQty     Int      @default(0)
-  unitCost        Decimal  @db.Decimal(14, 2)
+  receivedQty     Int                    @default(0)
+  unitCost        Decimal                @db.Decimal(14, 2)
   purchaseOrder   InventoryPurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
   @@index([purchaseOrderId])
 }
 
 model InventoryAsset {
-  id                   String                  @id @default(uuid())
+  id                   String                       @id @default(uuid())
   tenantId             String
   itemId               String
   branchId             String
   employeeId           String?
-  workflowAssignmentId String?                 @unique
+  workflowAssignmentId String?                      @unique
   assetTag             String
   serialNumber         String?
-  status               InventoryAssetStatus    @default(AVAILABLE)
-  condition            InventoryAssetCondition @default(GOOD)
+  status               InventoryAssetStatus         @default(AVAILABLE)
+  condition            InventoryAssetCondition      @default(GOOD)
   notes                String?
   assignedAt           DateTime?
   deliveredAt          DateTime?
   returnRequestedAt    DateTime?
   returnedAt           DateTime?
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
-  tenant               Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  item                 InventoryItem           @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  branch               Branch                  @relation("InventoryAssetCurrentBranch", fields: [branchId], references: [id], onDelete: Restrict)
-  employee             Employee?               @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  workflowAssignment   InventoryAssignment?    @relation(fields: [workflowAssignmentId], references: [id], onDelete: SetNull)
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  tenant               Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item                 InventoryItem                @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  branch               Branch                       @relation("InventoryAssetCurrentBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  employee             Employee?                    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  workflowAssignment   InventoryAssignment?         @relation(fields: [workflowAssignmentId], references: [id], onDelete: SetNull)
   movements            InventoryMovement[]
   evidences            InventoryEvidence[]
   maintenanceTickets   InventoryMaintenanceTicket[]
@@ -2879,23 +2889,24 @@ model InventoryAsset {
 }
 
 model InventoryMaintenanceTicket {
-  id          String   @id @default(uuid())
-  tenantId    String
-  assetId     String
-  type        String
-  status      String   @default("OPEN")
-  title       String
-  description String?
-  dueAt       DateTime?
-  resolvedAt  DateTime?
-  costAmount  Decimal? @db.Decimal(14, 2)
-  currency    String   @default("USD")
-  vendor      String?
-  createdById String
+  id           String         @id @default(uuid())
+  tenantId     String
+  assetId      String
+  type         String
+  status       String         @default("OPEN")
+  title        String
+  description  String?
+  dueAt        DateTime?
+  resolvedAt   DateTime?
+  costAmount   Decimal?       @db.Decimal(14, 2)
+  currency     String         @default("USD")
+  vendor       String?
+  createdById  String
   resolvedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  asset       InventoryAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  asset        InventoryAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
   @@index([tenantId, status, dueAt])
   @@index([tenantId, assetId])
 }
@@ -3031,38 +3042,38 @@ model VacancyLocation {
 }
 
 model JobBoardPosting {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   tenantId          String
   vacancyId         String
   provider          String
-  status            String   @default("DRAFT")
+  status            String    @default("DRAFT")
   externalPostingId String?
   externalUrl       String?
-  trackingCode      String   @unique
+  trackingCode      String    @unique
   publishedAt       DateTime?
   createdById       String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  vacancy           Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy           Vacancy   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
 
   @@unique([vacancyId, provider])
   @@index([tenantId, provider, status])
 }
 
 model EmployeeReferral {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   tenantId       String
   vacancyId      String
   referrerUserId String
-  referralCode   String   @unique
+  referralCode   String    @unique
   candidateEmail String?
   candidateName  String?
-  applicationId  String?  @unique
+  applicationId  String?   @unique
   acceptedAt     DateTime?
-  createdAt      DateTime @default(now())
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  vacancy        Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy        Vacancy   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, vacancyId])
 }
@@ -3195,6 +3206,22 @@ model ApplicationSavedView {
   @@index([tenantId, userId, updatedAt])
 }
 
+model ReportSavedFilter {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, name])
+  @@index([tenantId, userId, updatedAt])
+}
+
 model RecruitmentRejectionReason {
   id                 String                              @id @default(uuid())
   tenantId           String
@@ -3245,42 +3272,42 @@ model VacancyFormTemplate {
 }
 
 model Candidate {
-  id                    String                       @id @default(uuid())
-  tenantId              String
-  accountId             String?
-  fullName              String
-  email                 String
-  phone                 String?
-  city                  String?
-  linkedinUrl           String?
-  portfolioUrl          String?
-  resumeUrl             String?
-  crmStatus             CandidateCrmStatus           @default(ACTIVE)
-  source                String?
-  doNotContact          Boolean                      @default(false)
-  mergedIntoId          String?
-  mergedAt              DateTime?
-  createdAt             DateTime                     @default(now())
-  updatedAt             DateTime                     @updatedAt
-  tenant                Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  account               CandidateAccount?            @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  applications          VacancyApplication[]
-  masterWorkflows       MasterWorkflow[]
-  hiringFlows           HiringFlow[]
-  onboardingFlows       OnboardingFlow[]
-  automationExecutions  AutomationExecution[]
-  automationAuditLogs   AutomationAuditLog[]
-  employees             Employee[]
-  resumeFiles           CandidateResumeFile[]
-  channelPreferences    CandidateChannelPreference[]
-  mergedInto            Candidate?                   @relation("CandidateMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
-  mergedCandidates      Candidate[]                  @relation("CandidateMerge")
-  talentPoolMemberships TalentPoolMember[]
-  talentTagAssignments  CandidateTalentTag[]
-  talentActivities      TalentActivity[]
-  sourceMergeAudits     CandidateMergeAudit[]        @relation("CandidateMergeSource")
-  targetMergeAudits     CandidateMergeAudit[]        @relation("CandidateMergeTarget")
-  talentCampaignRecipients TalentCampaignRecipient[]
+  id                        String                       @id @default(uuid())
+  tenantId                  String
+  accountId                 String?
+  fullName                  String
+  email                     String
+  phone                     String?
+  city                      String?
+  linkedinUrl               String?
+  portfolioUrl              String?
+  resumeUrl                 String?
+  crmStatus                 CandidateCrmStatus           @default(ACTIVE)
+  source                    String?
+  doNotContact              Boolean                      @default(false)
+  mergedIntoId              String?
+  mergedAt                  DateTime?
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+  tenant                    Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account                   CandidateAccount?            @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  applications              VacancyApplication[]
+  masterWorkflows           MasterWorkflow[]
+  hiringFlows               HiringFlow[]
+  onboardingFlows           OnboardingFlow[]
+  automationExecutions      AutomationExecution[]
+  automationAuditLogs       AutomationAuditLog[]
+  employees                 Employee[]
+  resumeFiles               CandidateResumeFile[]
+  channelPreferences        CandidateChannelPreference[]
+  mergedInto                Candidate?                   @relation("CandidateMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedCandidates          Candidate[]                  @relation("CandidateMerge")
+  talentPoolMemberships     TalentPoolMember[]
+  talentTagAssignments      CandidateTalentTag[]
+  talentActivities          TalentActivity[]
+  sourceMergeAudits         CandidateMergeAudit[]        @relation("CandidateMergeSource")
+  targetMergeAudits         CandidateMergeAudit[]        @relation("CandidateMergeTarget")
+  talentCampaignRecipients  TalentCampaignRecipient[]
   talentSequenceEnrollments TalentSequenceEnrollment[]
 
   @@unique([tenantId, email])
@@ -3374,16 +3401,16 @@ model TalentActivity {
 }
 
 model TalentSegment {
-  id          String   @id @default(uuid())
+  id          String           @id @default(uuid())
   tenantId    String
   name        String
   description String?
   filters     Json
-  isActive    Boolean  @default(true)
+  isActive    Boolean          @default(true)
   createdById String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   campaigns   TalentCampaign[]
   sequences   TalentSequence[]
 
@@ -3429,41 +3456,41 @@ model HiringQualityReview {
 }
 
 model TalentCampaign {
-  id          String               @id @default(uuid())
-  tenantId    String
-  segmentId   String
-  name        String
-  subject     String
-  body        String
-  status      TalentCampaignStatus @default(DRAFT)
-  scheduledAt DateTime?
-  audiencePreparedAt DateTime?
-  audienceReviewedAt DateTime?
+  id                   String                    @id @default(uuid())
+  tenantId             String
+  segmentId            String
+  name                 String
+  subject              String
+  body                 String
+  status               TalentCampaignStatus      @default(DRAFT)
+  scheduledAt          DateTime?
+  audiencePreparedAt   DateTime?
+  audienceReviewedAt   DateTime?
   audienceReviewedById String?
-  audienceReviewNote String?
-  audienceFingerprint String?
-  launchedAt  DateTime?
-  completedAt DateTime?
-  createdById String
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  segment     TalentSegment        @relation(fields: [segmentId], references: [id], onDelete: Restrict)
-  recipients  TalentCampaignRecipient[]
-  approvals   TalentCampaignApproval[]
+  audienceReviewNote   String?
+  audienceFingerprint  String?
+  launchedAt           DateTime?
+  completedAt          DateTime?
+  createdById          String
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  tenant               Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  segment              TalentSegment             @relation(fields: [segmentId], references: [id], onDelete: Restrict)
+  recipients           TalentCampaignRecipient[]
+  approvals            TalentCampaignApproval[]
 
   @@index([tenantId, status, scheduledAt])
   @@index([segmentId, createdAt])
 }
 
 model TalentCampaignApproval {
-  id          String   @id @default(uuid())
-  tenantId    String
-  campaignId  String
-  approverId  String
-  approvedAt  DateTime @default(now())
-  note        String?
-  campaign    TalentCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id         String         @id @default(uuid())
+  tenantId   String
+  campaignId String
+  approverId String
+  approvedAt DateTime       @default(now())
+  note       String?
+  campaign   TalentCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, approverId])
   @@index([tenantId, campaignId, approvedAt])
@@ -3488,17 +3515,17 @@ model TalentCampaignRecipient {
 }
 
 model TalentSequence {
-  id          String   @id @default(uuid())
+  id          String                     @id @default(uuid())
   tenantId    String
   segmentId   String?
   name        String
   description String?
-  isActive    Boolean  @default(true)
+  isActive    Boolean                    @default(true)
   createdById String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  segment     TalentSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  tenant      Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  segment     TalentSegment?             @relation(fields: [segmentId], references: [id], onDelete: SetNull)
   steps       TalentSequenceStep[]
   enrollments TalentSequenceEnrollment[]
 
@@ -3507,31 +3534,31 @@ model TalentSequence {
 }
 
 model TalentSequenceStep {
-  id          String   @id @default(uuid())
-  sequenceId  String
-  position    Int
-  delayHours  Int      @default(0)
-  subject     String
-  body        String
-  createdAt   DateTime @default(now())
-  sequence    TalentSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  id         String         @id @default(uuid())
+  sequenceId String
+  position   Int
+  delayHours Int            @default(0)
+  subject    String
+  body       String
+  createdAt  DateTime       @default(now())
+  sequence   TalentSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
 
   @@unique([sequenceId, position])
 }
 
 model TalentSequenceEnrollment {
-  id          String                         @id @default(uuid())
-  tenantId    String
-  sequenceId  String
-  candidateId String
+  id           String                         @id @default(uuid())
+  tenantId     String
+  sequenceId   String
+  candidateId  String
   nextPosition Int                            @default(0)
-  status      TalentSequenceEnrollmentStatus @default(ACTIVE)
-  nextRunAt   DateTime
-  lastSentAt  DateTime?
-  createdAt   DateTime                       @default(now())
-  updatedAt   DateTime                       @updatedAt
-  sequence    TalentSequence                  @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
-  candidate   Candidate                       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  status       TalentSequenceEnrollmentStatus @default(ACTIVE)
+  nextRunAt    DateTime
+  lastSentAt   DateTime?
+  createdAt    DateTime                       @default(now())
+  updatedAt    DateTime                       @updatedAt
+  sequence     TalentSequence                 @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  candidate    Candidate                      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   @@unique([sequenceId, candidateId])
   @@index([tenantId, status, nextRunAt])
@@ -3623,29 +3650,29 @@ model VacancyImageFile {
 }
 
 model CandidateAccount {
-  id                 String                      @id @default(uuid())
-  email              String                      @unique
-  passwordHash       String
-  fullName           String?
-  phone              String?
-  city               String?
-  linkedinUrl        String?
-  portfolioUrl       String?
-  locale             String                      @default("es")
-  timezone           String                      @default("UTC")
-  statusUpdates      Boolean                     @default(true)
-  interviewReminders Boolean                     @default(true)
-  offerNotifications Boolean                     @default(true)
-  marketingConsent   Boolean                     @default(false)
-  profileSource      String                      @default("MANUAL")
-  anonymizedAt       DateTime?
-  isActive           Boolean                     @default(true)
-  createdAt          DateTime                    @default(now())
-  updatedAt          DateTime                    @updatedAt
-  candidates         Candidate[]
-  tokens             CandidateAccountToken[]
-  privacyRequests    CandidatePrivacyRequest[]
-  externalIdentities CandidateExternalIdentity[]
+  id                          String                      @id @default(uuid())
+  email                       String                      @unique
+  passwordHash                String
+  fullName                    String?
+  phone                       String?
+  city                        String?
+  linkedinUrl                 String?
+  portfolioUrl                String?
+  locale                      String                      @default("es")
+  timezone                    String                      @default("UTC")
+  statusUpdates               Boolean                     @default(true)
+  interviewReminders          Boolean                     @default(true)
+  offerNotifications          Boolean                     @default(true)
+  marketingConsent            Boolean                     @default(false)
+  profileSource               String                      @default("MANUAL")
+  anonymizedAt                DateTime?
+  isActive                    Boolean                     @default(true)
+  createdAt                   DateTime                    @default(now())
+  updatedAt                   DateTime                    @updatedAt
+  candidates                  Candidate[]
+  tokens                      CandidateAccountToken[]
+  privacyRequests             CandidatePrivacyRequest[]
+  externalIdentities          CandidateExternalIdentity[]
   uploadedOnboardingDocuments EmployeeDocument[]
 }
 
@@ -4689,52 +4716,52 @@ model AtsCommunicationTemplate {
 }
 
 model AtsMessage {
-  id                 String                    @id @default(uuid())
-  tenantId           String
-  vacancyId          String
-  applicationId      String
-  interviewId        String?
-  notificationId     String?                   @unique
-  templateId         String?
-  templateVersion    Int?
-  type               AtsCommunicationType
-  audience           AtsCommunicationAudience
-  direction          AtsMessageDirection       @default(OUTBOUND)
-  channel            NotificationChannel       @default(EMAIL)
-  recipientEmail     String
-  senderEmail        String?
-  recipientName      String?
-  recipientUserId    String?
-  subject            String
-  body               String
-  status             AtsMessageStatus          @default(PENDING)
-  scheduledAt        DateTime                  @default(now())
-  nextAttemptAt      DateTime                  @default(now())
-  attempts           Int                       @default(0)
-  maxAttempts        Int                       @default(5)
-  lastAttemptAt      DateTime?
-  deliveredAt        DateTime?
-  providerMessageId  String?
-  inReplyToMessageId String?
-  conversationId     String?
-  internetMessageId  String?
-  referencesHeader   String?
-  readAt             DateTime?
-  lastError          String?
-  correlationId      String?
-  deduplicationKey   String
-  createdByType      String                    @default("SYSTEM")
-  createdById        String?
-  payload            Json?
-  createdAt          DateTime                  @default(now())
-  updatedAt          DateTime                  @updatedAt
-  vacancy            Vacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Restrict)
-  application        VacancyApplication        @relation(fields: [applicationId], references: [id], onDelete: Restrict)
-  interview          ApplicationInterview?     @relation(fields: [interviewId], references: [id], onDelete: SetNull)
-  template           AtsCommunicationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  notification       Notification?             @relation(fields: [notificationId], references: [id], onDelete: SetNull)
-  conversation       AtsConversation?          @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  attachments        AtsMessageAttachment[]
+  id                      String                    @id @default(uuid())
+  tenantId                String
+  vacancyId               String
+  applicationId           String
+  interviewId             String?
+  notificationId          String?                   @unique
+  templateId              String?
+  templateVersion         Int?
+  type                    AtsCommunicationType
+  audience                AtsCommunicationAudience
+  direction               AtsMessageDirection       @default(OUTBOUND)
+  channel                 NotificationChannel       @default(EMAIL)
+  recipientEmail          String
+  senderEmail             String?
+  recipientName           String?
+  recipientUserId         String?
+  subject                 String
+  body                    String
+  status                  AtsMessageStatus          @default(PENDING)
+  scheduledAt             DateTime                  @default(now())
+  nextAttemptAt           DateTime                  @default(now())
+  attempts                Int                       @default(0)
+  maxAttempts             Int                       @default(5)
+  lastAttemptAt           DateTime?
+  deliveredAt             DateTime?
+  providerMessageId       String?
+  inReplyToMessageId      String?
+  conversationId          String?
+  internetMessageId       String?
+  referencesHeader        String?
+  readAt                  DateTime?
+  lastError               String?
+  correlationId           String?
+  deduplicationKey        String
+  createdByType           String                    @default("SYSTEM")
+  createdById             String?
+  payload                 Json?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  vacancy                 Vacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Restrict)
+  application             VacancyApplication        @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  interview               ApplicationInterview?     @relation(fields: [interviewId], references: [id], onDelete: SetNull)
+  template                AtsCommunicationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  notification            Notification?             @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  conversation            AtsConversation?          @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  attachments             AtsMessageAttachment[]
   talentCampaignRecipient TalentCampaignRecipient?
 
   @@unique([tenantId, deduplicationKey])
@@ -5968,16 +5995,16 @@ model TrainingAnalyticsSnapshot {
 
 // Learning intelligence records remain tenant-scoped and never aggregate identifiable data across companies.
 model TrainingRoleCompetencyProfile {
-  id           String   @id @default(uuid())
+  id           String                  @id @default(uuid())
   tenantId     String
   branchId     String?
   jobTitle     String
   competencyId String
   targetLevel  TrainingCompetencyLevel
-  weight       Int      @default(1)
-  isRequired   Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  weight       Int                     @default(1)
+  isRequired   Boolean                 @default(true)
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
 
   @@unique([tenantId, branchId, jobTitle, competencyId])
   @@index([tenantId, jobTitle])
@@ -6000,33 +6027,33 @@ model TrainingCompetencyAssessment {
 }
 
 model TrainingCareerPlan {
-  id             String   @id @default(uuid())
-  tenantId       String
-  userId         String
-  ownerId        String?
-  targetRole     String
-  title          String
-  status         String   @default("ACTIVE")
-  targetDate     DateTime?
-  progressPercent Int     @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String    @id @default(uuid())
+  tenantId        String
+  userId          String
+  ownerId         String?
+  targetRole      String
+  title           String
+  status          String    @default("ACTIVE")
+  targetDate      DateTime?
+  progressPercent Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([tenantId, userId, status])
 }
 
 model TrainingCareerPlanStep {
-  id          String   @id @default(uuid())
-  tenantId    String
-  planId      String
-  courseId    String?
+  id           String    @id @default(uuid())
+  tenantId     String
+  planId       String
+  courseId     String?
   competencyId String?
-  title       String
-  status      String   @default("PENDING")
-  dueAt       DateTime?
-  completedAt DateTime?
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
+  title        String
+  status       String    @default("PENDING")
+  dueAt        DateTime?
+  completedAt  DateTime?
+  sortOrder    Int       @default(0)
+  createdAt    DateTime  @default(now())
 
   @@index([tenantId, planId, sortOrder])
 }
@@ -6050,37 +6077,37 @@ model TrainingFeedback360 {
 }
 
 model TrainingRoiMeasurement {
-  id              String   @id @default(uuid())
-  tenantId        String
-  courseId        String?
-  periodStart     DateTime
-  periodEnd       DateTime
-  participantCount Int    @default(0)
-  costAmount      Decimal @default(0) @db.Decimal(14, 2)
-  benefitAmount   Decimal @default(0) @db.Decimal(14, 2)
-  currency        String  @default("USD")
+  id                String   @id @default(uuid())
+  tenantId          String
+  courseId          String?
+  periodStart       DateTime
+  periodEnd         DateTime
+  participantCount  Int      @default(0)
+  costAmount        Decimal  @default(0) @db.Decimal(14, 2)
+  benefitAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  currency          String   @default("USD")
   productivityDelta Decimal? @db.Decimal(8, 2)
   qualityDelta      Decimal? @db.Decimal(8, 2)
   retentionDelta    Decimal? @db.Decimal(8, 2)
-  evidence        Json?
-  createdById     String?
-  createdAt       DateTime @default(now())
+  evidence          Json?
+  createdById       String?
+  createdAt         DateTime @default(now())
 
   @@index([tenantId, courseId, periodStart])
 }
 
 model TrainingForecastSnapshot {
-  id                   String   @id @default(uuid())
-  tenantId             String
-  courseId             String?
-  cohortKey            String
-  dueDate              DateTime?
-  assigned             Int      @default(0)
-  completed            Int      @default(0)
-  projectedCompletionRate Int   @default(0)
-  projectedOverdue     Int      @default(0)
-  benchmark            Json?
-  generatedAt          DateTime @default(now())
+  id                      String    @id @default(uuid())
+  tenantId                String
+  courseId                String?
+  cohortKey               String
+  dueDate                 DateTime?
+  assigned                Int       @default(0)
+  completed               Int       @default(0)
+  projectedCompletionRate Int       @default(0)
+  projectedOverdue        Int       @default(0)
+  benchmark               Json?
+  generatedAt             DateTime  @default(now())
 
   @@index([tenantId, courseId, generatedAt])
   @@index([tenantId, cohortKey, generatedAt])

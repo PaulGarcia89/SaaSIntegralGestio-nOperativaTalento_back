@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import {
   ApplicationStatus,
   InventoryAssetStatus,
+  Prisma,
   TrainingProgressStatus,
   WorkflowTaskStatus,
 } from '@prisma/client';
@@ -9,6 +10,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { AccessScope } from '../common/enums/access-scope.enum';
+import { SaveReportFilterDto } from './dto/save-report-filter.dto';
 
 const DAY = 86_400_000;
 
@@ -186,6 +188,58 @@ export class ReportsService {
       content: `\uFEFF${csv}`,
       generatedAt: report.generatedAt,
     };
+  }
+
+  async listSavedFilters(actor: JwtPayload) {
+    const tenantId = this.requireTenantContext(actor);
+    return this.prisma.reportSavedFilter.findMany({
+      where: { tenantId, userId: actor.userId },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async saveFilter(actor: JwtPayload, dto: SaveReportFilterDto) {
+    const tenantId = this.requireTenantContext(actor);
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException('Report filter name is required');
+    const filters = dto.filters as Prisma.InputJsonValue;
+
+    return this.prisma.reportSavedFilter.upsert({
+      where: {
+        tenantId_userId_name: {
+          tenantId,
+          userId: actor.userId,
+          name,
+        },
+      },
+      update: { filters },
+      create: { tenantId, userId: actor.userId, name, filters },
+    });
+  }
+
+  async deleteFilter(actor: JwtPayload, id: string) {
+    const tenantId = this.requireTenantContext(actor);
+    const savedFilter = await this.prisma.reportSavedFilter.findFirst({
+      where: { id, tenantId, userId: actor.userId },
+      select: { id: true },
+    });
+    if (!savedFilter) {
+      throw new NotFoundException('Saved report filter not found');
+    }
+
+    await this.prisma.reportSavedFilter.delete({ where: { id } });
+    return { deleted: true, id };
+  }
+
+  private requireTenantContext(actor: JwtPayload) {
+    const tenantId = actor.activeTenantId ?? actor.tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Select an active tenant before managing report filters');
+    }
+    if (!actor.isSuperAdmin && actor.allowedTenantIds.length > 0 && !actor.allowedTenantIds.includes(tenantId)) {
+      throw new ForbiddenException('Tenant is outside the active user scope');
+    }
+    return tenantId;
   }
 
   private async resolveContext(actor: JwtPayload, query: ReportQueryDto) {
