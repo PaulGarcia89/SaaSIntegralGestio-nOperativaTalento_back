@@ -29,6 +29,9 @@ describe('EmployeesService documentary records', () => {
         findFirst: jest.fn().mockResolvedValue({ id: branchId }),
         findMany: jest.fn().mockResolvedValue([{ id: branchId }]),
       },
+      tenant: {
+        findUnique: jest.fn().mockResolvedValue({ id: tenantId, name: 'Empresa Demo', slug: 'demo', status: 'ACTIVE', createdAt, updatedAt: createdAt }),
+      },
       employee: {
         findFirst: jest.fn().mockResolvedValueOnce(null).mockResolvedValue(createdEmployee),
         findMany: jest.fn().mockResolvedValue([]),
@@ -161,5 +164,54 @@ describe('EmployeesService documentary records', () => {
       trainingSummary: null,
       assetSummary: null,
     });
+  });
+
+  it('builds a payroll and compliance snapshot without exposing sensitive data', async () => {
+    const { service, prisma } = setup();
+    prisma.employee.findFirst.mockReset().mockResolvedValue({
+      ...employeeRecord(),
+      branchAssignments: [{
+        id: 'assignment-1',
+        tenantId,
+        employeeId: 'employee-1',
+        branchId,
+        role: 'Supervisora',
+        isPrimary: true,
+        assignedAt: createdAt,
+        releasedAt: null,
+        branch: { id: branchId, tenantId, name: 'Sucursal Central', location: 'Miami', createdAt, updatedAt: createdAt },
+      }],
+    });
+    prisma.employeeDocument.findMany.mockResolvedValue([
+      {
+        id: 'w4-doc',
+        category: 'W4',
+        originalName: 'w4.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 100,
+        scanStatus: 'CLEAN',
+        status: 'APPROVED',
+        version: 2,
+        rejectionReason: null,
+        expiresAt: null,
+        reviewedAt: createdAt,
+        uploadedAt: createdAt,
+        effectiveAt: createdAt,
+        retentionUntil: null,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ] as any);
+    prisma.auditLog.findMany.mockResolvedValue([{ id: 'audit-1', action: 'EMPLOYEE_RECORD_REGISTERED', email: 'ana@example.com', actorRole: 'SYSTEM', createdAt }]);
+
+    const result = await service.payrollCompliance('employee-1', {} as any, tenantId);
+
+    expect(result.tenant).toMatchObject({ id: tenantId, name: 'Empresa Demo', slug: 'demo' });
+    expect(result.payroll).toMatchObject({ payType: null, payrollProvider: null });
+    expect(result.tax).toMatchObject({ w4Status: 'COMPLETE', w4DocumentId: 'w4-doc', ssnMasked: null });
+    expect(result.i9).toMatchObject({ status: 'NOT_STARTED', documentId: null });
+    expect(result.eVerify).toMatchObject({ status: 'NOT_REQUIRED', required: false });
+    expect(result.floridaNewHire).toMatchObject({ status: 'PENDING', required: false });
+    expect(result.auditTrail).toHaveLength(1);
   });
 });

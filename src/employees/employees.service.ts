@@ -527,6 +527,171 @@ export class EmployeesService {
     };
   }
 
+  async payrollCompliance(id: string, actor: JwtPayload, tenantId: string) {
+    const [employee, tenant, documentSummary, history, auditTrail] = await Promise.all([
+      this.prisma.employee.findFirst({
+        where: {
+          id,
+          tenantId,
+          ...this.buildBranchScopedWhere(actor, tenantId),
+        },
+        include: {
+          branchAssignments: {
+            where: {
+              tenantId,
+              releasedAt: null,
+            },
+            include: { branch: true },
+            orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
+          },
+        },
+      }),
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { id: true, name: true, slug: true, status: true, createdAt: true, updatedAt: true },
+      }),
+      this.documentSummary(id, actor, tenantId),
+      this.history(id, actor, tenantId),
+      this.prisma.auditLog.findMany({
+        where: { tenantId, entityType: 'Employee', entityId: id },
+        select: {
+          id: true,
+          action: true,
+          email: true,
+          actorRole: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 25,
+      }),
+    ]);
+
+    if (!employee || !tenant) {
+      throw new NotFoundException('Registro de empleado no encontrado');
+    }
+
+    const primaryAssignment = employee.branchAssignments.find((assignment) => assignment.isPrimary) ?? employee.branchAssignments[0] ?? null;
+    const now = new Date();
+    const expiringBefore = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const expiringDocuments = documentSummary.documents.filter((document) => document.expiresAt && document.expiresAt > now && document.expiresAt <= expiringBefore);
+    const w4Document = documentSummary.documents.find((document) => document.category === 'W4') ?? null;
+    const i9Document = documentSummary.documents.find((document) => document.category === 'I9') ?? null;
+    const identityDocument = documentSummary.documents.find((document) => document.category === 'IDENTITY' || document.category === 'IDENTIFICATION') ?? null;
+
+    return {
+      employeeId: employee.id,
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        status: tenant.status,
+      },
+      employee: {
+        id: employee.id,
+        name: employee.name,
+        email: employee.email,
+        status: employee.status,
+        jobTitle: employee.jobTitle,
+        recordSource: employee.sourceCandidateId ? 'CANDIDATE_CONVERSION' : 'DIRECTORY_REGISTRATION',
+        branch: primaryAssignment
+          ? {
+              branchId: primaryAssignment.branchId,
+              name: primaryAssignment.branch.name,
+              role: primaryAssignment.role,
+            }
+          : null,
+      },
+      payroll: {
+        payType: null,
+        payRate: null,
+        payFrequency: null,
+        overtimeEligible: null,
+        regularHourlyRate: null,
+        workweekStartDay: null,
+        workweekStartTime: null,
+        payrollProvider: null,
+        payrollEmployeeId: null,
+        externalPayrollReference: null,
+      },
+      tax: {
+        w4Status: w4Document ? 'COMPLETE' : 'NOT_STARTED',
+        w4CompletedAt: w4Document?.createdAt ?? null,
+        w4EffectiveAt: w4Document?.updatedAt ?? null,
+        w4DocumentId: w4Document?.id ?? null,
+        w4Version: w4Document?.version ?? null,
+        ssnMasked: null,
+      },
+      i9: {
+        status: i9Document ? 'VERIFIED' : 'NOT_STARTED',
+        firstDayOfEmployment: null,
+        section1CompletedAt: null,
+        section2CompletedAt: null,
+        verificationDueDate: null,
+        verificationCompletedAt: null,
+        reverificationRequired: false,
+        reverificationDueDate: null,
+        documentId: i9Document?.id ?? null,
+        retentionUntil: i9Document?.expiresAt ?? null,
+      },
+      eVerify: {
+        required: false,
+        requirementReason: null,
+        status: 'NOT_REQUIRED',
+        caseNumber: null,
+        submittedAt: null,
+        completedAt: null,
+        documentId: null,
+      },
+      floridaNewHire: {
+        required: false,
+        status: 'PENDING',
+        dueDate: null,
+        submittedAt: null,
+        confirmationNumber: null,
+        failureReason: null,
+      },
+      complianceSummary: {
+        totalDocuments: documentSummary.summary.total,
+        pendingReview: documentSummary.summary.pendingReview,
+        approved: documentSummary.summary.approved,
+        rejected: documentSummary.summary.rejected,
+        expired: documentSummary.summary.expired,
+        expiringWithin30Days: documentSummary.summary.expiringWithin30Days,
+        byCategory: documentSummary.summary.byCategory,
+        expiringDocuments: expiringDocuments.map((document) => ({
+          id: document.id,
+          category: document.category,
+          originalName: document.originalName,
+          expiresAt: document.expiresAt,
+        })),
+      },
+      documents: {
+        total: documentSummary.summary.total,
+        w4DocumentId: w4Document?.id ?? null,
+        i9DocumentId: i9Document?.id ?? null,
+        identityDocumentId: identityDocument?.id ?? null,
+      },
+      history: {
+        employeeId: history.employeeId,
+        assignments: history.assignments.length,
+        documents: history.documents?.length ?? 0,
+        auditTrail: history.auditTrail.length,
+      },
+      auditTrail: auditTrail.map((entry) => ({
+        id: entry.id,
+        action: entry.action,
+        actorEmail: entry.email,
+        actorRole: entry.actorRole,
+        createdAt: entry.createdAt,
+      })),
+      alerts: [
+        ...(documentSummary.summary.pendingReview > 0 ? [{ type: 'DOCUMENTS_PENDING_REVIEW', severity: 'warning', message: `${documentSummary.summary.pendingReview} documentos requieren revisión` }] : []),
+        ...(expiringDocuments.length > 0 ? [{ type: 'DOCUMENTS_EXPIRING', severity: 'warning', message: `${expiringDocuments.length} documentos vencerán en los próximos 30 días` }] : []),
+        ...(identityDocument ? [] : [{ type: 'IDENTITY_DOC_MISSING', severity: 'info', message: 'No hay documento de identidad relacionado' }]),
+      ],
+    };
+  }
+
   async documentSummary(id: string, actor: JwtPayload, tenantId: string) {
     await this.ensureEmployeeExists(id, actor, tenantId);
     const now = new Date();

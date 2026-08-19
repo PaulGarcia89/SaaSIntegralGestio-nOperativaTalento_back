@@ -42,6 +42,7 @@ Si una fila es inválida, la carga no escribe ningún registro.
 - `GET /employees/:id/document-summary`: resumen de documentos, revisiones, vencimientos y categorías. No expone claves internas de almacenamiento ni checksums.
 - `GET /employees/:id/history`: asignaciones, documentos y hasta 100 eventos de auditoría vinculados al empleado.
 - `GET /employees/:id/overview`: vista agregada y segura del expediente con datos base, empleo, sucursal, resumen documental y alertas derivadas.
+- `GET /employees/:id/payroll-compliance`: snapshot seguro para nómina y cumplimiento con base del tenant, estado W-4, I-9, E-Verify y Florida New Hire, usando placeholders cuando el backend aún no persiste un campo específico.
 - `PATCH /employees/:id`: actualiza nombre, correo, cargo o estado. Cambiar `jobTitle` sincroniza el rol de la asignación principal.
 
 Las respuestas de directorio incluyen:

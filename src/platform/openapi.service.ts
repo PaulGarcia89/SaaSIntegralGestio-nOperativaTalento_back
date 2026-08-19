@@ -75,6 +75,7 @@ export class OpenApiService {
         '/employees/{id}/document-summary': { get: { tags: ['Employees'], summary: 'Get a safe document summary for an employee' } },
         '/employees/{id}/history': { get: { tags: ['Employees'], summary: 'Get employee history and audit trail' } },
         '/employees/{id}/overview': { get: { tags: ['Employees'], summary: 'Get a safe employee overview' } },
+        '/employees/{id}/payroll-compliance': { get: { tags: ['Employees'], summary: 'Get a payroll and compliance snapshot for an employee' } },
         '/employees/{id}/status': { patch: { tags: ['Employees'], summary: 'Update employee status' } },
         '/employees/{id}/transfer': { post: { tags: ['Employees'], summary: 'Transfer the primary branch of an employee' } },
         '/employees/{id}/assignments': { post: { tags: ['Employees'], summary: 'Assign a secondary branch to an employee' } },

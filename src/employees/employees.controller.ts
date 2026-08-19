@@ -77,6 +77,12 @@ export class EmployeesController {
     return this.employeesService.overview(id, request.user, request.tenant!.id);
   }
 
+  @Get(':id/payroll-compliance')
+  @RequirePermissions('employees.read')
+  payrollCompliance(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.payrollCompliance(id, request.user, request.tenant!.id);
+  }
+
   @Patch(':id')
   @RequirePermissions('employees.update')
   async update(
