@@ -34,6 +34,7 @@ describe('EmployeesService documentary records', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       employeeDocument: { findMany: jest.fn().mockResolvedValue([]) },
+      auditLog: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn((operation: ((client: typeof tx) => unknown) | unknown[]) =>
         typeof operation === 'function' ? operation(tx) : Promise.all(operation),
       ),
@@ -130,5 +131,35 @@ describe('EmployeesService documentary records', () => {
     expect(result.summary).toMatchObject({ total: 1, approved: 1, byCategory: { IDENTITY: 1 } });
     expect(result.documents[0]).not.toHaveProperty('storageKey');
     expect(result.documents[0]).not.toHaveProperty('checksum');
+  });
+
+  it('builds an overview that reuses existing employee, document and audit data safely', async () => {
+    const { service, prisma } = setup();
+    prisma.employee.findFirst.mockReset().mockResolvedValue(employeeRecord());
+    prisma.employeeDocument.findMany.mockResolvedValue([]);
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    const result = await service.overview('employee-1', {} as any, tenantId);
+
+    expect(result).toMatchObject({
+      employeeId: 'employee-1',
+      basicInformation: {
+        name: 'Ana Perez',
+        email: 'ana@example.com',
+        status: EmployeeStatus.ACTIVE,
+        recordSource: 'DIRECTORY_REGISTRATION',
+      },
+      complianceSummary: {
+        totalDocuments: 0,
+        pendingReview: 0,
+        approved: 0,
+        rejected: 0,
+        expired: 0,
+        expiringWithin30Days: 0,
+        byCategory: {},
+      },
+      trainingSummary: null,
+      assetSummary: null,
+    });
   });
 });

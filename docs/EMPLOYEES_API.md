@@ -41,6 +41,7 @@ Si una fila es inválida, la carga no escribe ningún registro.
 - `GET /employees/:id`: ficha operativa, origen del registro y conteo documental.
 - `GET /employees/:id/document-summary`: resumen de documentos, revisiones, vencimientos y categorías. No expone claves internas de almacenamiento ni checksums.
 - `GET /employees/:id/history`: asignaciones, documentos y hasta 100 eventos de auditoría vinculados al empleado.
+- `GET /employees/:id/overview`: vista agregada y segura del expediente con datos base, empleo, sucursal, resumen documental y alertas derivadas.
 - `PATCH /employees/:id`: actualiza nombre, correo, cargo o estado. Cambiar `jobTitle` sincroniza el rol de la asignación principal.
 
 Las respuestas de directorio incluyen:

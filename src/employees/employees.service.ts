@@ -431,6 +431,102 @@ export class EmployeesService {
     };
   }
 
+  async overview(id: string, actor: JwtPayload, tenantId: string) {
+    const [employee, documentSummary, history] = await Promise.all([
+      this.prisma.employee.findFirst({
+        where: {
+          id,
+          tenantId,
+          ...this.buildBranchScopedWhere(actor, tenantId),
+        },
+        include: {
+          branchAssignments: {
+            where: {
+              tenantId,
+              releasedAt: null,
+            },
+            include: {
+              branch: true,
+            },
+            orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
+          },
+          _count: {
+            select: {
+              employeeDocuments: {
+                where: { deletedAt: null, status: { not: 'SUPERSEDED' } },
+              },
+            },
+          },
+        },
+      }),
+      this.documentSummary(id, actor, tenantId),
+      this.prisma.auditLog.findMany({
+        where: { tenantId, entityType: 'Employee', entityId: id },
+        select: {
+          id: true,
+          action: true,
+          email: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+    ]);
+
+    if (!employee) {
+      throw new NotFoundException('Registro de empleado no encontrado');
+    }
+
+    const primaryAssignment = employee.branchAssignments.find((assignment) => assignment.isPrimary) ?? employee.branchAssignments[0] ?? null;
+    const documentStats = documentSummary.summary;
+    const expiringDocuments = documentSummary.documents.filter((document) => document.expiresAt && document.expiresAt > new Date() && document.expiresAt <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+
+    return {
+      employeeId: employee.id,
+      basicInformation: {
+        name: employee.name,
+        email: employee.email,
+        status: employee.status,
+        recordSource: employee.sourceCandidateId ? 'CANDIDATE_CONVERSION' : 'DIRECTORY_REGISTRATION',
+      },
+      employment: {
+        jobTitle: employee.jobTitle,
+        createdAt: employee.createdAt,
+        updatedAt: employee.updatedAt,
+      },
+      branch: primaryAssignment
+        ? {
+            branchId: primaryAssignment.branchId,
+            name: primaryAssignment.branch.name,
+            role: primaryAssignment.role,
+            isPrimary: true,
+          }
+        : null,
+      department: null,
+      position: employee.jobTitle ? { title: employee.jobTitle } : null,
+      supervisor: null,
+      complianceSummary: {
+        totalDocuments: documentStats.total,
+        pendingReview: documentStats.pendingReview,
+        approved: documentStats.approved,
+        rejected: documentStats.rejected,
+        expired: documentStats.expired,
+        expiringWithin30Days: documentStats.expiringWithin30Days,
+        byCategory: documentStats.byCategory,
+      },
+      trainingSummary: null,
+      assetSummary: null,
+      alerts: [
+        ...(documentStats.pendingReview > 0 ? [{ type: 'DOCUMENTS_PENDING_REVIEW', severity: 'warning', message: `${documentStats.pendingReview} documentos requieren revisión` }] : []),
+        ...(expiringDocuments.length > 0 ? [{ type: 'DOCUMENTS_EXPIRING', severity: 'warning', message: `${expiringDocuments.length} documentos vencen pronto` }] : []),
+        ...(history.length > 0 ? [] : [{ type: 'NO_AUDIT_HISTORY', severity: 'info', message: 'Todavía no hay eventos auditables para este empleado' }]),
+      ],
+      documentSummary: {
+        totalDocuments: documentStats.total,
+      },
+    };
+  }
+
   async documentSummary(id: string, actor: JwtPayload, tenantId: string) {
     await this.ensureEmployeeExists(id, actor, tenantId);
     const now = new Date();

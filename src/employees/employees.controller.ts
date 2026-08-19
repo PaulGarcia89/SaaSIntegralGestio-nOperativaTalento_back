@@ -71,6 +71,12 @@ export class EmployeesController {
     return this.employeesService.documentSummary(id, request.user, request.tenant!.id);
   }
 
+  @Get(':id/overview')
+  @RequirePermissions('employees.read')
+  overview(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.overview(id, request.user, request.tenant!.id);
+  }
+
   @Patch(':id')
   @RequirePermissions('employees.update')
   async update(
