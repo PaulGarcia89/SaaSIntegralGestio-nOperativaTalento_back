@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -626,7 +628,7 @@ export class VacanciesService {
     let stored: { storageKey: string; sha256: string };
     let scan: Awaited<ReturnType<TrainingAntivirusService['scan']>>;
     try {
-      scan = await this.antivirus.scan(file.buffer);
+      scan = await this.scanVacancyImage(file.buffer);
       stored = { ...quarantined, ...await this.files.promote(quarantined.storageKey) };
     } catch (error) {
       await this.files.delete(quarantined.storageKey);
@@ -694,6 +696,23 @@ export class VacanciesService {
       },
       orderBy: { version: 'desc' },
     });
+  }
+
+  private async scanVacancyImage(buffer: Buffer) {
+    try {
+      return await this.antivirus!.scan(buffer);
+    } catch (error) {
+      // Temporary fallback while the shared antivirus service is disabled.
+      // Image type and size checks still run before the file reaches this point.
+      if (
+        this.antivirus?.mode === 'disabled'
+        && error instanceof HttpException
+        && error.getStatus() === HttpStatus.SERVICE_UNAVAILABLE
+      ) {
+        return { status: 'SKIPPED' as const, engine: null };
+      }
+      throw error;
+    }
   }
 
   async deleteImage(
