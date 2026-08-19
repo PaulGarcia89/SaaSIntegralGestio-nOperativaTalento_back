@@ -526,14 +526,24 @@ export class EmployeesService {
     this.assertBranchInActorScope(actor, dto.branchId);
     await this.ensureEmployeeExists(id, actor, tenantId);
 
-    const activeAssignment = await this.prisma.employeeBranch.findFirst({
-      where: {
-        tenantId,
-        employeeId: id,
-        branchId: dto.branchId,
-        releasedAt: null,
-      },
-    });
+    const [activeAssignment, currentPrimary] = await Promise.all([
+      this.prisma.employeeBranch.findFirst({
+        where: {
+          tenantId,
+          employeeId: id,
+          branchId: dto.branchId,
+          releasedAt: null,
+        },
+      }),
+      this.prisma.employeeBranch.findFirst({
+        where: {
+          tenantId,
+          employeeId: id,
+          isPrimary: true,
+          releasedAt: null,
+        },
+      }),
+    ]);
 
     if (activeAssignment) {
       throw new BadRequestException('El empleado ya tiene una asignación activa en esa sucursal');
@@ -545,7 +555,9 @@ export class EmployeesService {
         employeeId: id,
         branchId: dto.branchId,
         role: dto.role,
-        isPrimary: false,
+        // Employees imported from legacy data can lack assignments. Their first
+        // assignment must become the primary branch instead of a secondary one.
+        isPrimary: !currentPrimary,
       },
     });
 

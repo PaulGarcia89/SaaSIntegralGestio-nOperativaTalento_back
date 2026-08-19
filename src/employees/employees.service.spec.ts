@@ -82,6 +82,24 @@ describe('EmployeesService documentary records', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('makes the first assignment primary when an employee has none', async () => {
+    const { service, prisma } = setup();
+    prisma.employee.findFirst.mockReset().mockResolvedValue(employeeRecord());
+    prisma.employeeBranch = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+    };
+
+    await service.assignSecondaryBranch('employee-1', {} as any, tenantId, {
+      branchId,
+      role: 'Gerente',
+    });
+
+    expect(prisma.employeeBranch.create).toHaveBeenCalledWith({
+      data: { tenantId, employeeId: 'employee-1', branchId, role: 'Gerente', isPrimary: true },
+    });
+  });
+
   it('prevalidates a bulk load and reports row-level documentary record errors', async () => {
     const { service, prisma } = setup();
     prisma.employee.findMany.mockResolvedValue([{ email: 'existing@example.com' }]);
