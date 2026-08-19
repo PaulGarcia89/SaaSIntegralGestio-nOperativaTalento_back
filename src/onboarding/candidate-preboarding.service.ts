@@ -9,7 +9,8 @@ export class CandidatePreboardingService {
   constructor(private readonly prisma: PrismaService, private readonly storage: OnboardingDocumentStorageService, private readonly antivirus: TrainingAntivirusService) {}
 
   async overview(accountId: string) {
-    const flow = await this.flow(accountId);
+    const flow = await this.findFlow(accountId);
+    if (!flow) return null;
     return { id: flow.id, employee: flow.employee, status: flow.status, readinessStatus: flow.readinessStatus, startedAt: flow.startedAt, tasks: flow.tasks, documents: flow.documents, signatures: flow.signaturePackages, progressPercent: flow.tasks.length ? Math.round(flow.tasks.filter((task) => task.status === 'COMPLETED').length * 100 / flow.tasks.length) : 0 };
   }
 
@@ -39,8 +40,13 @@ export class CandidatePreboardingService {
   }
 
   private async flow(accountId: string) {
-    const flow = await this.prisma.onboardingFlow.findFirst({ where: { candidate: { accountId }, status: { not: WorkflowTaskStatus.COMPLETED } }, include: { employee: { select: { name: true, jobTitle: true, email: true } }, tasks: { orderBy: { sortOrder: 'asc' }, select: { id: true, title: true, description: true, status: true, ownerType: true, dueDate: true, required: true } }, documents: { where: { deletedAt: null, status: { not: 'SUPERSEDED' } }, select: { id: true, originalName: true, status: true, createdAt: true, category: true } }, signaturePackages: { select: { id: true, title: true, status: true, dueDate: true } } }, orderBy: { startedAt: 'desc' } });
+    const flow = await this.findFlow(accountId);
     if (!flow) throw new NotFoundException('No active preboarding was found for this account');
+    return flow;
+  }
+
+  private async findFlow(accountId: string) {
+    const flow = await this.prisma.onboardingFlow.findFirst({ where: { candidate: { accountId }, status: { not: WorkflowTaskStatus.COMPLETED } }, include: { employee: { select: { name: true, jobTitle: true, email: true } }, tasks: { orderBy: { sortOrder: 'asc' }, select: { id: true, title: true, description: true, status: true, ownerType: true, dueDate: true, required: true } }, documents: { where: { deletedAt: null, status: { not: 'SUPERSEDED' } }, select: { id: true, originalName: true, status: true, createdAt: true, category: true } }, signaturePackages: { select: { id: true, title: true, status: true, dueDate: true } } }, orderBy: { startedAt: 'desc' } });
     return flow;
   }
 }
