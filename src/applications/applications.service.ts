@@ -976,14 +976,27 @@ export class ApplicationsService {
   }
 
   async findOneForTenant(id: string, actor: JwtPayload, tenantId: string) {
-    const application = await this.prisma.vacancyApplication.findFirst({
+    const scopedWhere = {
+      tenantId,
+      ...this.buildBranchScopedWhere(actor),
+    };
+    let application = await this.prisma.vacancyApplication.findFirst({
       where: {
+        ...scopedWhere,
         id,
-        tenantId,
-        ...this.buildBranchScopedWhere(actor),
       },
       include: applicationInclude,
     });
+
+    // Candidate-facing links can carry a candidate ID while ATS links carry an
+    // application ID. Resolve the latest in-scope application in either case.
+    if (!application) {
+      application = await this.prisma.vacancyApplication.findFirst({
+        where: { ...scopedWhere, candidateId: id },
+        include: applicationInclude,
+        orderBy: { appliedAt: "desc" },
+      });
+    }
 
     if (!application) {
       throw new NotFoundException("Application not found");
