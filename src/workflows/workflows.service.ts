@@ -488,6 +488,7 @@ export class WorkflowsService {
         employee = await tx.employee.create({
           data: {
             tenantId,
+            employeeNumber: `EMP-${Date.now()}`,
             name: employeeName,
             email: employeeEmail,
             jobTitle,

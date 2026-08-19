@@ -27,6 +27,118 @@ enum EmployeeStatus {
   TERMINATED
 }
 
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  TEMPORARY
+  INTERNSHIP
+}
+
+enum EmploymentStatusProfile {
+  ACTIVE
+  INACTIVE
+  LEAVE
+  TERMINATED
+  DRAFT
+}
+
+enum EmployeePayType {
+  SALARY
+  HOURLY
+  COMMISSION
+  TIP_BASED
+  OTHER
+}
+
+enum EmployeePayFrequency {
+  WEEKLY
+  BIWEEKLY
+  SEMIMONTHLY
+  MONTHLY
+}
+
+enum EmployeePaymentMethod {
+  DIRECT_DEPOSIT
+  CHECK
+  PAY_CARD
+  OTHER
+}
+
+enum EmployeeW4Status {
+  NOT_STARTED
+  PENDING
+  COMPLETE
+  NOT_REQUIRED
+}
+
+enum EmployeeI9Status {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  EXPIRED
+  NOT_REQUIRED
+}
+
+enum EmployeeEVerifyStatus {
+  NOT_REQUIRED
+  PENDING
+  SUBMITTED
+  AUTHORIZED
+  TNC
+  CLOSED
+}
+
+enum EmployeeFloridaNewHireStatus {
+  NOT_REQUIRED
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+}
+
+enum EmployeeComplianceCategory {
+  TAX
+  ELIGIBILITY
+  FLORIDA
+  PAYROLL
+  DOCUMENT
+  TRAINING
+  LICENSE
+  SAFETY
+}
+
+enum EmployeeComplianceStatus {
+  NOT_STARTED
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+  EXPIRING
+  EXPIRED
+  NOT_REQUIRED
+  WAIVED
+}
+
+enum EmployeeComplianceSource {
+  SYSTEM
+  POLICY
+  MANUAL
+}
+
+enum EmployeeDocumentSensitivity {
+  STANDARD
+  SENSITIVE
+  HIGHLY_SENSITIVE
+}
+
+enum EmployeeDocumentStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SUPERSEDED
+  DELETED
+}
+
 enum VacancyStatus {
   OPEN
   PAUSED
@@ -1221,6 +1333,12 @@ model Tenant {
   onboardingRetentionPolicies   OnboardingRetentionPolicy[]
   onboardingLegalHolds          OnboardingLegalHold[]
   employeeDocuments             EmployeeDocument[]
+  employeeEmploymentProfiles    EmployeeEmploymentProfile[]         @relation("TenantEmployeeEmploymentProfiles")
+  employeePayrollProfiles       EmployeePayrollProfile[]            @relation("TenantEmployeePayrollProfiles")
+  employeeTaxProfiles           EmployeeTaxProfile[]                @relation("TenantEmployeeTaxProfiles")
+  employeeWorkEligibilityProfiles EmployeeWorkEligibilityProfile[]   @relation("TenantEmployeeWorkEligibilityProfiles")
+  employeeFloridaNewHireReports EmployeeFloridaNewHireReport[]      @relation("TenantEmployeeFloridaNewHireReports")
+  employeeComplianceRequirements EmployeeComplianceRequirement[]     @relation("TenantEmployeeComplianceRequirements")
   signaturePackages             SignaturePackage[]
   signatureParticipants         SignatureParticipant[]
   signatureTemplates            SignatureTemplate[]
@@ -1331,6 +1449,8 @@ model User {
   policyChecks                       PolicyCheck[]                     @relation("PolicyCheckCreatedBy")
   assignedInterviews                 VacancyApplication[]              @relation("ApplicationInterviewer")
   supervisedEmployees                Employee[]                        @relation("EmployeeSupervisor")
+  employeeEmploymentProfiles         EmployeeEmploymentProfile[]       @relation("EmployeeEmploymentSupervisor")
+  employeeComplianceRequirements     EmployeeComplianceRequirement[]    @relation("EmployeeComplianceVerifier")
   vacancyResponsibilities            VacancyResponsible[]
   applicationSavedViews              ApplicationSavedView[]
   workspaceViews                     WorkspaceView[]
@@ -2219,7 +2339,7 @@ model EmployeeDocument {
   sizeBytes                    Int
   checksum                     String
   scanStatus                   String
-  status                       String             @default("PENDING_REVIEW")
+  status                       EmployeeDocumentStatus @default(PENDING_REVIEW)
   version                      Int                @default(1)
   replacesDocumentId           String?
   rejectionReason              String?
@@ -2229,6 +2349,11 @@ model EmployeeDocument {
   expiresAt                    DateTime?
   reviewedAt                   DateTime?
   reviewedById                 String?
+  sensitivity                  EmployeeDocumentSensitivity @default(STANDARD)
+  issuedAt                     DateTime?
+  retentionUntil               DateTime?
+  legalHold                    Boolean            @default(false)
+  legalHoldReason              String?
   metadata                     Json?
   createdAt                    DateTime           @default(now())
   updatedAt                    DateTime           @updatedAt
@@ -2240,6 +2365,11 @@ model EmployeeDocument {
   replacesDocument             EmployeeDocument?  @relation("EmployeeDocumentVersions", fields: [replacesDocumentId], references: [id], onDelete: SetNull)
   replacementDocuments         EmployeeDocument[] @relation("EmployeeDocumentVersions")
   uploadedByCandidateAccount   CandidateAccount?  @relation(fields: [uploadedByCandidateAccountId], references: [id], onDelete: SetNull)
+  w4Profiles                   EmployeeTaxProfile[] @relation("EmployeeW4Document")
+  i9Profiles                   EmployeeWorkEligibilityProfile[] @relation("EmployeeI9Document")
+  eVerifyProfiles              EmployeeWorkEligibilityProfile[] @relation("EmployeeEVerifyDocument")
+  floridaNewHireProfiles       EmployeeFloridaNewHireReport[] @relation("EmployeeFloridaNewHireDocument")
+  complianceRequirements       EmployeeComplianceRequirement[] @relation("EmployeeComplianceDocument")
 
   @@unique([tenantId, storageKey])
   @@index([tenantId, employeeId, status])
@@ -2706,6 +2836,7 @@ model Branch {
   onboardingFlows               OnboardingFlow[]
   onboardingTasks               OnboardingTask[]
   employeeDocuments             EmployeeDocument[]
+  employeeEmploymentProfiles    EmployeeEmploymentProfile[]       @relation("BranchEmployeeEmploymentProfiles")
   signaturePackages             SignaturePackage[]
   inventoryAssignments          InventoryAssignment[]
   inventoryRecoveries           InventoryRecovery[]
@@ -2738,42 +2869,68 @@ model Branch {
 }
 
 model Employee {
-  id                          String                       @id @default(uuid())
-  tenantId                    String
-  name                        String
-  email                       String
-  jobTitle                    String?
-  supervisorUserId            String?
-  sourceCandidateId           String?
-  status                      EmployeeStatus               @default(ACTIVE)
-  createdAt                   DateTime                     @default(now())
-  updatedAt                   DateTime                     @updatedAt
-  tenant                      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supervisor                  User?                        @relation("EmployeeSupervisor", fields: [supervisorUserId], references: [id], onDelete: SetNull)
-  sourceCandidate             Candidate?                   @relation(fields: [sourceCandidateId], references: [id], onDelete: SetNull)
-  branchAssignments           EmployeeBranch[]
-  masterWorkflows             MasterWorkflow[]
-  hiringFlows                 HiringFlow[]
-  onboardingFlows             OnboardingFlow[]
-  onboardingTasks             OnboardingTask[]
-  employeeDocuments           EmployeeDocument[]
-  signaturePackages           SignaturePackage[]
-  inventoryAssignments        InventoryAssignment[]
-  inventoryRecoveries         InventoryRecovery[]
-  workflowTrainingAssignments WorkflowTrainingAssignment[]
-  accessTasks                 AccessTask[]
-  productivityReviews         ProductivityReview[]
-  automationExecutions        AutomationExecution[]
-  automationAuditLogs         AutomationAuditLog[]
-  policyChecks                PolicyCheck[]
-  assetAssignments            AssetAssignment[]
-  inventoryAssets             InventoryAsset[]
-  inventoryMovements          InventoryMovement[]
-  trainingActivations         TrainingActivation[]
-  hiringQualityReviews        HiringQualityReview[]
-  performanceObjectives       PerformanceObjective[]
-  performanceEvaluations      PerformanceEvaluation[]
+  id                           String                       @id @default(uuid())
+  tenantId                     String
+  employeeNumber               String
+  name                         String
+  legalFirstName               String?
+  middleName                   String?
+  legalLastName                String?
+  preferredName                String?
+  email                        String
+  workEmail                    String?
+  personalEmail                String?
+  phone                        String?
+  dateOfBirth                  DateTime?
+  addressLine1                 String?
+  addressLine2                 String?
+  city                         String?
+  state                        String?
+  postalCode                   String?
+  country                      String?
+  emergencyContactName         String?
+  emergencyContactPhone        String?
+  emergencyContactRelationship String?
+  jobTitle                     String?
+  supervisorUserId             String?
+  sourceCandidateId            String?
+  status                       EmployeeStatus               @default(ACTIVE)
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+  deletedAt                    DateTime?
+  tenant                       Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supervisor                   User?                        @relation("EmployeeSupervisor", fields: [supervisorUserId], references: [id], onDelete: SetNull)
+  sourceCandidate              Candidate?                   @relation(fields: [sourceCandidateId], references: [id], onDelete: SetNull)
+  branchAssignments            EmployeeBranch[]
+  employmentProfile            EmployeeEmploymentProfile?
+  payrollProfile               EmployeePayrollProfile?
+  taxProfile                   EmployeeTaxProfile?
+  workEligibilityProfile       EmployeeWorkEligibilityProfile?
+  floridaNewHireReport         EmployeeFloridaNewHireReport?
+  complianceRequirements       EmployeeComplianceRequirement[]
+  documents                    EmployeeDocument[]
+  masterWorkflows              MasterWorkflow[]
+  hiringFlows                  HiringFlow[]
+  onboardingFlows              OnboardingFlow[]
+  onboardingTasks              OnboardingTask[]
+  signaturePackages            SignaturePackage[]
+  inventoryAssignments         InventoryAssignment[]
+  inventoryRecoveries          InventoryRecovery[]
+  workflowTrainingAssignments  WorkflowTrainingAssignment[]
+  accessTasks                  AccessTask[]
+  productivityReviews          ProductivityReview[]
+  automationExecutions         AutomationExecution[]
+  automationAuditLogs          AutomationAuditLog[]
+  policyChecks                 PolicyCheck[]
+  assetAssignments             AssetAssignment[]
+  inventoryAssets              InventoryAsset[]
+  inventoryMovements           InventoryMovement[]
+  trainingActivations          TrainingActivation[]
+  hiringQualityReviews         HiringQualityReview[]
+  performanceObjectives        PerformanceObjective[]
+  performanceEvaluations       PerformanceEvaluation[]
 
+  @@unique([tenantId, employeeNumber])
   @@unique([tenantId, email])
   @@unique([tenantId, sourceCandidateId])
   @@index([tenantId])
@@ -2798,6 +2955,149 @@ model EmployeeBranch {
   @@index([tenantId, branchId])
   @@index([tenantId, branchId, releasedAt])
   @@index([tenantId, employeeId, releasedAt])
+}
+
+model EmployeeEmploymentProfile {
+  id                   String                  @id @default(uuid())
+  tenantId             String
+  employeeId           String                  @unique
+  branchId             String
+  department           String?
+  positionId           String?
+  supervisorUserId     String?
+  employmentType       EmploymentType
+  employmentStatus     EmploymentStatusProfile @default(DRAFT)
+  hireDate             DateTime?
+  startDate            DateTime?
+  jobTitle             String
+  workerClassification String?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  tenant               Tenant                  @relation("TenantEmployeeEmploymentProfiles", fields: [tenantId], references: [id], onDelete: Cascade)
+  employee             Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branch               Branch                  @relation("BranchEmployeeEmploymentProfiles", fields: [branchId], references: [id], onDelete: Restrict)
+  supervisor           User?                   @relation("EmployeeEmploymentSupervisor", fields: [supervisorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, branchId])
+}
+
+model EmployeePayrollProfile {
+  id                        String                  @id @default(uuid())
+  tenantId                  String
+  employeeId                String                  @unique
+  payType                   EmployeePayType
+  payRateEncrypted          String?
+  payRateLast4              String?
+  payFrequency              EmployeePayFrequency
+  overtimeEligible          Boolean?
+  regularHourlyRateEncrypted String?
+  regularHourlyRateLast4    String?
+  workweekStartDay          String?
+  workweekStartTime         String?
+  paymentMethod             EmployeePaymentMethod
+  payrollProvider           String?
+  payrollEmployeeId         String?
+  externalPayrollReference  String?
+  effectiveFrom             DateTime
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  tenant                    Tenant                  @relation("TenantEmployeePayrollProfiles", fields: [tenantId], references: [id], onDelete: Cascade)
+  employee                  Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, effectiveFrom])
+}
+
+model EmployeeTaxProfile {
+  id            String            @id @default(uuid())
+  tenantId      String
+  employeeId    String            @unique
+  ssnEncrypted  String?
+  ssnLast4      String?
+  w4Status      EmployeeW4Status  @default(NOT_STARTED)
+  w4CompletedAt DateTime?
+  w4DocumentId  String?
+  w2Reference   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  tenant        Tenant            @relation("TenantEmployeeTaxProfiles", fields: [tenantId], references: [id], onDelete: Cascade)
+  employee      Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  w4Document    EmployeeDocument? @relation("EmployeeW4Document", fields: [w4DocumentId], references: [id], onDelete: SetNull)
+}
+
+model EmployeeWorkEligibilityProfile {
+  id                      String                 @id @default(uuid())
+  tenantId                String
+  employeeId              String                 @unique
+  i9Status                EmployeeI9Status       @default(NOT_STARTED)
+  firstDayOfEmployment    DateTime?
+  section1CompletedAt     DateTime?
+  section2CompletedAt     DateTime?
+  verificationDueDate     DateTime?
+  verificationCompletedAt DateTime?
+  reverificationRequired  Boolean                @default(false)
+  reverificationDueDate   DateTime?
+  i9DocumentId            String?
+  eVerifyRequired        Boolean                @default(false)
+  eVerifyStatus          EmployeeEVerifyStatus  @default(NOT_REQUIRED)
+  eVerifyCaseNumber      String?
+  eVerifySubmittedAt     DateTime?
+  eVerifyCompletedAt     DateTime?
+  eVerifyDocumentId      String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  tenant                 Tenant                 @relation("TenantEmployeeWorkEligibilityProfiles", fields: [tenantId], references: [id], onDelete: Cascade)
+  employee               Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  i9Document             EmployeeDocument?      @relation("EmployeeI9Document", fields: [i9DocumentId], references: [id], onDelete: SetNull)
+  eVerifyDocument        EmployeeDocument?      @relation("EmployeeEVerifyDocument", fields: [eVerifyDocumentId], references: [id], onDelete: SetNull)
+}
+
+model EmployeeFloridaNewHireReport {
+  id                 String                        @id @default(uuid())
+  tenantId           String
+  employeeId         String                        @unique
+  required           Boolean                       @default(false)
+  status             EmployeeFloridaNewHireStatus  @default(NOT_REQUIRED)
+  dueDate            DateTime?
+  submittedAt        DateTime?
+  confirmationNumber String?
+  documentId         String?
+  failureReason      String?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+  tenant             Tenant                        @relation("TenantEmployeeFloridaNewHireReports", fields: [tenantId], references: [id], onDelete: Cascade)
+  employee           Employee                      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  document           EmployeeDocument?             @relation("EmployeeFloridaNewHireDocument", fields: [documentId], references: [id], onDelete: SetNull)
+}
+
+model EmployeeComplianceRequirement {
+  id                 String                     @id @default(uuid())
+  tenantId           String
+  employeeId         String
+  code               String
+  title              String
+  category           EmployeeComplianceCategory
+  jurisdiction       String?
+  status             EmployeeComplianceStatus   @default(NOT_STARTED)
+  required           Boolean                    @default(false)
+  dueDate            DateTime?
+  completedAt        DateTime?
+  expiresAt          DateTime?
+  documentId         String?
+  verificationStatus String?
+  verifiedByUserId   String?
+  verifiedAt         DateTime?
+  notes              String?
+  source             EmployeeComplianceSource   @default(SYSTEM)
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  tenant             Tenant                     @relation("TenantEmployeeComplianceRequirements", fields: [tenantId], references: [id], onDelete: Cascade)
+  employee           Employee                   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  document           EmployeeDocument?          @relation("EmployeeComplianceDocument", fields: [documentId], references: [id], onDelete: SetNull)
+  verifier           User?                      @relation("EmployeeComplianceVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, code])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, expiresAt])
 }
 
 model InventoryItem {

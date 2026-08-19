@@ -77,6 +77,30 @@ export class EmployeesController {
     return this.employeesService.overview(id, request.user, request.tenant!.id);
   }
 
+  @Get(':id/360')
+  @RequirePermissions('employees.read')
+  employee360(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.employee360(id, request.user, request.tenant!.id);
+  }
+
+  @Get(':id/compliance')
+  @RequirePermissions('employees.read')
+  compliance(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.compliance(id, request.user, request.tenant!.id);
+  }
+
+  @Get(':id/documents')
+  @RequirePermissions('employees.read')
+  documents(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.documentSummary(id, request.user, request.tenant!.id);
+  }
+
+  @Get(':id/audit')
+  @RequirePermissions('employees.read')
+  audit(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.audit(id, request.user, request.tenant!.id);
+  }
+
   @Get(':id/payroll-compliance')
   @RequirePermissions('employees.read')
   payrollCompliance(@Req() request: RequestWithUser, @Param('id') id: string) {
@@ -104,6 +128,82 @@ export class EmployeesController {
   ) {
     const employee = await this.employeesService.updateStatus(id, request.user, request.tenant!.id, dto);
     this.setEmployeeAudit(request, 'EMPLOYEE_STATUS_UPDATED', employee);
+    return employee;
+  }
+
+  @Patch(':id/personal')
+  @RequirePermissions('employees.update')
+  async updatePersonal(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const employee = await this.employeesService.updatePersonal(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_PERSONAL_SECTION_UPDATED', employee);
+    return employee;
+  }
+
+  @Patch(':id/contact')
+  @RequirePermissions('employees.update')
+  async updateContact(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const employee = await this.employeesService.updateContact(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_CONTACT_SECTION_UPDATED', employee);
+    return employee;
+  }
+
+  @Patch(':id/employment')
+  @RequirePermissions('employees.update')
+  async updateEmployment(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const employee = await this.employeesService.updateEmployment(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_EMPLOYMENT_SECTION_UPDATED', employee);
+    return employee;
+  }
+
+  @Patch(':id/payroll')
+  @RequirePermissions('employees.update')
+  async updatePayroll(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const result = await this.employeesService.updatePayroll(id, request.user, request.tenant!.id, dto);
+    request.auditAction = 'EMPLOYEE_PAYROLL_SECTION_UPDATED';
+    request.auditEntityType = 'Employee';
+    request.auditEntityId = id;
+    request.auditAfter = { section: 'payroll', employeeId: id };
+    return result;
+  }
+
+  @Patch(':id/tax')
+  @RequirePermissions('employees.update')
+  async updateTax(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const result = await this.employeesService.updateTax(id, request.user, request.tenant!.id, dto);
+    request.auditAction = 'EMPLOYEE_TAX_SECTION_UPDATED';
+    request.auditEntityType = 'Employee';
+    request.auditEntityId = id;
+    request.auditAfter = { section: 'tax', employeeId: id };
+    return result;
+  }
+
+  @Patch(':id/work-eligibility')
+  @RequirePermissions('employees.update')
+  async updateWorkEligibility(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const result = await this.employeesService.updateWorkEligibility(id, request.user, request.tenant!.id, dto);
+    request.auditAction = 'EMPLOYEE_WORK_ELIGIBILITY_SECTION_UPDATED';
+    request.auditEntityType = 'Employee';
+    request.auditEntityId = id;
+    request.auditAfter = { section: 'workEligibility', employeeId: id };
+    return result;
+  }
+
+  @Patch(':id/florida-new-hire')
+  @RequirePermissions('employees.update')
+  async updateFloridaNewHire(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const result = await this.employeesService.updateFloridaNewHire(id, request.user, request.tenant!.id, dto);
+    request.auditAction = 'EMPLOYEE_FLORIDA_NEW_HIRE_SECTION_UPDATED';
+    request.auditEntityType = 'Employee';
+    request.auditEntityId = id;
+    request.auditAfter = { section: 'floridaNewHire', employeeId: id };
+    return result;
+  }
+
+  @Patch(':id/emergency-contact')
+  @RequirePermissions('employees.update')
+  async updateEmergencyContact(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: Record<string, any>) {
+    const employee = await this.employeesService.updateEmergencyContact(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_EMERGENCY_CONTACT_UPDATED', employee);
     return employee;
   }
 

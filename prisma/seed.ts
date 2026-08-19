@@ -772,6 +772,7 @@ async function main() {
       },
       create: {
         tenantId: tenantRecord.id,
+        employeeNumber: `EMP-SEED-${tenantRecord.slug.toUpperCase()}`,
         name: `Employee ${demoTenant.name}`,
         email: `employee.${demoTenant.slug}@example.com`,
         status: EmployeeStatus.ACTIVE,

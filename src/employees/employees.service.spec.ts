@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { EmployeeStatus } from '@prisma/client';
 import { EmployeesService } from './employees.service';
+import { EmployeeSensitiveDataCryptoService } from './employee-sensitive-data-crypto.service';
 
 describe('EmployeesService documentary records', () => {
   const tenantId = 'tenant-1';
@@ -23,6 +24,12 @@ describe('EmployeesService documentary records', () => {
         update: jest.fn().mockResolvedValue(createdEmployee),
       },
       employeeBranch: { create: jest.fn(), updateMany: jest.fn() },
+      employeeEmploymentProfile: { create: jest.fn(), upsert: jest.fn() },
+      employeePayrollProfile: { create: jest.fn(), upsert: jest.fn() },
+      employeeTaxProfile: { create: jest.fn(), upsert: jest.fn() },
+      employeeWorkEligibilityProfile: { create: jest.fn(), upsert: jest.fn() },
+      employeeFloridaNewHireReport: { create: jest.fn(), upsert: jest.fn() },
+      employeeComplianceRequirement: { createMany: jest.fn() },
     };
     const prisma = {
       branch: {
@@ -42,7 +49,7 @@ describe('EmployeesService documentary records', () => {
         typeof operation === 'function' ? operation(tx) : Promise.all(operation),
       ),
     } as any;
-    return { service: new EmployeesService(prisma), prisma, tx };
+    return { service: new EmployeesService(prisma, new EmployeeSensitiveDataCryptoService()), prisma, tx };
   }
 
   it('registers an existing employee record and mirrors the job title on its primary branch', async () => {
@@ -52,9 +59,15 @@ describe('EmployeesService documentary records', () => {
       primaryRole: '  Supervisora  ', status: EmployeeStatus.ACTIVE,
     });
 
-    expect(tx.employee.create).toHaveBeenCalledWith({
-      data: { tenantId, name: 'Ana Perez', email: 'ana@example.com', jobTitle: 'Supervisora', status: EmployeeStatus.ACTIVE },
-    });
+    expect(tx.employee.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        tenantId,
+        name: 'Ana Perez',
+        email: 'ana@example.com',
+        jobTitle: 'Supervisora',
+        status: EmployeeStatus.ACTIVE,
+      }),
+    }));
     expect(tx.employeeBranch.create).toHaveBeenCalledWith({
       data: { tenantId, employeeId: 'employee-1', branchId, role: 'Supervisora', isPrimary: true },
     });

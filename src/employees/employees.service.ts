@@ -14,17 +14,32 @@ import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
 import { BulkUpdateEmployeeStatusDto } from './dto/bulk-update-employee-status.dto';
+import { EmployeeSensitiveDataCryptoService } from './employee-sensitive-data-crypto.service';
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sensitiveCrypto: EmployeeSensitiveDataCryptoService,
+  ) {}
 
   async register(tenantId: string, dto: RegisterEmployeeDto) {
-    await this.assertBranchBelongsToTenant(dto.primaryBranchId, tenantId);
+    const branchId = dto.employment?.primaryBranchId ?? dto.primaryBranchId;
+    const primaryRole = dto.employment?.jobTitle ?? dto.primaryRole ?? dto.name?.trim() ?? 'Empleado';
+    if (!branchId) {
+      throw new BadRequestException('Debes indicar la sucursal principal');
+    }
+    await this.assertBranchBelongsToTenant(branchId, tenantId);
 
-    const name = dto.name.trim();
-    const email = dto.email.trim().toLowerCase();
-    const jobTitle = dto.primaryRole.trim();
+    const name = (dto.personal
+      ? `${dto.personal.legalFirstName} ${dto.personal.middleName ? `${dto.personal.middleName} ` : ''}${dto.personal.legalLastName}`
+      : dto.name ?? '').trim();
+    const email = (dto.contact?.workEmail ?? dto.email ?? '').trim().toLowerCase();
+    if (!name || !email) {
+      throw new BadRequestException('Debes indicar nombre y correo');
+    }
+    const jobTitle = primaryRole.trim();
+    const employeeNumber = await this.generateEmployeeNumber(tenantId);
 
     const existing = await this.prisma.employee.findFirst({
       where: { tenantId, email: { equals: email, mode: 'insensitive' } },
@@ -38,8 +53,26 @@ export class EmployeesService {
       const created = await tx.employee.create({
         data: {
           tenantId,
+          employeeNumber,
           name,
+          legalFirstName: dto.personal?.legalFirstName?.trim() ?? null,
+          middleName: dto.personal?.middleName?.trim() ?? null,
+          legalLastName: dto.personal?.legalLastName?.trim() ?? null,
+          preferredName: dto.personal?.preferredName?.trim() ?? null,
           email,
+          workEmail: dto.contact?.workEmail?.trim().toLowerCase() ?? email,
+          personalEmail: dto.contact?.personalEmail?.trim().toLowerCase() ?? null,
+          phone: dto.contact?.phone?.trim() ?? null,
+          dateOfBirth: dto.personal?.dateOfBirth ? new Date(dto.personal.dateOfBirth) : undefined,
+          addressLine1: dto.contact?.addressLine1?.trim() ?? null,
+          addressLine2: dto.contact?.addressLine2?.trim() ?? null,
+          city: dto.contact?.city?.trim() ?? null,
+          state: dto.contact?.state?.trim() ?? null,
+          postalCode: dto.contact?.postalCode?.trim() ?? null,
+          country: dto.contact?.country?.trim() ?? null,
+          emergencyContactName: dto.emergencyContact?.name?.trim() ?? null,
+          emergencyContactPhone: dto.emergencyContact?.phone?.trim() ?? null,
+          emergencyContactRelationship: dto.emergencyContact?.relationship?.trim() ?? null,
           jobTitle,
           status: dto.status,
         },
@@ -49,10 +82,107 @@ export class EmployeesService {
         data: {
           tenantId,
           employeeId: created.id,
-          branchId: dto.primaryBranchId,
+          branchId,
           role: jobTitle,
           isPrimary: true,
         },
+      });
+
+      await tx.employeeEmploymentProfile.create({
+        data: {
+          tenantId,
+          employeeId: created.id,
+          branchId,
+          department: dto.employment?.department?.trim() ?? null,
+          positionId: dto.employment?.positionId?.trim() ?? null,
+          supervisorUserId: dto.employment?.supervisorUserId ?? null,
+          employmentType: dto.employment?.jobTitle ? 'FULL_TIME' : 'TEMPORARY',
+          employmentStatus: dto.employment?.status === EmployeeStatus.ACTIVE ? 'ACTIVE' : 'DRAFT',
+          hireDate: dto.employment?.hireDate ? new Date(dto.employment.hireDate) : null,
+          startDate: dto.employment?.startDate ? new Date(dto.employment.startDate) : null,
+          jobTitle,
+          workerClassification: dto.employment?.workerClassification?.trim() ?? null,
+        },
+      });
+
+      await tx.employeePayrollProfile.create({
+        data: {
+          tenantId,
+          employeeId: created.id,
+          payType: (dto.payroll?.payType as any) ?? 'SALARY',
+          payRateEncrypted: dto.payroll?.payRate ? this.sensitiveCrypto.encrypt(String(dto.payroll.payRate)) : null,
+          payRateLast4: dto.payroll?.payRate ? String(dto.payroll.payRate).slice(-4) : null,
+          payFrequency: (dto.payroll?.payFrequency as any) ?? 'MONTHLY',
+          overtimeEligible: dto.payroll?.overtimeEligible ?? null,
+          regularHourlyRateEncrypted: dto.payroll?.regularHourlyRate ? this.sensitiveCrypto.encrypt(String(dto.payroll.regularHourlyRate)) : null,
+          regularHourlyRateLast4: dto.payroll?.regularHourlyRate ? String(dto.payroll.regularHourlyRate).slice(-4) : null,
+          workweekStartDay: dto.payroll?.workweekStartDay?.trim() ?? null,
+          workweekStartTime: dto.payroll?.workweekStartTime?.trim() ?? null,
+          paymentMethod: (dto.payroll?.paymentMethod as any) ?? 'OTHER',
+          payrollProvider: dto.payroll?.payrollProvider?.trim() ?? null,
+          payrollEmployeeId: dto.payroll?.payrollEmployeeId?.trim() ?? null,
+          externalPayrollReference: dto.payroll?.externalPayrollReference?.trim() ?? null,
+          effectiveFrom: dto.employment?.startDate ? new Date(dto.employment.startDate) : new Date(),
+        },
+      });
+
+      await tx.employeeTaxProfile.create({
+        data: {
+          tenantId,
+          employeeId: created.id,
+          ssnEncrypted: dto.tax?.ssn ? this.sensitiveCrypto.encrypt(dto.tax.ssn.replace(/\D/g, '')) : null,
+          ssnLast4: dto.tax?.ssnLast4 ?? (dto.tax?.ssn ? dto.tax.ssn.replace(/\D/g, '').slice(-4) : null),
+          w4Status: (dto.tax?.w4Status as any) ?? 'PENDING',
+          w2Reference: dto.tax?.w2Reference?.trim() ?? null,
+          w4CompletedAt: dto.tax?.w4Status === 'COMPLETE' ? new Date() : null,
+        },
+      });
+
+      await tx.employeeWorkEligibilityProfile.create({
+        data: {
+          tenantId,
+          employeeId: created.id,
+          i9Status: (dto.eligibility?.i9Status as any) ?? 'PENDING',
+          firstDayOfEmployment: dto.eligibility?.firstDayOfEmployment ? new Date(dto.eligibility.firstDayOfEmployment) : null,
+          reverificationRequired: dto.eligibility?.reverificationRequired ?? false,
+          eVerifyRequired: dto.eligibility?.eVerifyRequired ?? false,
+          eVerifyStatus: (dto.eligibility?.eVerifyStatus as any) ?? 'NOT_REQUIRED',
+        },
+      });
+
+      await tx.employeeFloridaNewHireReport.create({
+        data: {
+          tenantId,
+          employeeId: created.id,
+          required: dto.floridaNewHire?.required ?? false,
+          status: (dto.floridaNewHire?.status as any) ?? 'NOT_REQUIRED',
+          dueDate: dto.floridaNewHire?.dueDate ? new Date(dto.floridaNewHire.dueDate) : null,
+        },
+      });
+
+      const checklist = [
+        { code: 'I9', title: 'Form I-9', category: 'ELIGIBILITY', required: true, status: 'PENDING' },
+        { code: 'W4', title: 'Form W-4', category: 'TAX', required: true, status: 'PENDING' },
+        { code: 'SSN_PAYROLL', title: 'Identidad fiscal de nómina', category: 'PAYROLL', required: true, status: 'PENDING' },
+        { code: 'FL_NEW_HIRE', title: 'Florida New Hire', category: 'FLORIDA', required: false, status: 'NOT_REQUIRED' },
+        { code: 'E_VERIFY', title: 'E-Verify', category: 'ELIGIBILITY', required: false, status: 'NOT_REQUIRED' },
+        { code: 'EMPLOYMENT_AGREEMENT', title: 'Employment Agreement', category: 'DOCUMENT', required: true, status: 'PENDING' },
+        { code: 'TRAINING_REQUIRED', title: 'Required Training', category: 'TRAINING', required: false, status: 'PENDING' },
+        { code: 'PROF_LICENSE', title: 'Professional License', category: 'LICENSE', required: false, status: 'NOT_REQUIRED' },
+        { code: 'SAFETY_TRAINING', title: 'Safety Training', category: 'SAFETY', required: false, status: 'PENDING' },
+      ] as const;
+      await tx.employeeComplianceRequirement.createMany({
+        data: checklist.map((item) => ({
+          tenantId,
+          employeeId: created.id,
+          code: item.code,
+          title: item.title,
+          category: item.category as any,
+          jurisdiction: item.code === 'FL_NEW_HIRE' ? 'FLORIDA' : 'COMPANY',
+          status: item.status as any,
+          required: item.required,
+          source: 'SYSTEM',
+        })),
       });
 
       return created;
@@ -61,17 +191,22 @@ export class EmployeesService {
     return this.findOne(employee.id, this.buildSystemActor(tenantId), tenantId);
   }
 
+  private async generateEmployeeNumber(tenantId: string) {
+    const count = await this.prisma.employee.findMany({ where: { tenantId }, select: { id: true } }).then((items) => items.length);
+    return `EMP-${String(count + 1).padStart(6, '0')}`;
+  }
+
   /** @deprecated Kept for internal compatibility. */
   create(tenantId: string, dto: RegisterEmployeeDto) {
     return this.register(tenantId, dto);
   }
 
   async validateBulkLoad(tenantId: string, dto: BulkLoadEmployeesDto) {
-    const emails = dto.employees.map((employee) => employee.email.trim().toLowerCase());
-    const branchIds = [...new Set(dto.employees.map((employee) => employee.primaryBranchId))];
+    const emails = dto.employees.map((employee) => (employee.email ?? '').trim().toLowerCase());
+    const branchIds = [...new Set(dto.employees.map((employee) => employee.primaryBranchId).filter((id): id is string => Boolean(id)))];
     const [branches, existing] = await Promise.all([
       this.prisma.branch.findMany({
-        where: { id: { in: branchIds }, tenantId },
+      where: { id: { in: branchIds }, tenantId },
         select: { id: true },
       }),
       this.prisma.employee.findMany({
@@ -85,22 +220,22 @@ export class EmployeesService {
     for (const email of emails) emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
 
     const rows = dto.employees.map((input, index) => {
-      const email = input.email.trim().toLowerCase();
+      const email = (input.email ?? '').trim().toLowerCase();
       const errors = [
         ...((emailCounts.get(email) ?? 0) > 1 ? ['DUPLICATE_EMAIL_IN_LOAD'] : []),
         ...(existingEmails.has(email) ? ['EMPLOYEE_EMAIL_ALREADY_REGISTERED'] : []),
-        ...(!validBranchIds.has(input.primaryBranchId) ? ['BRANCH_NOT_AVAILABLE_IN_TENANT'] : []),
+        ...(!input.primaryBranchId || !validBranchIds.has(input.primaryBranchId) ? ['BRANCH_NOT_AVAILABLE_IN_TENANT'] : []),
       ];
       return {
         row: index + 1,
         valid: errors.length === 0,
         errors,
         employee: {
-          name: input.name.trim(),
+          name: (input.name ?? '').trim(),
           email,
           status: input.status,
           primaryBranchId: input.primaryBranchId,
-          primaryRole: input.primaryRole.trim(),
+          primaryRole: (input.primaryRole ?? '').trim(),
         },
       };
     });
@@ -125,12 +260,14 @@ export class EmployeesService {
     const created = await this.prisma.$transaction(async (tx) => {
       const employees = [] as Array<{ id: string; email: string }>;
       for (const input of dto.employees) {
-        const name = input.name.trim();
-        const email = input.email.trim().toLowerCase();
-        const jobTitle = input.primaryRole.trim();
+        const name = (input.name ?? '').trim();
+        const email = (input.email ?? '').trim().toLowerCase();
+        const jobTitle = (input.primaryRole ?? '').trim();
+        const branchId = input.primaryBranchId!;
         const employee = await tx.employee.create({
           data: {
             tenantId,
+            employeeNumber: await this.generateEmployeeNumber(tenantId),
             name,
             email,
             jobTitle,
@@ -141,7 +278,7 @@ export class EmployeesService {
           data: {
             tenantId,
             employeeId: employee.id,
-            branchId: input.primaryBranchId,
+            branchId,
             role: jobTitle,
             isPrimary: true,
           },
@@ -202,13 +339,7 @@ export class EmployeesService {
             },
             orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
           },
-          _count: {
-            select: {
-              employeeDocuments: {
-                where: { deletedAt: null, status: { not: 'SUPERSEDED' } },
-              },
-            },
-          },
+          _count: { select: { documents: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: pagination.skip,
@@ -246,13 +377,7 @@ export class EmployeesService {
           },
           orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
         },
-        _count: {
-          select: {
-            employeeDocuments: {
-              where: { deletedAt: null, status: { not: 'SUPERSEDED' } },
-            },
-          },
-        },
+        _count: { select: { documents: true } },
       },
     });
 
@@ -367,7 +492,7 @@ export class EmployeesService {
           },
           orderBy: [{ assignedAt: 'desc' }],
         },
-        employeeDocuments: {
+        documents: {
           where: { tenantId, status: { not: 'SUPERSEDED' } },
           select: {
             id: true,
@@ -426,7 +551,7 @@ export class EmployeesService {
         unassignedAt: assignment.releasedAt,
         branch: assignment.branch,
       })),
-      documents: employee.employeeDocuments,
+      documents: (employee as any).employeeDocuments ?? (employee as any).documents ?? [],
       auditTrail,
     };
   }
@@ -452,7 +577,7 @@ export class EmployeesService {
           },
           _count: {
             select: {
-              employeeDocuments: {
+              documents: {
                 where: { deletedAt: null, status: { not: 'SUPERSEDED' } },
               },
             },
@@ -477,7 +602,7 @@ export class EmployeesService {
       throw new NotFoundException('Registro de empleado no encontrado');
     }
 
-    const primaryAssignment = employee.branchAssignments.find((assignment) => assignment.isPrimary) ?? employee.branchAssignments[0] ?? null;
+    const primaryAssignment = (employee as any).branchAssignments.find((assignment: any) => assignment.isPrimary) ?? (employee as any).branchAssignments[0] ?? null;
     const documentStats = documentSummary.summary;
     const expiringDocuments = documentSummary.documents.filter((document) => document.expiresAt && document.expiresAt > new Date() && document.expiresAt <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
 
@@ -570,7 +695,14 @@ export class EmployeesService {
       throw new NotFoundException('Registro de empleado no encontrado');
     }
 
-    const primaryAssignment = employee.branchAssignments.find((assignment) => assignment.isPrimary) ?? employee.branchAssignments[0] ?? null;
+    const [payrollProfile, taxProfile, eligibilityProfile, floridaProfile] = await Promise.all([
+      (this.prisma as any).employeePayrollProfile?.findUnique?.({ where: { employeeId: id } }) ?? null,
+      (this.prisma as any).employeeTaxProfile?.findUnique?.({ where: { employeeId: id } }) ?? null,
+      (this.prisma as any).employeeWorkEligibilityProfile?.findUnique?.({ where: { employeeId: id } }) ?? null,
+      (this.prisma as any).employeeFloridaNewHireReport?.findUnique?.({ where: { employeeId: id } }) ?? null,
+    ]);
+
+    const primaryAssignment = (employee as any).branchAssignments.find((assignment: any) => assignment.isPrimary) ?? (employee as any).branchAssignments[0] ?? null;
     const now = new Date();
     const expiringBefore = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const expiringDocuments = documentSummary.documents.filter((document) => document.expiresAt && document.expiresAt > now && document.expiresAt <= expiringBefore);
@@ -602,53 +734,53 @@ export class EmployeesService {
           : null,
       },
       payroll: {
-        payType: null,
-        payRate: null,
-        payFrequency: null,
-        overtimeEligible: null,
-        regularHourlyRate: null,
-        workweekStartDay: null,
-        workweekStartTime: null,
-        payrollProvider: null,
-        payrollEmployeeId: null,
-        externalPayrollReference: null,
+        payType: payrollProfile?.payType ?? null,
+        payRate: payrollProfile?.payRateLast4 ? `***${payrollProfile.payRateLast4}` : null,
+        payFrequency: payrollProfile?.payFrequency ?? null,
+        overtimeEligible: payrollProfile?.overtimeEligible ?? null,
+        regularHourlyRate: payrollProfile?.regularHourlyRateLast4 ? `***${payrollProfile.regularHourlyRateLast4}` : null,
+        workweekStartDay: payrollProfile?.workweekStartDay ?? null,
+        workweekStartTime: payrollProfile?.workweekStartTime ?? null,
+        payrollProvider: payrollProfile?.payrollProvider ?? null,
+        payrollEmployeeId: payrollProfile?.payrollEmployeeId ?? null,
+        externalPayrollReference: payrollProfile?.externalPayrollReference ?? null,
       },
       tax: {
-        w4Status: w4Document ? 'COMPLETE' : 'NOT_STARTED',
-        w4CompletedAt: w4Document?.createdAt ?? null,
+        w4Status: taxProfile?.w4Status ?? (w4Document ? 'COMPLETE' : 'NOT_STARTED'),
+        w4CompletedAt: taxProfile?.w4CompletedAt ?? w4Document?.createdAt ?? null,
         w4EffectiveAt: w4Document?.updatedAt ?? null,
-        w4DocumentId: w4Document?.id ?? null,
+        w4DocumentId: taxProfile?.w4DocumentId ?? w4Document?.id ?? null,
         w4Version: w4Document?.version ?? null,
-        ssnMasked: null,
+        ssnMasked: this.maskSensitiveSsn(taxProfile?.ssnEncrypted, taxProfile?.ssnLast4),
       },
       i9: {
-        status: i9Document ? 'VERIFIED' : 'NOT_STARTED',
-        firstDayOfEmployment: null,
-        section1CompletedAt: null,
-        section2CompletedAt: null,
-        verificationDueDate: null,
-        verificationCompletedAt: null,
-        reverificationRequired: false,
-        reverificationDueDate: null,
-        documentId: i9Document?.id ?? null,
+        status: eligibilityProfile?.i9Status ?? (i9Document ? 'VERIFIED' : 'NOT_STARTED'),
+        firstDayOfEmployment: eligibilityProfile?.firstDayOfEmployment ?? null,
+        section1CompletedAt: eligibilityProfile?.section1CompletedAt ?? null,
+        section2CompletedAt: eligibilityProfile?.section2CompletedAt ?? null,
+        verificationDueDate: eligibilityProfile?.verificationDueDate ?? null,
+        verificationCompletedAt: eligibilityProfile?.verificationCompletedAt ?? null,
+        reverificationRequired: eligibilityProfile?.reverificationRequired ?? false,
+        reverificationDueDate: eligibilityProfile?.reverificationDueDate ?? null,
+        documentId: eligibilityProfile?.i9DocumentId ?? i9Document?.id ?? null,
         retentionUntil: i9Document?.expiresAt ?? null,
       },
       eVerify: {
-        required: false,
+        required: eligibilityProfile?.eVerifyRequired ?? false,
         requirementReason: null,
-        status: 'NOT_REQUIRED',
-        caseNumber: null,
-        submittedAt: null,
-        completedAt: null,
+        status: eligibilityProfile?.eVerifyStatus ?? 'NOT_REQUIRED',
+        caseNumber: eligibilityProfile?.eVerifyCaseNumber ?? null,
+        submittedAt: eligibilityProfile?.eVerifySubmittedAt ?? null,
+        completedAt: eligibilityProfile?.eVerifyCompletedAt ?? null,
         documentId: null,
       },
       floridaNewHire: {
-        required: false,
-        status: 'PENDING',
-        dueDate: null,
-        submittedAt: null,
-        confirmationNumber: null,
-        failureReason: null,
+        required: floridaProfile?.required ?? false,
+        status: floridaProfile?.status ?? 'PENDING',
+        dueDate: floridaProfile?.dueDate ?? null,
+        submittedAt: floridaProfile?.submittedAt ?? null,
+        confirmationNumber: floridaProfile?.confirmationNumber ?? null,
+        failureReason: floridaProfile?.failureReason ?? null,
       },
       complianceSummary: {
         totalDocuments: documentSummary.summary.total,
@@ -738,6 +870,171 @@ export class EmployeesService {
     };
   }
 
+  async employee360(id: string, actor: JwtPayload, tenantId: string) {
+    const [overview, compliance, documents, audit] = await Promise.all([
+      this.overview(id, actor, tenantId),
+      this.compliance(id, actor, tenantId),
+      this.documentSummary(id, actor, tenantId),
+      this.audit(id, actor, tenantId),
+    ]);
+
+    return {
+      employeeId: id,
+      overview,
+      compliance,
+      documents,
+      audit,
+    };
+  }
+
+  async compliance(id: string, actor: JwtPayload, tenantId: string) {
+    const [employee, payrollProfile, taxProfile, eligibilityProfile, floridaProfile, requirements] = await Promise.all([
+      this.prisma.employee.findFirst({
+        where: {
+          id,
+          tenantId,
+          ...this.buildBranchScopedWhere(actor, tenantId),
+        },
+        include: {
+          branchAssignments: {
+            where: { tenantId, releasedAt: null },
+            include: { branch: true },
+            orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
+          },
+        },
+      }),
+      (this.prisma as any).employeePayrollProfile?.findUnique?.({ where: { employeeId: id } }) ?? null,
+      (this.prisma as any).employeeTaxProfile?.findUnique?.({ where: { employeeId: id } }) ?? null,
+      (this.prisma as any).employeeWorkEligibilityProfile?.findUnique?.({ where: { employeeId: id } }) ?? null,
+      (this.prisma as any).employeeFloridaNewHireReport?.findUnique?.({ where: { employeeId: id } }) ?? null,
+      (this.prisma as any).employeeComplianceRequirement?.findMany?.({
+        where: { tenantId, employeeId: id },
+        orderBy: [{ required: 'desc' }, { createdAt: 'asc' }],
+      }) ?? [],
+    ]);
+
+    if (!employee) {
+      throw new NotFoundException('Registro de empleado no encontrado');
+    }
+
+    const primaryAssignment = employee.branchAssignments.find((assignment) => assignment.isPrimary) ?? employee.branchAssignments[0] ?? null;
+
+    return {
+      employeeId: id,
+      employee: {
+        id: employee.id,
+        name: employee.name,
+        email: employee.email,
+        status: employee.status,
+        jobTitle: employee.jobTitle,
+      },
+      branch: primaryAssignment
+        ? {
+            branchId: primaryAssignment.branchId,
+            name: primaryAssignment.branch.name,
+            role: primaryAssignment.role,
+          }
+        : null,
+      payroll: payrollProfile
+        ? {
+            payType: payrollProfile.payType,
+            payFrequency: payrollProfile.payFrequency,
+            overtimeEligible: payrollProfile.overtimeEligible,
+            paymentMethod: payrollProfile.paymentMethod,
+            payrollProvider: payrollProfile.payrollProvider,
+            payrollEmployeeId: payrollProfile.payrollEmployeeId,
+            externalPayrollReference: payrollProfile.externalPayrollReference,
+            effectiveFrom: payrollProfile.effectiveFrom,
+          }
+        : null,
+      tax: taxProfile
+        ? {
+            w4Status: taxProfile.w4Status,
+            w4CompletedAt: taxProfile.w4CompletedAt,
+            w4DocumentId: taxProfile.w4DocumentId ?? null,
+            w2Reference: taxProfile.w2Reference ?? null,
+            ssnMasked: this.maskSensitiveSsn(taxProfile.ssnEncrypted, taxProfile.ssnLast4),
+          }
+        : null,
+      workEligibility: eligibilityProfile
+        ? {
+            i9Status: eligibilityProfile.i9Status,
+            firstDayOfEmployment: eligibilityProfile.firstDayOfEmployment,
+            section1CompletedAt: eligibilityProfile.section1CompletedAt,
+            section2CompletedAt: eligibilityProfile.section2CompletedAt,
+            verificationDueDate: eligibilityProfile.verificationDueDate,
+            verificationCompletedAt: eligibilityProfile.verificationCompletedAt,
+            reverificationRequired: eligibilityProfile.reverificationRequired,
+            reverificationDueDate: eligibilityProfile.reverificationDueDate,
+            eVerifyRequired: eligibilityProfile.eVerifyRequired,
+            eVerifyStatus: eligibilityProfile.eVerifyStatus,
+            eVerifyCaseNumber: eligibilityProfile.eVerifyCaseNumber ?? null,
+          }
+        : null,
+      floridaNewHire: floridaProfile
+        ? {
+            required: floridaProfile.required,
+            status: floridaProfile.status,
+            dueDate: floridaProfile.dueDate,
+            submittedAt: floridaProfile.submittedAt,
+            confirmationNumber: floridaProfile.confirmationNumber ?? null,
+            failureReason: floridaProfile.failureReason ?? null,
+          }
+        : null,
+      requirements: requirements.map((requirement: any) => ({
+        id: requirement.id,
+        code: requirement.code,
+        title: requirement.title,
+        category: requirement.category,
+        jurisdiction: requirement.jurisdiction,
+        status: requirement.status,
+        required: requirement.required,
+        dueDate: requirement.dueDate,
+        completedAt: requirement.completedAt,
+        expiresAt: requirement.expiresAt,
+        source: requirement.source,
+      })),
+    };
+  }
+
+  async audit(id: string, actor: JwtPayload, tenantId: string) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    const items = await this.prisma.auditLog.findMany({
+      where: { tenantId, entityType: 'Employee', entityId: id },
+      select: {
+        id: true,
+        action: true,
+        userId: true,
+        email: true,
+        actorRole: true,
+        actorScope: true,
+        before: true,
+        after: true,
+        correlationId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    return {
+      employeeId: id,
+      total: items.length,
+      items: items.map((entry) => ({
+        id: entry.id,
+        action: entry.action,
+        userId: entry.userId,
+        email: entry.email,
+        actorRole: entry.actorRole,
+        actorScope: entry.actorScope,
+        correlationId: entry.correlationId,
+        createdAt: entry.createdAt,
+        before: this.redactAuditPayload(entry.before as Record<string, unknown> | null),
+        after: this.redactAuditPayload(entry.after as Record<string, unknown> | null),
+      })),
+    };
+  }
+
   async transfer(id: string, actor: JwtPayload, tenantId: string, dto: TransferEmployeeDto) {
     await this.assertBranchBelongsToTenant(dto.branchId, tenantId);
     this.assertBranchInActorScope(actor, dto.branchId);
@@ -822,6 +1119,231 @@ export class EmployeesService {
       },
     });
 
+    return this.findOne(id, actor, tenantId);
+  }
+
+  async updatePersonal(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    await this.prisma.employee.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name?.trim() ?? null } : {}),
+        ...(dto.legalFirstName !== undefined ? { legalFirstName: dto.legalFirstName?.trim() ?? null } : {}),
+        ...(dto.middleName !== undefined ? { middleName: dto.middleName?.trim() ?? null } : {}),
+        ...(dto.legalLastName !== undefined ? { legalLastName: dto.legalLastName?.trim() ?? null } : {}),
+        ...(dto.preferredName !== undefined ? { preferredName: dto.preferredName?.trim() ?? null } : {}),
+        ...(dto.dateOfBirth !== undefined ? { dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null } : {}),
+      },
+    });
+    return this.findOne(id, actor, tenantId);
+  }
+
+  async updateContact(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    await this.prisma.employee.update({
+      where: { id },
+      data: {
+        ...(dto.workEmail !== undefined ? { workEmail: dto.workEmail?.trim().toLowerCase() ?? null } : {}),
+        ...(dto.personalEmail !== undefined ? { personalEmail: dto.personalEmail?.trim().toLowerCase() ?? null } : {}),
+        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() ?? null } : {}),
+        ...(dto.addressLine1 !== undefined ? { addressLine1: dto.addressLine1?.trim() ?? null } : {}),
+        ...(dto.addressLine2 !== undefined ? { addressLine2: dto.addressLine2?.trim() ?? null } : {}),
+        ...(dto.city !== undefined ? { city: dto.city?.trim() ?? null } : {}),
+        ...(dto.state !== undefined ? { state: dto.state?.trim() ?? null } : {}),
+        ...(dto.postalCode !== undefined ? { postalCode: dto.postalCode?.trim() ?? null } : {}),
+        ...(dto.country !== undefined ? { country: dto.country?.trim() ?? null } : {}),
+      },
+    });
+    return this.findOne(id, actor, tenantId);
+  }
+
+  async updateEmployment(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    if (dto.primaryBranchId) {
+      await this.assertBranchBelongsToTenant(dto.primaryBranchId, tenantId);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.employee.update({
+        where: { id },
+        data: {
+          ...(dto.jobTitle !== undefined ? { jobTitle: dto.jobTitle?.trim() ?? null } : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+        },
+      });
+
+      if (dto.primaryBranchId) {
+        const currentPrimary = await tx.employeeBranch.findFirst({
+          where: { tenantId, employeeId: id, isPrimary: true, releasedAt: null },
+          select: { id: true },
+        });
+        if (currentPrimary) {
+          await tx.employeeBranch.update({
+            where: { id: currentPrimary.id },
+            data: { releasedAt: new Date() },
+          });
+        }
+        await tx.employeeBranch.create({
+          data: {
+            tenantId,
+            employeeId: id,
+            branchId: dto.primaryBranchId,
+            role: dto.jobTitle?.trim() ?? 'Empleado',
+            isPrimary: true,
+          },
+        });
+      }
+
+      await tx.employeeEmploymentProfile.upsert({
+        where: { employeeId: id },
+        create: {
+          tenantId,
+          employeeId: id,
+          branchId: dto.primaryBranchId ?? (await tx.employeeBranch.findFirst({ where: { tenantId, employeeId: id, isPrimary: true, releasedAt: null }, select: { branchId: true } }))?.branchId ?? dto.primaryBranchId,
+          department: dto.department?.trim() ?? null,
+          positionId: dto.positionId?.trim() ?? null,
+          supervisorUserId: dto.supervisorUserId ?? null,
+          employmentType: dto.employmentType ?? 'FULL_TIME',
+          employmentStatus: dto.employmentStatus ?? 'DRAFT',
+          hireDate: dto.hireDate ? new Date(dto.hireDate) : null,
+          startDate: dto.startDate ? new Date(dto.startDate) : null,
+          jobTitle: dto.jobTitle?.trim() ?? 'Empleado',
+          workerClassification: dto.workerClassification?.trim() ?? null,
+        },
+        update: {
+          ...(dto.primaryBranchId ? { branchId: dto.primaryBranchId } : {}),
+          ...(dto.department !== undefined ? { department: dto.department?.trim() ?? null } : {}),
+          ...(dto.positionId !== undefined ? { positionId: dto.positionId?.trim() ?? null } : {}),
+          ...(dto.supervisorUserId !== undefined ? { supervisorUserId: dto.supervisorUserId ?? null } : {}),
+          ...(dto.employmentType !== undefined ? { employmentType: dto.employmentType } : {}),
+          ...(dto.employmentStatus !== undefined ? { employmentStatus: dto.employmentStatus } : {}),
+          ...(dto.hireDate !== undefined ? { hireDate: dto.hireDate ? new Date(dto.hireDate) : null } : {}),
+          ...(dto.startDate !== undefined ? { startDate: dto.startDate ? new Date(dto.startDate) : null } : {}),
+          ...(dto.jobTitle !== undefined ? { jobTitle: dto.jobTitle?.trim() ?? null } : {}),
+          ...(dto.workerClassification !== undefined ? { workerClassification: dto.workerClassification?.trim() ?? null } : {}),
+        },
+      });
+    });
+
+    return this.findOne(id, actor, tenantId);
+  }
+
+  async updatePayroll(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    await this.prisma.employeePayrollProfile.upsert({
+      where: { employeeId: id },
+      create: {
+        tenantId,
+        employeeId: id,
+        payType: dto.payType ?? 'SALARY',
+        payRateEncrypted: dto.payRate ? this.sensitiveCrypto.encrypt(String(dto.payRate)) : null,
+        payRateLast4: dto.payRate ? String(dto.payRate).slice(-4) : null,
+        payFrequency: dto.payFrequency ?? 'MONTHLY',
+        overtimeEligible: dto.overtimeEligible ?? null,
+        regularHourlyRateEncrypted: dto.regularHourlyRate ? this.sensitiveCrypto.encrypt(String(dto.regularHourlyRate)) : null,
+        regularHourlyRateLast4: dto.regularHourlyRate ? String(dto.regularHourlyRate).slice(-4) : null,
+        workweekStartDay: dto.workweekStartDay?.trim() ?? null,
+        workweekStartTime: dto.workweekStartTime?.trim() ?? null,
+        paymentMethod: dto.paymentMethod ?? 'OTHER',
+        payrollProvider: dto.payrollProvider?.trim() ?? null,
+        payrollEmployeeId: dto.payrollEmployeeId?.trim() ?? null,
+        externalPayrollReference: dto.externalPayrollReference?.trim() ?? null,
+        effectiveFrom: new Date(),
+      },
+      update: {
+        ...(dto.payType !== undefined ? { payType: dto.payType } : {}),
+        ...(dto.payRate !== undefined ? { payRateEncrypted: dto.payRate ? this.sensitiveCrypto.encrypt(String(dto.payRate)) : null, payRateLast4: dto.payRate ? String(dto.payRate).slice(-4) : null } : {}),
+        ...(dto.payFrequency !== undefined ? { payFrequency: dto.payFrequency } : {}),
+        ...(dto.overtimeEligible !== undefined ? { overtimeEligible: dto.overtimeEligible } : {}),
+        ...(dto.regularHourlyRate !== undefined ? { regularHourlyRateEncrypted: dto.regularHourlyRate ? this.sensitiveCrypto.encrypt(String(dto.regularHourlyRate)) : null, regularHourlyRateLast4: dto.regularHourlyRate ? String(dto.regularHourlyRate).slice(-4) : null } : {}),
+        ...(dto.workweekStartDay !== undefined ? { workweekStartDay: dto.workweekStartDay?.trim() ?? null } : {}),
+        ...(dto.workweekStartTime !== undefined ? { workweekStartTime: dto.workweekStartTime?.trim() ?? null } : {}),
+        ...(dto.paymentMethod !== undefined ? { paymentMethod: dto.paymentMethod } : {}),
+        ...(dto.payrollProvider !== undefined ? { payrollProvider: dto.payrollProvider?.trim() ?? null } : {}),
+        ...(dto.payrollEmployeeId !== undefined ? { payrollEmployeeId: dto.payrollEmployeeId?.trim() ?? null } : {}),
+        ...(dto.externalPayrollReference !== undefined ? { externalPayrollReference: dto.externalPayrollReference?.trim() ?? null } : {}),
+      },
+    });
+    return this.compliance(id, actor, tenantId);
+  }
+
+  async updateTax(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    await this.prisma.employeeTaxProfile.upsert({
+      where: { employeeId: id },
+      create: {
+        tenantId,
+        employeeId: id,
+        ssnEncrypted: dto.ssn ? this.sensitiveCrypto.encrypt(String(dto.ssn).replace(/\D/g, '')) : null,
+        ssnLast4: dto.ssnLast4 ?? (dto.ssn ? String(dto.ssn).replace(/\D/g, '').slice(-4) : null),
+        w4Status: dto.w4Status ?? 'NOT_STARTED',
+        w2Reference: dto.w2Reference?.trim() ?? null,
+        w4CompletedAt: dto.w4Status === 'COMPLETE' ? new Date() : null,
+      },
+      update: {
+        ...(dto.ssn !== undefined ? { ssnEncrypted: dto.ssn ? this.sensitiveCrypto.encrypt(String(dto.ssn).replace(/\D/g, '')) : null, ssnLast4: dto.ssn ? String(dto.ssn).replace(/\D/g, '').slice(-4) : dto.ssnLast4 ?? null } : {}),
+        ...(dto.ssnLast4 !== undefined ? { ssnLast4: dto.ssnLast4 ?? null } : {}),
+        ...(dto.w4Status !== undefined ? { w4Status: dto.w4Status } : {}),
+        ...(dto.w2Reference !== undefined ? { w2Reference: dto.w2Reference?.trim() ?? null } : {}),
+      },
+    });
+    return this.compliance(id, actor, tenantId);
+  }
+
+  async updateWorkEligibility(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    await this.prisma.employeeWorkEligibilityProfile.upsert({
+      where: { employeeId: id },
+      create: {
+        tenantId,
+        employeeId: id,
+        i9Status: dto.i9Status ?? 'NOT_STARTED',
+        firstDayOfEmployment: dto.firstDayOfEmployment ? new Date(dto.firstDayOfEmployment) : null,
+        reverificationRequired: dto.reverificationRequired ?? false,
+        eVerifyRequired: dto.eVerifyRequired ?? false,
+        eVerifyStatus: dto.eVerifyStatus ?? 'NOT_REQUIRED',
+      },
+      update: {
+        ...(dto.i9Status !== undefined ? { i9Status: dto.i9Status } : {}),
+        ...(dto.firstDayOfEmployment !== undefined ? { firstDayOfEmployment: dto.firstDayOfEmployment ? new Date(dto.firstDayOfEmployment) : null } : {}),
+        ...(dto.reverificationRequired !== undefined ? { reverificationRequired: dto.reverificationRequired } : {}),
+        ...(dto.eVerifyRequired !== undefined ? { eVerifyRequired: dto.eVerifyRequired } : {}),
+        ...(dto.eVerifyStatus !== undefined ? { eVerifyStatus: dto.eVerifyStatus } : {}),
+      },
+    });
+    return this.compliance(id, actor, tenantId);
+  }
+
+  async updateFloridaNewHire(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    await this.prisma.employeeFloridaNewHireReport.upsert({
+      where: { employeeId: id },
+      create: {
+        tenantId,
+        employeeId: id,
+        required: dto.required ?? false,
+        status: dto.status ?? 'NOT_REQUIRED',
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+      },
+      update: {
+        ...(dto.required !== undefined ? { required: dto.required } : {}),
+        ...(dto.status !== undefined ? { status: dto.status } : {}),
+        ...(dto.dueDate !== undefined ? { dueDate: dto.dueDate ? new Date(dto.dueDate) : null } : {}),
+      },
+    });
+    return this.compliance(id, actor, tenantId);
+  }
+
+  async updateEmergencyContact(id: string, actor: JwtPayload, tenantId: string, dto: Record<string, any>) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    await this.prisma.employee.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined ? { emergencyContactName: dto.name?.trim() ?? null } : {}),
+        ...(dto.phone !== undefined ? { emergencyContactPhone: dto.phone?.trim() ?? null } : {}),
+        ...(dto.relationship !== undefined ? { emergencyContactRelationship: dto.relationship?.trim() ?? null } : {}),
+      },
+    });
     return this.findOne(id, actor, tenantId);
   }
 
@@ -970,7 +1492,7 @@ export class EmployeesService {
           updatedAt: Date;
         };
       }>;
-      _count?: { employeeDocuments: number };
+      _count?: { documents: number };
     },
   ) {
     const primaryAssignment =
@@ -987,7 +1509,7 @@ export class EmployeesService {
       createdAt: employee.createdAt,
       updatedAt: employee.updatedAt,
       documentSummary: {
-        totalDocuments: employee._count?.employeeDocuments ?? 0,
+        totalDocuments: employee._count?.documents ?? 0,
       },
       primaryBranch: primaryAssignment
         ? {
@@ -1007,5 +1529,32 @@ export class EmployeesService {
         branch: assignment.branch,
       })),
     };
+  }
+
+  private maskSensitiveSsn(ssnEncrypted: string | null | undefined, ssnLast4: string | null | undefined) {
+    if (ssnEncrypted) {
+      try {
+        return this.sensitiveCrypto.maskSsn(this.sensitiveCrypto.decrypt(ssnEncrypted));
+      } catch {
+        return ssnLast4 ? `***-**-${ssnLast4}` : null;
+      }
+    }
+
+    return ssnLast4 ? `***-**-${ssnLast4}` : null;
+  }
+
+  private redactAuditPayload(payload: Record<string, unknown> | null) {
+    if (!payload) {
+      return null;
+    }
+
+    const redacted = { ...payload };
+    for (const key of ['ssn', 'ssnEncrypted', 'payRate', 'payRateEncrypted', 'regularHourlyRate', 'regularHourlyRateEncrypted']) {
+      if (key in redacted) {
+        redacted[key] = '[REDACTED]';
+      }
+    }
+
+    return redacted;
   }
 }
