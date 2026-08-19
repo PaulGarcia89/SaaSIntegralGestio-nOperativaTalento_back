@@ -127,4 +127,29 @@ describe('AtsPrivateFileService security', () => {
     expect(prisma.candidateResumeFile.findFirst).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
+
+  it('uses the active access-token secret when no dedicated ATS signing secret is set', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousAtsSecret = process.env.ATS_FILE_SIGNING_SECRET;
+    const previousAccessSecret = process.env.JWT_ACCESS_SECRET;
+    const previousLegacySecret = process.env.JWT_SECRET;
+    process.env.NODE_ENV = 'production';
+    delete process.env.ATS_FILE_SIGNING_SECRET;
+    process.env.JWT_ACCESS_SECRET = 'test-access-secret';
+    delete process.env.JWT_SECRET;
+
+    try {
+      const signed = service.createSignedUrl('vacancy-image', 'file-1');
+      expect(new URL(signed.url).searchParams.get('token')).toBeTruthy();
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousAtsSecret === undefined) delete process.env.ATS_FILE_SIGNING_SECRET;
+      else process.env.ATS_FILE_SIGNING_SECRET = previousAtsSecret;
+      if (previousAccessSecret === undefined) delete process.env.JWT_ACCESS_SECRET;
+      else process.env.JWT_ACCESS_SECRET = previousAccessSecret;
+      if (previousLegacySecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousLegacySecret;
+    }
+  });
 });

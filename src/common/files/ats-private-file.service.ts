@@ -263,7 +263,9 @@ export class AtsPrivateFileService {
   }
 
   private signingSecret() {
-    const secret = process.env.ATS_FILE_SIGNING_SECRET ?? process.env.JWT_SECRET;
+    const secret = process.env.ATS_FILE_SIGNING_SECRET
+      ?? process.env.JWT_ACCESS_SECRET
+      ?? process.env.JWT_SECRET;
     if (!secret && process.env.NODE_ENV === 'production') {
       throw new ServiceUnavailableException('ATS file signing is not configured');
     }
