@@ -282,7 +282,10 @@ export class AuthContextService {
       ...payload.enabledModules.map((moduleCode) => `module.${moduleCode.toLowerCase()}`),
     ]);
 
-    const canAccessGlobalGovernance = payload.isSuperAdmin && payload.isGlobalContext;
+    // Platform administrators govern the SaaS even when no tenant is selected.
+    const canAccessGlobalGovernance =
+      (payload.role === 'SUPERADMIN' || payload.role === 'PLATFORM_ADMIN') &&
+      payload.isGlobalContext;
 
     if (canAccessGlobalGovernance) {
       featureFlags.add('module.admin');
