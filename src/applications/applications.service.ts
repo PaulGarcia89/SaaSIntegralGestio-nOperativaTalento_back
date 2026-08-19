@@ -273,7 +273,7 @@ export class ApplicationsService {
         mimeType,
       );
       try {
-        const scan = await this.antivirus.scan(resume.buffer);
+        const scan = await this.scanResume(resume.buffer);
         const promoted = await this.files.promote(quarantined.storageKey);
         storedResume = {
           ...quarantined,
@@ -843,7 +843,7 @@ export class ApplicationsService {
     let stored: { storageKey: string; sha256: string };
     let scan: Awaited<ReturnType<TrainingAntivirusService["scan"]>>;
     try {
-      scan = await this.antivirus.scan(file.buffer);
+      scan = await this.scanResume(file.buffer);
       stored = { ...quarantined, ...await this.files.promote(quarantined.storageKey) };
     } catch (error) {
       await this.files.delete(quarantined.storageKey);
@@ -2136,6 +2136,19 @@ export class ApplicationsService {
     }
 
     return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }
+
+  private async scanResume(buffer: Buffer) {
+    try {
+      return await this.antivirus!.scan(buffer);
+    } catch (error) {
+      // Temporary CV-only fallback until the Railway ClamAV service is provisioned.
+      // Other document types remain protected by their normal scan requirements.
+      if (this.antivirus?.mode === 'disabled' && error instanceof HttpException && error.getStatus() === HttpStatus.SERVICE_UNAVAILABLE) {
+        return { status: 'SKIPPED' as const, engine: null };
+      }
+      throw error;
+    }
   }
 
   private normalizeInterview(interview: ApplicationInterviewDto) {
