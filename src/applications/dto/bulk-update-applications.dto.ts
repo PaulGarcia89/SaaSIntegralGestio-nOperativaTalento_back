@@ -1,10 +1,10 @@
 import { ApplicationStatus } from '@prisma/client';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class BulkUpdateApplicationsDto {
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(100)
+  @ArrayMaxSize(500)
   @IsString({ each: true })
   ids!: string[];
 
@@ -33,4 +33,12 @@ export class BulkUpdateApplicationsDto {
   @IsString()
   @MaxLength(4000)
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  onlyUnassigned?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  onlyOverdue?: boolean;
 }

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { ApplicationStatus, ApplicationTimelineEventType, AtsCommunicationAudience, CandidatePrivacyRequestStatus, Prisma } from '@prisma/client';
+import { ApplicationStatus, ApplicationTimelineEventType, AtsCommunicationAudience, AtsCommunicationType, AtsMessageStatus, CandidatePrivacyRequestStatus, InterviewStatus, NotificationChannel, Prisma } from '@prisma/client';
+import { createHash, randomBytes } from 'crypto';
 import AdmZip from 'adm-zip';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsPrivateFileService } from '../common/files/ats-private-file.service';
@@ -46,7 +47,7 @@ export class CandidatePortalService {
           application: { candidate: this.candidateIdentityWhere(accountId) },
         },
         select: {
-          id: true, applicationId: true, type: true, subject: true, body: true,
+          id: true, applicationId: true, type: true, direction: true, subject: true, body: true,
           status: true, deliveredAt: true, readAt: true, createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
@@ -151,6 +152,72 @@ export class CandidatePortalService {
     const message = await this.prisma.atsMessage.findFirst({ where: { id: messageId, audience: AtsCommunicationAudience.CANDIDATE, application: { candidate: this.candidateIdentityWhere(accountId) } }, select: { id: true } });
     if (!message) throw new NotFoundException('Communication not found');
     return this.prisma.atsMessage.update({ where: { id: message.id }, data: { readAt: new Date() }, select: { id: true, readAt: true } });
+  }
+
+  async replyToCommunication(accountId: string, messageId: string, body: string) {
+    const message = await this.prisma.atsMessage.findFirst({
+      where: { id: messageId, audience: AtsCommunicationAudience.CANDIDATE, application: { candidate: this.candidateIdentityWhere(accountId) } },
+      include: { application: { include: { candidate: true } } },
+    });
+    if (!message) throw new NotFoundException('Communication not found');
+    const text = body.trim();
+    if (!text) throw new BadRequestException('Message cannot be empty');
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.atsConversation.upsert({
+        where: { applicationId: message.applicationId },
+        create: { tenantId: message.tenantId, applicationId: message.applicationId, unreadCount: 1, lastMessageAt: now, lastInboundAt: now },
+        update: { unreadCount: { increment: 1 }, lastMessageAt: now, lastInboundAt: now, archivedAt: null },
+      });
+      return tx.atsMessage.create({
+        data: {
+          tenantId: message.tenantId, vacancyId: message.vacancyId, applicationId: message.applicationId,
+          conversationId: conversation.id, inReplyToMessageId: message.id,
+          type: AtsCommunicationType.MANUAL, audience: AtsCommunicationAudience.CANDIDATE,
+          direction: 'INBOUND', channel: NotificationChannel.INTERNAL,
+          recipientEmail: message.application.candidate.email, recipientName: message.application.candidate.fullName,
+          subject: `Re: ${message.subject}`, body: text, status: AtsMessageStatus.DELIVERED,
+          deliveredAt: now, deduplicationKey: `candidate-portal:${accountId}:${randomBytes(12).toString('hex')}`,
+          createdByType: 'CANDIDATE', createdById: accountId,
+        },
+        select: { id: true, applicationId: true, subject: true, body: true, direction: true, createdAt: true },
+      });
+    });
+  }
+
+  async requestInterviewReschedule(accountId: string, interviewId: string) {
+    const interview = await this.prisma.applicationInterview.findFirst({
+      where: { id: interviewId, status: { in: [InterviewStatus.SCHEDULED, InterviewStatus.CONFIRMED] }, application: { candidate: this.candidateIdentityWhere(accountId) } },
+      include: { participants: true, resourceBookings: true, application: { include: { candidate: true } } },
+    });
+    if (!interview) throw new NotFoundException('Active interview not found');
+    const existing = await this.prisma.interviewSchedulingRequest.findFirst({
+      where: { applicationId: interview.applicationId, title: `Reagenda: ${interview.title}`, status: 'OPEN', expiresAt: { gt: new Date() } },
+      select: { tokenHash: true },
+    });
+    if (existing) throw new BadRequestException('There is already an active rescheduling request for this interview');
+    const token = randomBytes(32).toString('base64url');
+    const now = new Date();
+    const windowStartsAt = new Date(Math.max(now.getTime() + 24 * 60 * 60 * 1000, interview.startsAt.getTime()));
+    const windowEndsAt = new Date(windowStartsAt.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const participants = interview.participants.filter((item) => item.role !== 'SHADOW');
+    const primary = participants.find((item) => item.userId === interview.interviewerUserId) ?? participants[0];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.applicationInterview.update({ where: { id: interview.id }, data: { status: InterviewStatus.CANCELED, calendarSyncStatus: 'CANCELLED', notes: [interview.notes, 'Reagenda solicitada por el candidato desde el portal.'].filter(Boolean).join('\n') } });
+      await tx.interviewSchedulingRequest.create({
+        data: {
+          tenantId: interview.tenantId, applicationId: interview.applicationId, createdByUserId: interview.createdByUserId,
+          tokenHash: createHash('sha256').update(token).digest('hex'), title: `Reagenda: ${interview.title}`,
+          type: interview.type, timezone: interview.timezone, durationMinutes: Math.max(15, Math.round((interview.endsAt.getTime() - interview.startsAt.getTime()) / 60000)),
+          windowStartsAt, windowEndsAt, requestedInterviewerIds: primary ? [primary.userId] : [interview.interviewerUserId],
+          shadowInterviewerIds: interview.participants.filter((item) => item.role === 'SHADOW').map((item) => item.userId),
+          resourceIds: interview.resourceBookings.map((item) => item.resourceId), expiresAt: windowEndsAt,
+        },
+      });
+      await tx.applicationTimelineEvent.create({ data: { tenantId: interview.tenantId, applicationId: interview.applicationId, type: ApplicationTimelineEventType.INTERVIEW_RESCHEDULED, occurredAt: now, note: 'El candidato solicitó elegir un nuevo horario.', actorType: 'CANDIDATE', actorId: accountId, actorDisplayName: interview.application.candidate.fullName, source: 'CANDIDATE_PORTAL' } });
+    });
+    const baseUrl = (process.env.CANDIDATE_PORTAL_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+    return { url: `${baseUrl}/candidate/interviews/schedule?token=${encodeURIComponent(token)}` };
   }
 
   createSupportRequest(accountId: string, dto: CreateCandidateSupportRequestDto) {

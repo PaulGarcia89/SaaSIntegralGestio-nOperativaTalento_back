@@ -578,6 +578,25 @@ export class ScorecardsService {
     if (!signedScorecards) {
       throw new BadRequestException('At least one signed scorecard is required');
     }
+    const evaluators = await this.prisma.interviewScorecard.findMany({
+      where: { tenantId, interview: { applicationId: committee.applicationId }, status: ScorecardStatus.SIGNED },
+      select: { reviewerUserId: true },
+      distinct: ['reviewerUserId'],
+    });
+    const calibrated = await this.prisma.evaluatorCalibrationSnapshot.findMany({
+      where: {
+        tenantId,
+        evaluatorUserId: { in: evaluators.map((item) => item.reviewerUserId) },
+        calculatedAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
+      },
+      select: { evaluatorUserId: true },
+      distinct: ['evaluatorUserId'],
+    });
+    if (calibrated.length !== evaluators.length) {
+      throw new BadRequestException(
+        'La decisión requiere calibración vigente (90 días) para cada evaluador con una ficha firmada',
+      );
+    }
     return this.prisma.hiringDecisionCommittee.update({
       where: { id: committee.id },
       data: {

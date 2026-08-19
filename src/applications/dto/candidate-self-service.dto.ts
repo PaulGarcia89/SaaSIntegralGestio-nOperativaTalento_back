@@ -27,3 +27,9 @@ export class CreateCandidateSupportRequestDto {
   @MaxLength(4000)
   message!: string;
 }
+
+export class ReplyCandidateConversationDto {
+  @IsString()
+  @MaxLength(4000)
+  message!: string;
+}

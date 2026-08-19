@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { ApplicationStatus } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
+import { IsDateString, IsEnum, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
 import {
   ApplicationInterviewDto,
   ApplicationTrackingDto,
@@ -38,6 +38,16 @@ export class UpdateApplicationStatusDto {
   @ValidateNested()
   @Type(() => ApplicationTrackingDto)
   tracking?: ApplicationTrackingDto | null;
+
+  // Optimistic concurrency: clients submit the version they rendered.
+  @IsOptional()
+  @IsDateString()
+  expectedUpdatedAt?: string;
+}
+
+export class UndoApplicationTransitionDto {
+  @IsDateString()
+  expectedUpdatedAt!: string;
 }
 
 export class DecideApplicationTransitionDto {

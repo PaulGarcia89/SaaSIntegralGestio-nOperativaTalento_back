@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Param, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { ApplicationsService } from './applications.service';
 import { CandidateAuthGuard, CandidateRequest } from './candidate-auth.guard';
 import { CandidatePortalService } from './candidate-portal.service';
-import { CreateCandidatePrivacyRequestDto, CreateCandidateSupportRequestDto, WithdrawCandidateApplicationDto } from './dto/candidate-self-service.dto';
+import { CreateCandidatePrivacyRequestDto, CreateCandidateSupportRequestDto, ReplyCandidateConversationDto, WithdrawCandidateApplicationDto } from './dto/candidate-self-service.dto';
 
 @Controller('candidate/applications')
 @UseGuards(CandidateAuthGuard)
@@ -22,6 +22,16 @@ export class CandidateApplicationsController {
   @Get('portal')
   portalOverview(@Req() request: CandidateRequest) {
     return this.portal.overview(request.candidate.sub);
+  }
+
+  @Get('drafts/:vacancyId')
+  draft(@Req() request: CandidateRequest, @Param('vacancyId') vacancyId: string) {
+    return this.applications.getCandidateDraft(vacancyId, request.candidate.sub);
+  }
+
+  @Put('drafts/:vacancyId')
+  saveDraft(@Req() request: CandidateRequest, @Param('vacancyId') vacancyId: string, @Body() body: { value: unknown }) {
+    return this.applications.saveCandidateDraft(vacancyId, request.candidate.sub, body.value);
   }
 
   @Post(':id/withdraw')
@@ -46,6 +56,16 @@ export class CandidateApplicationsController {
   @Post('communications/:id/read')
   markCommunicationRead(@Req() request: CandidateRequest, @Param('id') id: string) {
     return this.portal.markCommunicationRead(request.candidate.sub, id);
+  }
+
+  @Post('communications/:id/reply')
+  replyToCommunication(@Req() request: CandidateRequest, @Param('id') id: string, @Body() dto: ReplyCandidateConversationDto) {
+    return this.portal.replyToCommunication(request.candidate.sub, id, dto.message);
+  }
+
+  @Post('interviews/:id/reschedule')
+  requestInterviewReschedule(@Req() request: CandidateRequest, @Param('id') id: string) {
+    return this.portal.requestInterviewReschedule(request.candidate.sub, id);
   }
 
   @Post('support-requests')

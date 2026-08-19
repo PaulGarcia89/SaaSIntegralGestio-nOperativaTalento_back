@@ -13,7 +13,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestWithUser } from '../common/types/request-with-user.type';
 import { ApplicationsService } from './applications.service';
 import { ListApplicationsDto } from './dto/list-applications.dto';
-import { DecideApplicationTransitionDto, UpdateApplicationStatusDto } from './dto/update-application-status.dto';
+import { DecideApplicationTransitionDto, UndoApplicationTransitionDto, UpdateApplicationStatusDto } from './dto/update-application-status.dto';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
@@ -186,6 +186,13 @@ export class ApplicationsController {
     return this.applicationsService.findOneForTenant(id, user, request.tenant!.id);
   }
 
+  @Get(':id/decision-evidence')
+  @RequirePermissions('applications.export')
+  decisionEvidence(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    request.auditAction = 'ATS_DECISION_EVIDENCE_EXPORTED';
+    return this.applicationsService.decisionEvidence(id, user, request.tenant!.id);
+  }
+
   @Get('branch/:id')
   @UseGuards(BranchAccessGuard)
   @BranchLocal()
@@ -207,6 +214,17 @@ export class ApplicationsController {
     @Body() dto: UpdateApplicationStatusDto,
   ) {
     return this.applicationsService.updateStatus(id, user, request.tenant!.id, dto);
+  }
+
+  @Post(':id/transitions/undo')
+  @RequirePermissions('applications.update')
+  undoLatestTransition(
+    @Req() request: RequestWithUser,
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UndoApplicationTransitionDto,
+  ) {
+    return this.applicationsService.undoLatestTransition(id, user, request.tenant!.id, dto.expectedUpdatedAt);
   }
 
   @Post(':id/transitions/:requestId/approve')

@@ -58,4 +58,6 @@ export class CreatePublicApplicationDto {
   @IsOptional() @IsString() @MaxLength(160) utmSource?: string;
   @IsOptional() @IsString() @MaxLength(160) utmMedium?: string;
   @IsOptional() @IsString() @MaxLength(160) utmCampaign?: string;
+  @IsOptional() @IsString() @MaxLength(0) website?: string;
+  @IsOptional() @IsString() @MaxLength(40) formStartedAt?: string;
 }

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -178,6 +179,24 @@ export class ApplicationsService {
     return { ok: true };
   }
 
+  async getCandidateDraft(vacancyId: string, candidateAccountId: string) {
+    const draft = await this.prisma.publicApplicationDraft.findFirst({ where: { vacancyId, candidateAccountId } });
+    if (!draft || draft.expiresAt.getTime() <= Date.now()) return { value: null, expiresAt: null };
+    return { value: draft.payload, expiresAt: draft.expiresAt };
+  }
+
+  async saveCandidateDraft(vacancyId: string, candidateAccountId: string, value: unknown) {
+    const vacancy = await this.prisma.vacancy.findUnique({ where: { id: vacancyId }, select: { id: true } });
+    if (!vacancy) throw new NotFoundException('Vacancy not found');
+    const expiresAt = new Date(Date.now() + PUBLIC_DRAFT_TTL_MS);
+    await this.prisma.publicApplicationDraft.upsert({
+      where: { candidateAccountId_vacancyId: { candidateAccountId, vacancyId } },
+      create: { vacancyId, candidateAccountId, tokenHash: this.hashDraftToken(`account:${candidateAccountId}:${vacancyId}`), payload: value as Prisma.InputJsonValue, expiresAt },
+      update: { payload: value as Prisma.InputJsonValue, expiresAt },
+    });
+    return { expiresAt };
+  }
+
   async createReferral(user: JwtPayload, tenantId: string, dto: CreateEmployeeReferralDto) {
     const vacancy = await this.prisma.vacancy.findFirst({ where: { id: dto.vacancyId, tenantId, status: 'OPEN', ...(user.scope === AccessScope.BRANCH && !user.isSuperAdmin ? { branchId: { in: user.allowedBranchIds } } : {}) }, select: { id: true } });
     if (!vacancy) throw new NotFoundException('Vacante no disponible para referidos.');
@@ -192,6 +211,11 @@ export class ApplicationsService {
     resume?: Express.Multer.File,
     consentContext?: { ip?: string; userAgent?: string },
   ) {
+    if (dto.website) throw new BadRequestException('No fue posible validar la postulación');
+    const startedAt = dto.formStartedAt ? new Date(dto.formStartedAt).getTime() : 0;
+    if (startedAt && (!Number.isFinite(startedAt) || Date.now() - startedAt < 2500)) {
+      throw new BadRequestException('Completa la postulación con calma e inténtalo nuevamente');
+    }
     await this.assertPublicRateLimit(`apply:${vacancyId}:${this.hashDraftToken(consentContext?.ip ?? "unknown")}`);
     if (
       dto.email.trim().toLowerCase() !== authenticatedEmail.trim().toLowerCase()
@@ -572,6 +596,36 @@ export class ApplicationsService {
     };
   }
 
+  async decisionEvidence(id: string, actor: JwtPayload, tenantId: string) {
+    const application = await this.prisma.vacancyApplication.findFirst({
+      where: { id, tenantId, ...this.buildBranchScopedWhere(actor) },
+      include: {
+        candidate: { select: { id: true, fullName: true, email: true, phone: true, city: true } },
+        vacancy: { select: { id: true, title: true, branch: { select: { id: true, name: true } } } },
+        currentStage: { select: { id: true, code: true, name: true } },
+        timelineEvents: { orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }] },
+        interviews: {
+          orderBy: { startsAt: 'asc' },
+          include: {
+            stage: { select: { id: true, code: true, name: true } },
+            scorecards: {
+              include: { reviewer: { select: { id: true, firstName: true, lastName: true, email: true } }, signedBy: { select: { id: true, firstName: true, lastName: true, email: true } }, template: { select: { id: true, name: true, version: true } }, responses: { include: { criterion: { select: { key: true, label: true, competencyName: true } } } } },
+            },
+          },
+        },
+        decisionCommittee: { include: { members: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } } } } },
+      },
+    });
+    if (!application) throw new NotFoundException('Application not found');
+    return {
+      format: 'ATS_DECISION_EVIDENCE_V1',
+      generatedAt: new Date().toISOString(),
+      generatedBy: { id: actor.sub, email: actor.email },
+      application,
+      disclaimer: 'Expediente operativo para revisión interna, auditoría y asesoría legal. Verifique requisitos locales de retención, privacidad y admisibilidad probatoria.',
+    };
+  }
+
   async bulkUpdateStatus(
     actor: JwtPayload,
     tenantId: string,
@@ -585,7 +639,13 @@ export class ApplicationsService {
     };
     const authorized = await this.prisma.vacancyApplication.findMany({
       where,
-      select: { id: true, assignedRecruiterId: true, notes: true },
+      select: {
+        id: true,
+        assignedRecruiterId: true,
+        notes: true,
+        stageEnteredAt: true,
+        currentStage: { select: { slaHours: true } },
+      },
     });
     if (authorized.length !== ids.length) {
       throw new NotFoundException("One or more applications were not found");
@@ -594,10 +654,19 @@ export class ApplicationsService {
     if (!dto.status && !dto.currentStageId && !dto.assignedRecruiterId && dto.notes === undefined) {
       throw new BadRequestException("A stage, status, recruiter assignment or note is required");
     }
+    const now = Date.now();
+    const applicable = authorized.filter((application) => {
+      if (dto.onlyUnassigned && application.assignedRecruiterId) return false;
+      if (dto.onlyOverdue) {
+        const slaHours = application.currentStage?.slaHours;
+        if (!slaHours || application.stageEnteredAt.getTime() + slaHours * 60 * 60 * 1000 > now) return false;
+      }
+      return true;
+    });
     if (dto.assignedRecruiterId) {
       await this.assertRecruiterCanAccessApplications(dto.assignedRecruiterId, tenantId, ids);
       await this.prisma.$transaction(async (tx) => {
-        for (const application of authorized) {
+        for (const application of applicable) {
           if (application.assignedRecruiterId === dto.assignedRecruiterId) continue;
           await tx.vacancyApplication.update({ where: { id: application.id }, data: { assignedRecruiterId: dto.assignedRecruiterId } });
           await this.createTimelineEvent(tx, {
@@ -614,7 +683,7 @@ export class ApplicationsService {
       });
     }
     if (dto.status || dto.currentStageId) {
-      for (const application of authorized) {
+      for (const application of applicable) {
         await this.updateStatus(application.id, actor, tenantId, {
           status: dto.status,
           currentStageId: dto.currentStageId,
@@ -625,7 +694,7 @@ export class ApplicationsService {
     }
     if (dto.notes !== undefined) {
       await this.prisma.$transaction(async (tx) => {
-        for (const application of authorized) {
+        for (const application of applicable) {
           if (application.notes === dto.notes) continue;
           await tx.vacancyApplication.update({
             where: { id: application.id },
@@ -644,7 +713,7 @@ export class ApplicationsService {
         }
       });
     }
-    return { updated: authorized.length };
+    return { updated: applicable.length, skipped: authorized.length - applicable.length };
   }
 
   listSavedViews(actor: JwtPayload, tenantId: string) {
@@ -930,6 +999,7 @@ export class ApplicationsService {
     dto: UpdateApplicationStatusDto,
   ) {
     const application = await this.findApplicationState(id, actor, tenantId);
+    this.assertExpectedVersion(application.updatedAt, dto.expectedUpdatedAt);
     const targetStage = await this.resolveTargetStage(
       tenantId,
       application.vacancyId,
@@ -1117,6 +1187,65 @@ export class ApplicationsService {
     return this.findOneForTenant(id, actor, tenantId);
   }
 
+  async undoLatestTransition(
+    id: string,
+    actor: JwtPayload,
+    tenantId: string,
+    expectedUpdatedAt: string,
+  ) {
+    const application = await this.findApplicationState(id, actor, tenantId);
+    this.assertExpectedVersion(application.updatedAt, expectedUpdatedAt);
+    const latestOverall = await this.prisma.applicationTimelineEvent.findFirst({
+      where: { tenantId, applicationId: id, type: PrismaApplicationTimelineEventType.STAGE_CHANGED },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+    });
+    const latest = await this.prisma.applicationTimelineEvent.findFirst({
+      where: {
+        tenantId,
+        applicationId: id,
+        type: PrismaApplicationTimelineEventType.STAGE_CHANGED,
+        actorId: actor.sub,
+        source: 'ATS_TRANSITION',
+      },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+    });
+    const previous = latest?.previousValue as { status?: ApplicationStatus; stageId?: string | null } | null;
+    if (!latest || latestOverall?.id !== latest.id || !previous?.status || !previous.stageId) {
+      throw new BadRequestException('No hay una transición propia que se pueda deshacer');
+    }
+    const previousStatus = previous.status;
+    const previousStage = application.vacancy.stages.find((stage) => stage.id === previous.stageId);
+    if (!previousStage) throw new BadRequestException('La etapa anterior ya no está disponible');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vacancyApplication.update({
+        where: { id },
+        data: {
+          status: previousStatus,
+          currentStageId: previousStage.id,
+          stageEnteredAt: new Date(),
+          slaWarningSentAt: null,
+          slaEscalatedAt: null,
+          slaReassignedAt: null,
+          rejectionReason: null,
+          rejectionReasonId: null,
+        },
+      });
+      await this.createTimelineEvent(tx, {
+        tenantId,
+        applicationId: id,
+        type: PrismaApplicationTimelineEventType.STAGE_CHANGED,
+        actor,
+        previousValue: this.applicationStateSnapshot(application.status, application.currentStage),
+        newValue: this.applicationStateSnapshot(previousStatus, previousStage),
+        note: `Cambio deshecho: ${previousStage.name}`,
+        source: 'ATS_UNDO',
+        metadata: { undoneTimelineEventId: latest.id },
+      });
+    });
+    return this.findOneForTenant(id, actor, tenantId);
+  }
+
   async findOneForBranch(id: string, tenantId: string, branchId: string) {
     const application = await this.prisma.vacancyApplication.findFirst({
       where: {
@@ -1163,9 +1292,11 @@ export class ApplicationsService {
       select: {
         id: true,
         vacancyId: true,
+        updatedAt: true,
         status: true,
         currentStageId: true,
         currentStage: true,
+        vacancy: { select: { stages: { orderBy: { position: 'asc' } } } },
         candidate: {
           include: {
             resumeFiles: {
@@ -1678,6 +1809,16 @@ export class ApplicationsService {
       stageCode: stage?.code ?? null,
       stageName: stage?.name ?? null,
     };
+  }
+
+  private assertExpectedVersion(current: Date, expected?: string) {
+    if (!expected) return;
+    const parsed = new Date(expected);
+    if (Number.isNaN(parsed.getTime()) || current.getTime() !== parsed.getTime()) {
+      throw new ConflictException(
+        'La postulación fue modificada por otra persona. Actualiza la vista antes de continuar.',
+      );
+    }
   }
 
   private buildBranchScopedWhere(
