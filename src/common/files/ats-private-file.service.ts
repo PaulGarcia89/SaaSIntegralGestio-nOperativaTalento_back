@@ -155,7 +155,13 @@ export class AtsPrivateFileService {
     const expiresAt = Date.now() + Math.min(Math.max(ttlSeconds, 30), 900) * 1000;
     const payload = Buffer.from(JSON.stringify({ kind, fileId, expiresAt })).toString('base64url');
     const signature = createHmac('sha256', this.signingSecret()).update(payload).digest('base64url');
-    const baseUrl = (process.env.API_PUBLIC_URL ?? 'http://localhost:3001').replace(/\/$/, '');
+    // Railway supplies the public hostname at runtime. Prefer an explicit URL,
+    // but never issue localhost URLs for files requested by browser clients.
+    const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+    const baseUrl = (
+      process.env.API_PUBLIC_URL?.trim()
+      ?? (railwayDomain ? `https://${railwayDomain}` : 'http://localhost:3001')
+    ).replace(/\/$/, '');
     return {
       url: `${baseUrl}/public/ats-files/${kind}/${fileId}?token=${payload}.${signature}`,
       expiresAt: new Date(expiresAt).toISOString(),

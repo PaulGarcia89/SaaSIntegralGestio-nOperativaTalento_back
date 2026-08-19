@@ -152,4 +152,21 @@ describe('AtsPrivateFileService security', () => {
       else process.env.JWT_SECRET = previousLegacySecret;
     }
   });
+
+  it('uses the Railway public domain for browser-facing signed URLs', () => {
+    const previousPublicUrl = process.env.API_PUBLIC_URL;
+    const previousRailwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+    delete process.env.API_PUBLIC_URL;
+    process.env.RAILWAY_PUBLIC_DOMAIN = 'talentos-api.up.railway.app';
+
+    try {
+      const signed = service.createSignedUrl('vacancy-image', 'file-1');
+      expect(new URL(signed.url).origin).toBe('https://talentos-api.up.railway.app');
+    } finally {
+      if (previousPublicUrl === undefined) delete process.env.API_PUBLIC_URL;
+      else process.env.API_PUBLIC_URL = previousPublicUrl;
+      if (previousRailwayDomain === undefined) delete process.env.RAILWAY_PUBLIC_DOMAIN;
+      else process.env.RAILWAY_PUBLIC_DOMAIN = previousRailwayDomain;
+    }
+  });
 });
