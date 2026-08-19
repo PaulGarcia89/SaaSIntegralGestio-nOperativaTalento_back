@@ -1,12 +1,4 @@
-import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, ValidateNested } from 'class-validator';
-import { CreateEmployeeDto } from './create-employee.dto';
+import { BulkLoadEmployeesDto } from './bulk-load-employees.dto';
 
-export class BulkCreateEmployeesDto {
-  @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(500)
-  @ValidateNested({ each: true })
-  @Type(() => CreateEmployeeDto)
-  employees!: CreateEmployeeDto[];
-}
+/** @deprecated Use BulkLoadEmployeesDto. Kept for source compatibility. */
+export class BulkCreateEmployeesDto extends BulkLoadEmployeesDto {}

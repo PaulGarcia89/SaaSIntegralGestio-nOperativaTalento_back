@@ -208,7 +208,10 @@
 | `/domain-events/training-completed` | POST | `domain-events` | JWT/candidato | `domain_events.training_completed` | TENANT | No explícito | `TRAINING` | Implementado | `src/domain-events/domain-events.controller.ts:63` |
 | `/employees` | GET | `employees` | JWT/candidato | `employees.read` | BRANCH | Sí | — | Implementado | `src/employees/employees.controller.ts:30` |
 | `/employees` | POST | `employees` | JWT/candidato | `employees.create` | BRANCH | Sí | — | Implementado | `src/employees/employees.controller.ts:24` |
+| `/employees/bulk` | POST | `employees` | JWT/candidato | `employees.create` | BRANCH | Sí | — | Implementado | Carga documental atómica con el mismo contrato del alta manual |
+| `/employees/bulk/validate` | POST | `employees` | JWT/candidato | `employees.create` | BRANCH | Sí | — | Implementado | Prevalidación sin escritura con errores por fila |
 | `/employees/:id` | GET | `employees` | JWT/candidato | `employees.read` | BRANCH | Sí | — | Implementado | `src/employees/employees.controller.ts:40` |
+| `/employees/:id/document-summary` | GET | `employees` | JWT/candidato | `employees.read` | BRANCH | Sí | — | Implementado | Resumen documental seguro para auditoría |
 | `/employees/:id` | PATCH | `employees` | JWT/candidato | `employees.update` | BRANCH | Sí | — | Implementado | `src/employees/employees.controller.ts:46` |
 | `/employees/:id/assignments` | POST | `employees` | JWT/candidato | `employees.update` | BRANCH | Sí | — | Implementado | `src/employees/employees.controller.ts:82` |
 | `/employees/:id/history` | GET | `employees` | JWT/candidato | `employees.read` | BRANCH | Sí | — | Implementado | `src/employees/employees.controller.ts:66` |

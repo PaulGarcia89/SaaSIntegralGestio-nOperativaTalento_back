@@ -8,6 +8,10 @@ export type RequestWithUser = Request & {
   requestId?: string;
   auditAction?: string;
   auditDomain?: 'governance_global' | 'tenant_operations';
+  auditEntityType?: string;
+  auditEntityId?: string;
+  auditBefore?: Record<string, unknown> | null;
+  auditAfter?: Record<string, unknown> | null;
   user: JwtPayload;
   accessContext?: {
     actorScope: AccessScope;

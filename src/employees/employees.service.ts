@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { EmployeeStatus, Prisma } from '@prisma/client';
 import { SubscriptionAccessState } from '../common/auth/subscription-access-state.enum';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -6,8 +6,8 @@ import { RoleScope } from '../common/enums/role-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
-import { CreateEmployeeDto } from './dto/create-employee.dto';
-import { BulkCreateEmployeesDto } from './dto/bulk-create-employees.dto';
+import { RegisterEmployeeDto } from './dto/register-employee.dto';
+import { BulkLoadEmployeesDto } from './dto/bulk-load-employees.dto';
 import { ListEmployeesDto } from './dto/list-employees.dto';
 import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
@@ -18,12 +18,20 @@ import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
 export class EmployeesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(tenantId: string, dto: CreateEmployeeDto) {
+  async register(tenantId: string, dto: RegisterEmployeeDto) {
     await this.assertBranchBelongsToTenant(dto.primaryBranchId, tenantId);
 
     const name = dto.name.trim();
     const email = dto.email.trim().toLowerCase();
     const jobTitle = dto.primaryRole.trim();
+
+    const existing = await this.prisma.employee.findFirst({
+      where: { tenantId, email: { equals: email, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new ConflictException('Ya existe un registro de empleado con este correo en la empresa');
+    }
 
     const employee = await this.prisma.$transaction(async (tx) => {
       const created = await tx.employee.create({
@@ -52,28 +60,65 @@ export class EmployeesService {
     return this.findOne(employee.id, this.buildSystemActor(tenantId), tenantId);
   }
 
-  async bulkCreate(tenantId: string, dto: BulkCreateEmployeesDto) {
+  /** @deprecated Kept for internal compatibility. */
+  create(tenantId: string, dto: RegisterEmployeeDto) {
+    return this.register(tenantId, dto);
+  }
+
+  async validateBulkLoad(tenantId: string, dto: BulkLoadEmployeesDto) {
     const emails = dto.employees.map((employee) => employee.email.trim().toLowerCase());
-    const duplicateEmails = [...new Set(emails.filter((email, index) => emails.indexOf(email) !== index))];
-    if (duplicateEmails.length) {
-      throw new BadRequestException(`Duplicate emails in import: ${duplicateEmails.join(', ')}`);
-    }
-
     const branchIds = [...new Set(dto.employees.map((employee) => employee.primaryBranchId))];
-    const branches = await this.prisma.branch.findMany({
-      where: { id: { in: branchIds }, tenantId },
-      select: { id: true },
-    });
-    if (branches.length !== branchIds.length) {
-      throw new BadRequestException('Every imported employee must belong to a branch in the current company');
-    }
+    const [branches, existing] = await Promise.all([
+      this.prisma.branch.findMany({
+        where: { id: { in: branchIds }, tenantId },
+        select: { id: true },
+      }),
+      this.prisma.employee.findMany({
+        where: { tenantId, email: { in: emails, mode: 'insensitive' } },
+        select: { email: true },
+      }),
+    ]);
+    const validBranchIds = new Set(branches.map((branch) => branch.id));
+    const existingEmails = new Set(existing.map((employee) => employee.email.trim().toLowerCase()));
+    const emailCounts = new Map<string, number>();
+    for (const email of emails) emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
 
-    const existing = await this.prisma.employee.findMany({
-      where: { tenantId, email: { in: emails, mode: 'insensitive' } },
-      select: { email: true },
+    const rows = dto.employees.map((input, index) => {
+      const email = input.email.trim().toLowerCase();
+      const errors = [
+        ...((emailCounts.get(email) ?? 0) > 1 ? ['DUPLICATE_EMAIL_IN_LOAD'] : []),
+        ...(existingEmails.has(email) ? ['EMPLOYEE_EMAIL_ALREADY_REGISTERED'] : []),
+        ...(!validBranchIds.has(input.primaryBranchId) ? ['BRANCH_NOT_AVAILABLE_IN_TENANT'] : []),
+      ];
+      return {
+        row: index + 1,
+        valid: errors.length === 0,
+        errors,
+        employee: {
+          name: input.name.trim(),
+          email,
+          status: input.status,
+          primaryBranchId: input.primaryBranchId,
+          primaryRole: input.primaryRole.trim(),
+        },
+      };
     });
-    if (existing.length) {
-      throw new BadRequestException(`Employees already exist: ${existing.map((employee) => employee.email).join(', ')}`);
+
+    return {
+      total: rows.length,
+      valid: rows.filter((row) => row.valid).length,
+      invalid: rows.filter((row) => !row.valid).length,
+      rows,
+    };
+  }
+
+  async bulkLoad(tenantId: string, dto: BulkLoadEmployeesDto) {
+    const validation = await this.validateBulkLoad(tenantId, dto);
+    if (validation.invalid > 0) {
+      throw new BadRequestException({
+        message: 'La carga contiene registros de empleados que requieren corrección',
+        validation,
+      });
     }
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -105,7 +150,16 @@ export class EmployeesService {
       return employees;
     });
 
-    return { created: created.length, employees: created };
+    return {
+      created: created.length,
+      employees: created,
+      message: `${created.length} registros de empleados cargados correctamente`,
+    };
+  }
+
+  /** @deprecated Kept for internal compatibility. */
+  bulkCreate(tenantId: string, dto: BulkLoadEmployeesDto) {
+    return this.bulkLoad(tenantId, dto);
   }
 
   async findAll(tenantId: string, activeBranchId: string, query: ListEmployeesDto) {
@@ -147,6 +201,13 @@ export class EmployeesService {
             },
             orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
           },
+          _count: {
+            select: {
+              employeeDocuments: {
+                where: { deletedAt: null, status: { not: 'SUPERSEDED' } },
+              },
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: pagination.skip,
@@ -184,11 +245,18 @@ export class EmployeesService {
           },
           orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
         },
+        _count: {
+          select: {
+            employeeDocuments: {
+              where: { deletedAt: null, status: { not: 'SUPERSEDED' } },
+            },
+          },
+        },
       },
     });
 
     if (!employee) {
-      throw new NotFoundException('Employee not found');
+      throw new NotFoundException('Registro de empleado no encontrado');
     }
 
     return this.mapEmployee(employee);
@@ -197,13 +265,23 @@ export class EmployeesService {
   async update(id: string, actor: JwtPayload, tenantId: string, dto: UpdateEmployeeDto) {
     await this.ensureEmployeeExists(id, actor, tenantId);
 
-    await this.prisma.employee.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.email !== undefined ? { email: dto.email } : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.employee.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+          ...(dto.email !== undefined ? { email: dto.email.trim().toLowerCase() } : {}),
+          ...(dto.jobTitle !== undefined ? { jobTitle: dto.jobTitle.trim() } : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+        },
+      });
+
+      if (dto.jobTitle !== undefined) {
+        await tx.employeeBranch.updateMany({
+          where: { tenantId, employeeId: id, isPrimary: true, releasedAt: null },
+          data: { role: dto.jobTitle.trim() },
+        });
+      }
     });
 
     if (dto.status === EmployeeStatus.TERMINATED) {
@@ -247,12 +325,45 @@ export class EmployeesService {
           },
           orderBy: [{ assignedAt: 'desc' }],
         },
+        employeeDocuments: {
+          where: { tenantId, status: { not: 'SUPERSEDED' } },
+          select: {
+            id: true,
+            category: true,
+            originalName: true,
+            status: true,
+            version: true,
+            createdAt: true,
+            updatedAt: true,
+            reviewedAt: true,
+            expiresAt: true,
+            deletedAt: true,
+          },
+          orderBy: [{ updatedAt: 'desc' }],
+        },
       },
     });
 
     if (!employee) {
-      throw new NotFoundException('Employee not found');
+      throw new NotFoundException('Registro de empleado no encontrado');
     }
+
+    const auditTrail = await this.prisma.auditLog.findMany({
+      where: { tenantId, entityType: 'Employee', entityId: employee.id },
+      select: {
+        id: true,
+        action: true,
+        userId: true,
+        email: true,
+        actorRole: true,
+        before: true,
+        after: true,
+        correlationId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
 
     return {
       employeeId: employee.id,
@@ -260,6 +371,8 @@ export class EmployeesService {
       name: employee.name,
       email: employee.email,
       status: employee.status,
+      jobTitle: employee.jobTitle,
+      source: employee.sourceCandidateId ? 'CANDIDATE_CONVERSION' : 'DIRECTORY_REGISTRATION',
       assignments: employee.branchAssignments.map((assignment) => ({
         id: assignment.id,
         employeeId: employee.id,
@@ -271,6 +384,54 @@ export class EmployeesService {
         unassignedAt: assignment.releasedAt,
         branch: assignment.branch,
       })),
+      documents: employee.employeeDocuments,
+      auditTrail,
+    };
+  }
+
+  async documentSummary(id: string, actor: JwtPayload, tenantId: string) {
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    const now = new Date();
+    const expiringBefore = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const documents = await this.prisma.employeeDocument.findMany({
+      where: { tenantId, employeeId: id, deletedAt: null, status: { not: 'SUPERSEDED' } },
+      select: {
+        id: true,
+        category: true,
+        originalName: true,
+        mimeType: true,
+        sizeBytes: true,
+        scanStatus: true,
+        status: true,
+        version: true,
+        rejectionReason: true,
+        expiresAt: true,
+        reviewedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: [{ category: 'asc' }, { version: 'desc' }],
+    });
+    const byCategory = documents.reduce<Record<string, number>>((summary, document) => {
+      summary[document.category] = (summary[document.category] ?? 0) + 1;
+      return summary;
+    }, {});
+
+    return {
+      employeeId: id,
+      generatedAt: now,
+      summary: {
+        total: documents.length,
+        pendingReview: documents.filter((document) => document.status === 'PENDING_REVIEW').length,
+        approved: documents.filter((document) => document.status === 'APPROVED').length,
+        rejected: documents.filter((document) => document.status === 'REJECTED').length,
+        expired: documents.filter((document) => document.expiresAt && document.expiresAt <= now).length,
+        expiringWithin30Days: documents.filter(
+          (document) => document.expiresAt && document.expiresAt > now && document.expiresAt <= expiringBefore,
+        ).length,
+        byCategory,
+      },
+      documents,
     };
   }
 
@@ -289,11 +450,11 @@ export class EmployeesService {
     });
 
     if (!currentPrimary) {
-      throw new BadRequestException('Employee does not have an active primary branch');
+      throw new BadRequestException('El empleado no tiene una sucursal principal activa');
     }
 
     if (currentPrimary.branchId === dto.branchId) {
-      throw new BadRequestException('Target branch must differ from the current primary branch');
+      throw new BadRequestException('La sucursal destino debe ser diferente de la sucursal principal actual');
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -333,7 +494,7 @@ export class EmployeesService {
     });
 
     if (activeAssignment) {
-      throw new BadRequestException('Employee already has an active assignment in that branch');
+      throw new BadRequestException('El empleado ya tiene una asignación activa en esa sucursal');
     }
 
     await this.prisma.employeeBranch.create({
@@ -359,7 +520,7 @@ export class EmployeesService {
     });
 
     if (!employee) {
-      throw new NotFoundException('Employee not found');
+      throw new NotFoundException('Registro de empleado no encontrado');
     }
 
     return employee;
@@ -375,7 +536,7 @@ export class EmployeesService {
     });
 
     if (!branch) {
-      throw new NotFoundException('Branch not found');
+      throw new NotFoundException('Sucursal no encontrada en la empresa activa');
     }
   }
 
@@ -471,6 +632,8 @@ export class EmployeesService {
       tenantId: string;
       name: string;
       email: string;
+      jobTitle: string | null;
+      sourceCandidateId: string | null;
       status: EmployeeStatus;
       createdAt: Date;
       updatedAt: Date;
@@ -492,6 +655,7 @@ export class EmployeesService {
           updatedAt: Date;
         };
       }>;
+      _count?: { employeeDocuments: number };
     },
   ) {
     const primaryAssignment =
@@ -502,9 +666,14 @@ export class EmployeesService {
       tenantId: employee.tenantId,
       name: employee.name,
       email: employee.email,
+      jobTitle: employee.jobTitle,
+      recordSource: employee.sourceCandidateId ? 'CANDIDATE_CONVERSION' : 'DIRECTORY_REGISTRATION',
       status: employee.status,
       createdAt: employee.createdAt,
       updatedAt: employee.updatedAt,
+      documentSummary: {
+        totalDocuments: employee._count?.employeeDocuments ?? 0,
+      },
       primaryBranch: primaryAssignment
         ? {
             assignmentId: primaryAssignment.id,

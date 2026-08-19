@@ -6,8 +6,8 @@ import { PermissionGuard } from '../common/guards/permission.guard';
 import { ScopeGuard } from '../common/guards/scope.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { CurrentBranch } from '../common/decorators/current-branch.decorator';
-import { CreateEmployeeDto } from './dto/create-employee.dto';
-import { BulkCreateEmployeesDto } from './dto/bulk-create-employees.dto';
+import { RegisterEmployeeDto } from './dto/register-employee.dto';
+import { BulkLoadEmployeesDto } from './dto/bulk-load-employees.dto';
 import { ListEmployeesDto } from './dto/list-employees.dto';
 import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
@@ -26,14 +26,26 @@ export class EmployeesController {
 
   @Post()
   @RequirePermissions('employees.create')
-  create(@Req() request: RequestWithUser, @Body() dto: CreateEmployeeDto) {
-    return this.employeesService.create(request.tenant!.id, dto);
+  async register(@Req() request: RequestWithUser, @Body() dto: RegisterEmployeeDto) {
+    const employee = await this.employeesService.register(request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_RECORD_REGISTERED', employee);
+    return employee;
   }
 
   @Post('bulk')
   @RequirePermissions('employees.create')
-  bulkCreate(@Req() request: RequestWithUser, @Body() dto: BulkCreateEmployeesDto) {
-    return this.employeesService.bulkCreate(request.tenant!.id, dto);
+  async bulkLoad(@Req() request: RequestWithUser, @Body() dto: BulkLoadEmployeesDto) {
+    const result = await this.employeesService.bulkLoad(request.tenant!.id, dto);
+    request.auditAction = 'EMPLOYEE_RECORDS_BULK_LOADED';
+    request.auditAfter = { loaded: result.created };
+    return result;
+  }
+
+  @Post('bulk/validate')
+  @RequirePermissions('employees.create')
+  async validateBulkLoad(@Req() request: RequestWithUser, @Body() dto: BulkLoadEmployeesDto) {
+    request.auditAction = 'EMPLOYEE_BULK_LOAD_VALIDATED';
+    return this.employeesService.validateBulkLoad(request.tenant!.id, dto);
   }
 
   @Get()
@@ -52,24 +64,34 @@ export class EmployeesController {
     return this.employeesService.findOne(id, request.user, request.tenant!.id);
   }
 
+  @Get(':id/document-summary')
+  @RequirePermissions('employees.read')
+  documentSummary(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.documentSummary(id, request.user, request.tenant!.id);
+  }
+
   @Patch(':id')
   @RequirePermissions('employees.update')
-  update(
+  async update(
     @Req() request: RequestWithUser,
     @Param('id') id: string,
     @Body() dto: UpdateEmployeeDto,
   ) {
-    return this.employeesService.update(id, request.user, request.tenant!.id, dto);
+    const employee = await this.employeesService.update(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_RECORD_UPDATED', employee);
+    return employee;
   }
 
   @Patch(':id/status')
   @RequirePermissions('employees.update')
-  updateStatus(
+  async updateStatus(
     @Req() request: RequestWithUser,
     @Param('id') id: string,
     @Body() dto: UpdateEmployeeStatusDto,
   ) {
-    return this.employeesService.updateStatus(id, request.user, request.tenant!.id, dto);
+    const employee = await this.employeesService.updateStatus(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_STATUS_UPDATED', employee);
+    return employee;
   }
 
   @Get(':id/history')
@@ -80,21 +102,42 @@ export class EmployeesController {
 
   @Post(':id/transfer')
   @RequirePermissions('employees.update')
-  transfer(
+  async transfer(
     @Req() request: RequestWithUser,
     @Param('id') id: string,
     @Body() dto: TransferEmployeeDto,
   ) {
-    return this.employeesService.transfer(id, request.user, request.tenant!.id, dto);
+    const employee = await this.employeesService.transfer(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_PRIMARY_BRANCH_CHANGED', employee);
+    return employee;
   }
 
   @Post(':id/assignments')
   @RequirePermissions('employees.update')
-  assignSecondaryBranch(
+  async assignSecondaryBranch(
     @Req() request: RequestWithUser,
     @Param('id') id: string,
     @Body() dto: AssignEmployeeBranchDto,
   ) {
-    return this.employeesService.assignSecondaryBranch(id, request.user, request.tenant!.id, dto);
+    const employee = await this.employeesService.assignSecondaryBranch(id, request.user, request.tenant!.id, dto);
+    this.setEmployeeAudit(request, 'EMPLOYEE_BRANCH_ASSIGNMENT_REGISTERED', employee);
+    return employee;
+  }
+
+  private setEmployeeAudit(
+    request: RequestWithUser,
+    action: string,
+    employee: { id: string; name: string; email: string; status: string; jobTitle?: string | null },
+  ) {
+    request.auditAction = action;
+    request.auditEntityType = 'Employee';
+    request.auditEntityId = employee.id;
+    request.auditAfter = {
+      id: employee.id,
+      name: employee.name,
+      email: employee.email,
+      status: employee.status,
+      jobTitle: employee.jobTitle ?? null,
+    };
   }
 }

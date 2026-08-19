@@ -1,29 +1,32 @@
 import { EmployeeStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsString, IsUUID, MaxLength } from 'class-validator';
 
-export class UpdateEmployeeDto {
-  @IsOptional()
+/**
+ * Contract for registering an existing employee in the operational directory.
+ * Candidate, offer, onboarding, payroll and identity data belong to their own domains.
+ */
+export class RegisterEmployeeDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
   @MaxLength(160)
-  name?: string;
+  name!: string;
 
-  @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail()
   @MaxLength(180)
-  email?: string;
+  email!: string;
 
-  @IsOptional()
+  @IsEnum(EmployeeStatus)
+  status: EmployeeStatus = EmployeeStatus.ACTIVE;
+
+  @IsUUID()
+  primaryBranchId!: string;
+
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
-  jobTitle?: string;
-
-  @IsOptional()
-  @IsEnum(EmployeeStatus)
-  status?: EmployeeStatus;
+  primaryRole!: string;
 }
