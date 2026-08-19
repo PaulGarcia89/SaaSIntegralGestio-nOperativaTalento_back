@@ -220,6 +220,11 @@ export class VacanciesService {
               lastName: true,
             },
           },
+          imageFiles: {
+            where: { status: 'ACTIVE' },
+            orderBy: { version: 'desc' },
+            take: 1,
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: pagination.skip,
