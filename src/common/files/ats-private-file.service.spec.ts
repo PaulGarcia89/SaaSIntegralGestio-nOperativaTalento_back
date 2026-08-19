@@ -156,17 +156,23 @@ describe('AtsPrivateFileService security', () => {
   it('uses the Railway public domain for browser-facing signed URLs', () => {
     const previousPublicUrl = process.env.API_PUBLIC_URL;
     const previousRailwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+    const previousGlobalPrefix = process.env.DISABLE_GLOBAL_PREFIX;
     delete process.env.API_PUBLIC_URL;
     process.env.RAILWAY_PUBLIC_DOMAIN = 'talentos-api.up.railway.app';
+    delete process.env.DISABLE_GLOBAL_PREFIX;
 
     try {
       const signed = service.createSignedUrl('vacancy-image', 'file-1');
-      expect(new URL(signed.url).origin).toBe('https://talentos-api.up.railway.app');
+      const signedUrl = new URL(signed.url);
+      expect(signedUrl.origin).toBe('https://talentos-api.up.railway.app');
+      expect(signedUrl.pathname).toBe('/api/public/ats-files/vacancy-image/file-1');
     } finally {
       if (previousPublicUrl === undefined) delete process.env.API_PUBLIC_URL;
       else process.env.API_PUBLIC_URL = previousPublicUrl;
       if (previousRailwayDomain === undefined) delete process.env.RAILWAY_PUBLIC_DOMAIN;
       else process.env.RAILWAY_PUBLIC_DOMAIN = previousRailwayDomain;
+      if (previousGlobalPrefix === undefined) delete process.env.DISABLE_GLOBAL_PREFIX;
+      else process.env.DISABLE_GLOBAL_PREFIX = previousGlobalPrefix;
     }
   });
 });

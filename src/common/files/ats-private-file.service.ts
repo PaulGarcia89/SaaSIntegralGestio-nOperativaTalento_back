@@ -162,8 +162,11 @@ export class AtsPrivateFileService {
       process.env.API_PUBLIC_URL?.trim()
       ?? (railwayDomain ? `https://${railwayDomain}` : 'http://localhost:3001')
     ).replace(/\/$/, '');
+    const publicBaseUrl = process.env.DISABLE_GLOBAL_PREFIX !== 'true' && !baseUrl.endsWith('/api')
+      ? `${baseUrl}/api`
+      : baseUrl;
     return {
-      url: `${baseUrl}/public/ats-files/${kind}/${fileId}?token=${payload}.${signature}`,
+      url: `${publicBaseUrl}/public/ats-files/${kind}/${fileId}?token=${payload}.${signature}`,
       expiresAt: new Date(expiresAt).toISOString(),
     };
   }
