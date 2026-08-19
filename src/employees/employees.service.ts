@@ -13,6 +13,7 @@ import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
+import { BulkUpdateEmployeeStatusDto } from './dto/bulk-update-employee-status.dto';
 
 @Injectable()
 export class EmployeesService {
@@ -306,6 +307,47 @@ export class EmployeesService {
     }
 
     return this.findOne(id, actor, tenantId);
+  }
+
+  async bulkUpdateStatus(actor: JwtPayload, tenantId: string, dto: BulkUpdateEmployeeStatusDto) {
+    const employeeIds = [...new Set(dto.employeeIds)];
+    if (!employeeIds.length) {
+      throw new BadRequestException('Debes seleccionar al menos un empleado');
+    }
+
+    const employees = await this.prisma.employee.findMany({
+      where: {
+        tenantId,
+        id: { in: employeeIds },
+        ...this.buildBranchScopedWhere(actor, tenantId),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        status: true,
+        jobTitle: true,
+      },
+    });
+
+    if (employees.length !== employeeIds.length) {
+      throw new NotFoundException('Uno o más empleados no están disponibles en el contexto actual');
+    }
+
+    await this.prisma.employee.updateMany({
+      where: { tenantId, id: { in: employeeIds } },
+      data: { status: dto.status },
+    });
+
+    if (dto.status === EmployeeStatus.TERMINATED) {
+      await Promise.all(employeeIds.map((id) => this.releaseActiveAssignments(id, tenantId)));
+    }
+
+    return {
+      updated: await Promise.all(employeeIds.map((id) => this.findOne(id, actor, tenantId))),
+      previous: employees,
+      status: dto.status,
+    };
   }
 
   async history(id: string, actor: JwtPayload, tenantId: string) {

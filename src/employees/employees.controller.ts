@@ -13,6 +13,7 @@ import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
+import { BulkUpdateEmployeeStatusDto } from './dto/bulk-update-employee-status.dto';
 import { EmployeesService } from './employees.service';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
@@ -92,6 +93,18 @@ export class EmployeesController {
     const employee = await this.employeesService.updateStatus(id, request.user, request.tenant!.id, dto);
     this.setEmployeeAudit(request, 'EMPLOYEE_STATUS_UPDATED', employee);
     return employee;
+  }
+
+  @Patch('bulk/status')
+  @RequirePermissions('employees.update')
+  async bulkUpdateStatus(
+    @Req() request: RequestWithUser,
+    @Body() dto: BulkUpdateEmployeeStatusDto,
+  ) {
+    const result = await this.employeesService.bulkUpdateStatus(request.user, request.tenant!.id, dto);
+    request.auditAction = 'EMPLOYEE_STATUSES_BULK_UPDATED';
+    request.auditAfter = { employeeIds: result.updated.map((employee) => employee.id), status: dto.status, updated: result.updated.length };
+    return result;
   }
 
   @Get(':id/history')
