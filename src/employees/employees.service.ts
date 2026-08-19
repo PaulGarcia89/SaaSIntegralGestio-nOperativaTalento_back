@@ -21,12 +21,17 @@ export class EmployeesService {
   async create(tenantId: string, dto: CreateEmployeeDto) {
     await this.assertBranchBelongsToTenant(dto.primaryBranchId, tenantId);
 
+    const name = dto.name.trim();
+    const email = dto.email.trim().toLowerCase();
+    const jobTitle = dto.primaryRole.trim();
+
     const employee = await this.prisma.$transaction(async (tx) => {
       const created = await tx.employee.create({
         data: {
           tenantId,
-          name: dto.name,
-          email: dto.email,
+          name,
+          email,
+          jobTitle,
           status: dto.status,
         },
       });
@@ -36,7 +41,7 @@ export class EmployeesService {
           tenantId,
           employeeId: created.id,
           branchId: dto.primaryBranchId,
-          role: dto.primaryRole,
+          role: jobTitle,
           isPrimary: true,
         },
       });
@@ -74,11 +79,15 @@ export class EmployeesService {
     const created = await this.prisma.$transaction(async (tx) => {
       const employees = [] as Array<{ id: string; email: string }>;
       for (const input of dto.employees) {
+        const name = input.name.trim();
+        const email = input.email.trim().toLowerCase();
+        const jobTitle = input.primaryRole.trim();
         const employee = await tx.employee.create({
           data: {
             tenantId,
-            name: input.name.trim(),
-            email: input.email.trim().toLowerCase(),
+            name,
+            email,
+            jobTitle,
             status: input.status,
           },
         });
@@ -87,7 +96,7 @@ export class EmployeesService {
             tenantId,
             employeeId: employee.id,
             branchId: input.primaryBranchId,
-            role: input.primaryRole.trim(),
+            role: jobTitle,
             isPrimary: true,
           },
         });
