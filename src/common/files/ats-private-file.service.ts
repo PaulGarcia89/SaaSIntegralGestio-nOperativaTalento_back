@@ -266,10 +266,21 @@ export class AtsPrivateFileService {
     const secret = process.env.ATS_FILE_SIGNING_SECRET
       ?? process.env.JWT_ACCESS_SECRET
       ?? process.env.JWT_SECRET;
-    if (!secret && process.env.NODE_ENV === 'production') {
+    if (secret) return secret;
+
+    // Railway always supplies DATABASE_URL to this service. Derive an isolated
+    // signing key so private file delivery remains available during key setup.
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (databaseUrl) {
+      return createHash('sha256')
+        .update(`ats-private-file-signing:${databaseUrl}`)
+        .digest('hex');
+    }
+
+    if (process.env.NODE_ENV === 'production') {
       throw new ServiceUnavailableException('ATS file signing is not configured');
     }
-    return secret ?? 'local-development-ats-file-secret';
+    return 'local-development-ats-file-secret';
   }
 
   private remoteClient(): S3Client {
