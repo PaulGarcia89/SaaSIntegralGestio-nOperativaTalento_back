@@ -1092,6 +1092,129 @@ export class EmployeesService {
     }
   }
 
+  async downloadDocument(id: string, documentId: string, actor: JwtPayload, tenantId: string) {
+    const document = await this.requireEmployeeDocument(id, documentId, actor, tenantId);
+    this.assertDocumentBinaryAccess(actor);
+    const file = await this.documentStorage.read(document.storageKey);
+    return { document, file };
+  }
+
+  async replaceDocument(
+    id: string,
+    documentId: string,
+    actor: JwtPayload,
+    tenantId: string,
+    file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Debes adjuntar un archivo');
+    }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.mimetype)) {
+      throw new BadRequestException('El archivo debe ser PDF, JPG o PNG');
+    }
+
+    const previous = await this.requireEmployeeDocument(id, documentId, actor, tenantId);
+    this.assertDocumentBinaryAccess(actor);
+
+    const stored = await this.documentStorage.store(tenantId, id, file);
+    try {
+      const replacement = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.employeeDocument.create({
+          data: {
+            tenantId,
+            branchId: previous.branchId,
+            employeeId: previous.employeeId,
+            onboardingFlowId: previous.onboardingFlowId,
+            taskId: previous.taskId,
+            category: previous.category,
+            originalName: file.originalname,
+            storageKey: stored.key,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            checksum: stored.checksum,
+            scanStatus: 'CLEAN',
+            status: previous.status,
+            version: previous.version + 1,
+            replacesDocumentId: previous.id,
+            sensitivity: previous.sensitivity,
+            expiresAt: previous.expiresAt,
+            metadata: (previous.metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            uploadedById: actor.sub,
+          },
+        });
+
+        await tx.employeeDocument.update({
+          where: { id: previous.id },
+          data: {
+            status: 'SUPERSEDED',
+            updatedAt: new Date(),
+          },
+        });
+
+        return created;
+      });
+
+      await this.prisma.auditLog.create({
+        data: {
+          action: 'EMPLOYEE_DOCUMENT_REPLACED',
+          domain: 'TENANT_OPERATIONS',
+          entityType: 'Employee',
+          entityId: id,
+          tenantId,
+          targetTenantId: tenantId,
+          actorTenantId: actor.tenantId ?? tenantId,
+          actorScope: actor.scope === 'global' ? 'GLOBAL' : actor.scope === 'tenant' ? 'TENANT' : 'BRANCH',
+          actorRole: actor.role ?? null,
+          userId: actor.sub,
+          email: actor.email ?? null,
+          branchId: previous.branchId,
+          method: 'POST',
+          route: `/api/employees/${id}/documents/${documentId}/replace`,
+          statusCode: 201,
+          after: {
+            previousDocumentId: previous.id,
+            replacementDocumentId: replacement.id,
+            category: replacement.category,
+            mimeType: replacement.mimeType,
+            sizeBytes: replacement.sizeBytes,
+          },
+        },
+      });
+
+      await this.documentStorage.delete(previous.storageKey).catch(() => undefined);
+
+      return {
+        id: replacement.id,
+        employeeId: replacement.employeeId,
+        branchId: replacement.branchId,
+        category: replacement.category,
+        originalName: replacement.originalName,
+        mimeType: replacement.mimeType,
+        sizeBytes: replacement.sizeBytes,
+        status: replacement.status,
+        scanStatus: replacement.scanStatus,
+        version: replacement.version,
+        createdAt: replacement.createdAt,
+        updatedAt: replacement.updatedAt,
+      };
+    } catch (error) {
+      await this.documentStorage.delete(stored.key).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async updateDocument(id: string, documentId: string, actor: JwtPayload, tenantId: string, dto: { expiresAt?: string | null }) {
+    const document = await this.requireEmployeeDocument(id, documentId, actor, tenantId);
+    this.assertDocumentBinaryAccess(actor);
+    const expiresAt = dto.expiresAt === undefined ? undefined : dto.expiresAt ? new Date(dto.expiresAt) : null;
+    return this.prisma.employeeDocument.update({
+      where: { id: document.id },
+      data: {
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+      },
+    });
+  }
+
   private classifyDocumentMeaning(section: string, documentType: string, originalName: string) {
     const source = `${section} ${documentType} ${originalName}`.toLowerCase();
     if (source.includes('w-4') || source.includes('w4') || source.includes('ssn')) return 'W4';
@@ -1100,6 +1223,32 @@ export class EmployeesService {
     if (source.includes('florida')) return 'FLORIDA_NEW_HIRE';
     if (source.includes('agreement') || source.includes('contract')) return 'EMPLOYMENT_AGREEMENT';
     return 'GENERAL';
+  }
+
+  private async requireEmployeeDocument(id: string, documentId: string, actor: JwtPayload, tenantId: string) {
+    const document = await this.prisma.employeeDocument.findFirst({
+      where: {
+        id: documentId,
+        tenantId,
+        employeeId: id,
+        deletedAt: null,
+      },
+    });
+    if (!document) {
+      throw new NotFoundException('Documento no encontrado');
+    }
+    await this.ensureEmployeeExists(id, actor, tenantId);
+    return document;
+  }
+
+  private assertDocumentBinaryAccess(actor: JwtPayload) {
+    if (actor.isSuperAdmin) {
+      return;
+    }
+    if (actor.roleScope === RoleScope.TENANT_ADMIN) {
+      return;
+    }
+    throw new BadRequestException('Solo el administrador de empresa puede ver o reemplazar archivos PDF');
   }
 
   private async linkDocumentToEmployeeProfiles(

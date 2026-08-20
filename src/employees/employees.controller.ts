@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
@@ -117,6 +118,45 @@ export class EmployeesController {
       notes: body.notes,
       expiresAt: body.expiresAt ?? null,
     });
+  }
+
+  @Get(':id/documents/:documentId/file')
+  @RequirePermissions('employees.read')
+  async downloadDocument(
+    @Req() request: RequestWithUser,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Res() response: Response,
+  ) {
+    const { document, file } = await this.employeesService.downloadDocument(id, documentId, request.user, request.tenant!.id);
+    response.setHeader('Content-Type', document.mimeType);
+    response.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(document.originalName)}`);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.send(file);
+  }
+
+  @Patch(':id/documents/:documentId')
+  @RequirePermissions('employees.update')
+  async updateDocument(
+    @Req() request: RequestWithUser,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Body() body: { expiresAt?: string | null },
+  ) {
+    return this.employeesService.updateDocument(id, documentId, request.user, request.tenant!.id, body);
+  }
+
+  @Post(':id/documents/:documentId/replace')
+  @RequirePermissions('employees.update')
+  @UseInterceptors(FileInterceptor('file'))
+  replaceDocument(
+    @Req() request: RequestWithUser,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.employeesService.replaceDocument(id, documentId, request.user, request.tenant!.id, file);
   }
 
   @Get(':id/audit')
