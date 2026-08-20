@@ -960,6 +960,7 @@ export class EmployeesService {
         rejectionReason: true,
         expiresAt: true,
         reviewedAt: true,
+        metadata: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -1014,6 +1015,7 @@ export class EmployeesService {
     const stored = await this.documentStorage.store(tenantId, id, file);
     const section = this.normalizeDocumentSection(dto.section);
     const documentType = (dto.documentType ?? dto.section ?? 'OTHER').trim().toUpperCase();
+    const documentMeaning = this.classifyDocumentMeaning(section, documentType, file.originalname);
 
     try {
       const document = await this.prisma.employeeDocument.create({
@@ -1034,11 +1036,14 @@ export class EmployeesService {
           metadata: {
             source: 'employee-editor',
             section,
+            documentMeaning,
             notes: dto.notes?.trim() ?? null,
           },
           uploadedById: actor.sub,
         },
       });
+
+      await this.linkDocumentToEmployeeProfiles(tenantId, id, document.id, documentMeaning, section, dto.expiresAt);
 
       await this.prisma.auditLog.create({
         data: {
@@ -1087,6 +1092,255 @@ export class EmployeesService {
     }
   }
 
+  private classifyDocumentMeaning(section: string, documentType: string, originalName: string) {
+    const source = `${section} ${documentType} ${originalName}`.toLowerCase();
+    if (source.includes('w-4') || source.includes('w4') || source.includes('ssn')) return 'W4';
+    if (source.includes('i-9') || source.includes('i9')) return 'I9';
+    if (source.includes('everify') || source.includes('e-verify')) return 'EVERIFY';
+    if (source.includes('florida')) return 'FLORIDA_NEW_HIRE';
+    if (source.includes('agreement') || source.includes('contract')) return 'EMPLOYMENT_AGREEMENT';
+    return 'GENERAL';
+  }
+
+  private async linkDocumentToEmployeeProfiles(
+    tenantId: string,
+    employeeId: string,
+    documentId: string,
+    documentMeaning: string,
+    section: string,
+    expiresAt?: string | null,
+  ) {
+    const completionDate = new Date();
+    if (documentMeaning === 'W4') {
+      await this.prisma.employeeTaxProfile.upsert({
+        where: { employeeId },
+        create: {
+          tenantId,
+          employeeId,
+          w4Status: 'COMPLETE',
+          w4CompletedAt: completionDate,
+          w4DocumentId: documentId,
+        },
+        update: {
+          w4Status: 'COMPLETE',
+          w4CompletedAt: completionDate,
+          w4DocumentId: documentId,
+        },
+      });
+    }
+    if (documentMeaning === 'I9') {
+      await this.prisma.employeeWorkEligibilityProfile.upsert({
+        where: { employeeId },
+        create: {
+          tenantId,
+          employeeId,
+          i9Status: 'VERIFIED',
+          section1CompletedAt: completionDate,
+          section2CompletedAt: completionDate,
+          verificationCompletedAt: completionDate,
+          i9DocumentId: documentId,
+        },
+        update: {
+          i9Status: 'VERIFIED',
+          section1CompletedAt: completionDate,
+          section2CompletedAt: completionDate,
+          verificationCompletedAt: completionDate,
+          i9DocumentId: documentId,
+        },
+      });
+    }
+    if (documentMeaning === 'EVERIFY') {
+      await this.prisma.employeeWorkEligibilityProfile.upsert({
+        where: { employeeId },
+        create: {
+          tenantId,
+          employeeId,
+          eVerifyRequired: true,
+          eVerifyStatus: 'AUTHORIZED',
+          eVerifySubmittedAt: completionDate,
+          eVerifyCompletedAt: completionDate,
+          eVerifyDocumentId: documentId,
+        },
+        update: {
+          eVerifyRequired: true,
+          eVerifyStatus: 'AUTHORIZED',
+          eVerifySubmittedAt: completionDate,
+          eVerifyCompletedAt: completionDate,
+          eVerifyDocumentId: documentId,
+        },
+      });
+    }
+    if (documentMeaning === 'FLORIDA_NEW_HIRE') {
+      await this.prisma.employeeFloridaNewHireReport.upsert({
+        where: { employeeId },
+        create: {
+          tenantId,
+          employeeId,
+          required: true,
+          status: 'CONFIRMED',
+          submittedAt: completionDate,
+          dueDate: expiresAt ? new Date(expiresAt) : null,
+          documentId,
+        },
+        update: {
+          required: true,
+          status: 'CONFIRMED',
+          submittedAt: completionDate,
+          ...(expiresAt !== undefined ? { dueDate: expiresAt ? new Date(expiresAt) : null } : {}),
+          documentId,
+        },
+      });
+    }
+    if (documentMeaning === 'EMPLOYMENT_AGREEMENT') {
+      await this.prisma.employeeComplianceRequirement.updateMany({
+        where: { tenantId, employeeId, code: 'EMPLOYMENT_AGREEMENT' },
+        data: {
+          status: 'COMPLETE',
+          completedAt: completionDate,
+          documentId,
+          source: 'MANUAL',
+        },
+      });
+    }
+    if (documentMeaning === 'GENERAL' && section === 'tax') {
+      await this.prisma.employeeComplianceRequirement.updateMany({
+        where: { tenantId, employeeId, code: { in: ['W4', 'SSN_PAYROLL'] } },
+        data: {
+          status: 'COMPLETE',
+          completedAt: completionDate,
+          documentId,
+          source: 'MANUAL',
+        },
+      });
+    }
+  }
+
+  private deriveDocumentLinks(documents: Array<{ id: string; category: string; metadata?: unknown }>) {
+    const byMeaning = {
+      w4DocumentId: null as string | null,
+      i9DocumentId: null as string | null,
+      eVerifyDocumentId: null as string | null,
+      floridaDocumentId: null as string | null,
+      employmentAgreementDocumentId: null as string | null,
+    };
+
+    for (const document of documents) {
+      const metadata = this.objectFromMaybeJson(document.metadata);
+      const meaning = typeof metadata?.documentMeaning === 'string'
+        ? metadata.documentMeaning
+        : this.classifyDocumentMeaning(typeof metadata?.section === 'string' ? metadata.section : '', document.category, '');
+      if (!byMeaning.w4DocumentId && meaning === 'W4') byMeaning.w4DocumentId = document.id;
+      if (!byMeaning.i9DocumentId && meaning === 'I9') byMeaning.i9DocumentId = document.id;
+      if (!byMeaning.eVerifyDocumentId && meaning === 'EVERIFY') byMeaning.eVerifyDocumentId = document.id;
+      if (!byMeaning.floridaDocumentId && meaning === 'FLORIDA_NEW_HIRE') byMeaning.floridaDocumentId = document.id;
+      if (!byMeaning.employmentAgreementDocumentId && meaning === 'EMPLOYMENT_AGREEMENT') byMeaning.employmentAgreementDocumentId = document.id;
+    }
+
+    return byMeaning;
+  }
+
+  private mapRequirementStatus(
+    requirement: {
+      id: string;
+      code: string;
+      title: string;
+      category: string;
+      jurisdiction: string | null;
+      status: string;
+      required: boolean;
+      dueDate: Date | null;
+      completedAt: Date | null;
+      expiresAt: Date | null;
+      source: string;
+      documentId: string | null;
+      notes: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+    },
+    documents: Array<{ id: string; category: string; createdAt: Date; updatedAt: Date; metadata?: unknown }>,
+    documentLinks: Record<string, string | null>,
+  ) {
+    const hasDocument = this.requirementHasDocument(requirement.code, documents, documentLinks);
+    const status = requirement.status === 'COMPLETE' || hasDocument ? 'COMPLETE' : requirement.status;
+    return {
+      id: requirement.id,
+      code: requirement.code,
+      title: requirement.title,
+      category: requirement.category,
+      jurisdiction: requirement.jurisdiction,
+      status,
+      required: requirement.required,
+      dueDate: requirement.dueDate,
+      completedAt: requirement.completedAt ?? (hasDocument ? documents.find((document) => this.requirementHasDocument(requirement.code, [document], documentLinks))?.createdAt ?? null : null),
+      expiresAt: requirement.expiresAt,
+      source: requirement.source,
+      documentId: requirement.documentId ?? (hasDocument ? this.resolveRequirementDocumentId(requirement.code, documentLinks) : null),
+      notes: requirement.notes,
+      createdAt: requirement.createdAt,
+      updatedAt: requirement.updatedAt,
+    };
+  }
+
+  private requirementHasDocument(
+    code: string,
+    documents: Array<{ id: string; category: string; metadata?: unknown }>,
+    documentLinks: Record<string, string | null>,
+  ) {
+    const matchByCode = {
+      W4: () => Boolean(documentLinks.w4DocumentId) || documents.some((document) => this.documentMeaning(document) === 'W4'),
+      SSN_PAYROLL: () => Boolean(documentLinks.w4DocumentId) || documents.some((document) => this.documentMeaning(document) === 'W4'),
+      I9: () => Boolean(documentLinks.i9DocumentId) || documents.some((document) => this.documentMeaning(document) === 'I9'),
+      E_VERIFY: () => Boolean(documentLinks.eVerifyDocumentId) || documents.some((document) => this.documentMeaning(document) === 'EVERIFY'),
+      FL_NEW_HIRE: () => Boolean(documentLinks.floridaDocumentId) || documents.some((document) => this.documentMeaning(document) === 'FLORIDA_NEW_HIRE'),
+      EMPLOYMENT_AGREEMENT: () => Boolean(documentLinks.employmentAgreementDocumentId) || documents.some((document) => this.documentMeaning(document) === 'EMPLOYMENT_AGREEMENT'),
+    } as const;
+
+    const resolver = matchByCode[code as keyof typeof matchByCode];
+    return resolver ? resolver() : false;
+  }
+
+  private resolveRequirementDocumentId(code: string, documentLinks: Record<string, string | null>) {
+    if (code === 'W4' || code === 'SSN_PAYROLL') return documentLinks.w4DocumentId;
+    if (code === 'I9') return documentLinks.i9DocumentId;
+    if (code === 'E_VERIFY') return documentLinks.eVerifyDocumentId;
+    if (code === 'FL_NEW_HIRE') return documentLinks.floridaDocumentId;
+    if (code === 'EMPLOYMENT_AGREEMENT') return documentLinks.employmentAgreementDocumentId;
+    return null;
+  }
+
+  private documentMeaning(document: { category: string; metadata?: unknown }) {
+    const metadata = this.objectFromMaybeJson(document.metadata);
+    if (typeof metadata?.documentMeaning === 'string') {
+      return metadata.documentMeaning;
+    }
+    const section = typeof metadata?.section === 'string' ? metadata.section : '';
+    return this.classifyDocumentMeaning(section, document.category, '');
+  }
+
+  private objectFromMaybeJson(value: unknown) {
+    return value && typeof value === 'object' ? value as Record<string, unknown> : null;
+  }
+
+  private deriveTaxStatus(current: any, documentId: string | null) {
+    if (current === 'COMPLETE' || documentId) return 'COMPLETE';
+    return current;
+  }
+
+  private deriveI9Status(current: any, documentId: string | null) {
+    if (current === 'VERIFIED' || documentId) return 'VERIFIED';
+    return current;
+  }
+
+  private deriveEVerifyStatus(current: any, documentId: string | null) {
+    if (current === 'AUTHORIZED' || documentId) return 'AUTHORIZED';
+    return current;
+  }
+
+  private deriveFloridaStatus(current: any, documentId: string | null) {
+    if (current === 'CONFIRMED' || documentId) return 'CONFIRMED';
+    return current;
+  }
+
   async employee360(id: string, actor: JwtPayload, tenantId: string) {
     const [overview, compliance, documents, audit] = await Promise.all([
       this.overview(id, actor, tenantId),
@@ -1105,7 +1359,7 @@ export class EmployeesService {
   }
 
   async compliance(id: string, actor: JwtPayload, tenantId: string) {
-    const [employee, payrollProfile, taxProfile, eligibilityProfile, floridaProfile, requirements] = await Promise.all([
+    const [employee, payrollProfile, taxProfile, eligibilityProfile, floridaProfile, requirements, documentSummary] = await Promise.all([
       this.prisma.employee.findFirst({
         where: {
           id,
@@ -1128,6 +1382,7 @@ export class EmployeesService {
         where: { tenantId, employeeId: id },
         orderBy: [{ required: 'desc' }, { createdAt: 'asc' }],
       }) ?? [],
+      this.documentSummary(id, actor, tenantId),
     ]);
 
     if (!employee) {
@@ -1135,6 +1390,7 @@ export class EmployeesService {
     }
 
     const primaryAssignment = employee.branchAssignments.find((assignment) => assignment.isPrimary) ?? employee.branchAssignments[0] ?? null;
+    const documentLinks = this.deriveDocumentLinks(documentSummary.documents);
 
     return {
       employeeId: id,
@@ -1166,16 +1422,16 @@ export class EmployeesService {
         : null,
       tax: taxProfile
         ? {
-            w4Status: taxProfile.w4Status,
-            w4CompletedAt: taxProfile.w4CompletedAt,
-            w4DocumentId: taxProfile.w4DocumentId ?? null,
+            w4Status: this.deriveTaxStatus(taxProfile.w4Status, documentLinks.w4DocumentId),
+            w4CompletedAt: taxProfile.w4CompletedAt ?? (documentLinks.w4DocumentId ? documentSummary.documents.find((document) => document.id === documentLinks.w4DocumentId)?.createdAt ?? null : null),
+            w4DocumentId: taxProfile.w4DocumentId ?? documentLinks.w4DocumentId ?? null,
             w2Reference: taxProfile.w2Reference ?? null,
             ssnMasked: this.maskSensitiveSsn(taxProfile.ssnEncrypted, taxProfile.ssnLast4),
           }
         : null,
       workEligibility: eligibilityProfile
         ? {
-            i9Status: eligibilityProfile.i9Status,
+            i9Status: this.deriveI9Status(eligibilityProfile.i9Status, documentLinks.i9DocumentId),
             firstDayOfEmployment: eligibilityProfile.firstDayOfEmployment,
             section1CompletedAt: eligibilityProfile.section1CompletedAt,
             section2CompletedAt: eligibilityProfile.section2CompletedAt,
@@ -1184,33 +1440,21 @@ export class EmployeesService {
             reverificationRequired: eligibilityProfile.reverificationRequired,
             reverificationDueDate: eligibilityProfile.reverificationDueDate,
             eVerifyRequired: eligibilityProfile.eVerifyRequired,
-            eVerifyStatus: eligibilityProfile.eVerifyStatus,
+            eVerifyStatus: this.deriveEVerifyStatus(eligibilityProfile.eVerifyStatus, documentLinks.eVerifyDocumentId),
             eVerifyCaseNumber: eligibilityProfile.eVerifyCaseNumber ?? null,
           }
         : null,
       floridaNewHire: floridaProfile
         ? {
             required: floridaProfile.required,
-            status: floridaProfile.status,
+            status: this.deriveFloridaStatus(floridaProfile.status, documentLinks.floridaDocumentId),
             dueDate: floridaProfile.dueDate,
-            submittedAt: floridaProfile.submittedAt,
+            submittedAt: floridaProfile.submittedAt ?? (documentLinks.floridaDocumentId ? documentSummary.documents.find((document) => document.id === documentLinks.floridaDocumentId)?.createdAt ?? null : null),
             confirmationNumber: floridaProfile.confirmationNumber ?? null,
             failureReason: floridaProfile.failureReason ?? null,
           }
         : null,
-      requirements: requirements.map((requirement: any) => ({
-        id: requirement.id,
-        code: requirement.code,
-        title: requirement.title,
-        category: requirement.category,
-        jurisdiction: requirement.jurisdiction,
-        status: requirement.status,
-        required: requirement.required,
-        dueDate: requirement.dueDate,
-        completedAt: requirement.completedAt,
-        expiresAt: requirement.expiresAt,
-        source: requirement.source,
-      })),
+      requirements: requirements.map((requirement: any) => this.mapRequirementStatus(requirement, documentSummary.documents, documentLinks)),
     };
   }
 
