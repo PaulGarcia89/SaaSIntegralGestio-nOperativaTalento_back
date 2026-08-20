@@ -110,11 +110,12 @@ export class EmployeesController {
     @Req() request: RequestWithUser,
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { section?: string; documentType?: string; notes?: string; expiresAt?: string | null },
+    @Body() body: { section?: string; documentType?: string; requirementCode?: string; notes?: string; expiresAt?: string | null },
   ) {
     return this.employeesService.uploadDocument(id, request.user, request.tenant!.id, file, {
       section: body.section ?? 'employment',
       documentType: body.documentType ?? body.section ?? 'OTHER',
+      requirementCode: body.requirementCode ?? null,
       notes: body.notes,
       expiresAt: body.expiresAt ?? null,
     });

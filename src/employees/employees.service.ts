@@ -994,7 +994,7 @@ export class EmployeesService {
     actor: JwtPayload,
     tenantId: string,
     file: Express.Multer.File,
-    dto: { section: string; documentType: string; notes?: string; expiresAt?: string | null },
+    dto: { section: string; documentType: string; requirementCode?: string | null; notes?: string; expiresAt?: string | null },
   ) {
     if (!file) {
       throw new BadRequestException('Debes adjuntar un archivo');
@@ -1015,7 +1015,8 @@ export class EmployeesService {
     const stored = await this.documentStorage.store(tenantId, id, file);
     const section = this.normalizeDocumentSection(dto.section);
     const documentType = (dto.documentType ?? dto.section ?? 'OTHER').trim().toUpperCase();
-    const documentMeaning = this.classifyDocumentMeaning(section, documentType, file.originalname);
+    const requirementCode = this.normalizeRequirementCode(dto.requirementCode);
+    const documentMeaning = this.classifyDocumentMeaning(section, documentType, requirementCode, file.originalname);
 
     try {
       const document = await this.prisma.employeeDocument.create({
@@ -1036,6 +1037,7 @@ export class EmployeesService {
           metadata: {
             source: 'employee-editor',
             section,
+            requirementCode,
             documentMeaning,
             notes: dto.notes?.trim() ?? null,
           },
@@ -1043,7 +1045,7 @@ export class EmployeesService {
         },
       });
 
-      await this.linkDocumentToEmployeeProfiles(tenantId, id, document.id, documentMeaning, section, dto.expiresAt);
+      await this.linkDocumentToEmployeeProfiles(tenantId, id, document.id, documentMeaning, requirementCode, section, dto.expiresAt);
 
       await this.prisma.auditLog.create({
         data: {
@@ -1078,6 +1080,8 @@ export class EmployeesService {
         branchId: branch.branchId,
         section,
         category: document.category,
+        requirementCode,
+        documentMeaning,
         originalName: document.originalName,
         mimeType: document.mimeType,
         sizeBytes: document.sizeBytes,
@@ -1215,8 +1219,13 @@ export class EmployeesService {
     });
   }
 
-  private classifyDocumentMeaning(section: string, documentType: string, originalName: string) {
-    const source = `${section} ${documentType} ${originalName}`.toLowerCase();
+  private classifyDocumentMeaning(section: string, documentType: string, requirementCode: string | null, originalName: string) {
+    const source = `${section} ${documentType} ${requirementCode ?? ''} ${originalName}`.toLowerCase();
+    if (requirementCode === 'W4' || requirementCode === 'SSN_PAYROLL') return 'W4';
+    if (requirementCode === 'I9') return 'I9';
+    if (requirementCode === 'E_VERIFY') return 'EVERIFY';
+    if (requirementCode === 'FL_NEW_HIRE') return 'FLORIDA_NEW_HIRE';
+    if (requirementCode === 'EMPLOYMENT_AGREEMENT') return 'EMPLOYMENT_AGREEMENT';
     if (source.includes('w-4') || source.includes('w4') || source.includes('ssn')) return 'W4';
     if (source.includes('i-9') || source.includes('i9')) return 'I9';
     if (source.includes('everify') || source.includes('e-verify')) return 'EVERIFY';
@@ -1256,6 +1265,7 @@ export class EmployeesService {
     employeeId: string,
     documentId: string,
     documentMeaning: string,
+    requirementCode: string | null,
     section: string,
     expiresAt?: string | null,
   ) {
@@ -1340,7 +1350,7 @@ export class EmployeesService {
         },
       });
     }
-    if (documentMeaning === 'EMPLOYMENT_AGREEMENT') {
+    if (documentMeaning === 'EMPLOYMENT_AGREEMENT' || requirementCode === 'EMPLOYMENT_AGREEMENT') {
       await this.prisma.employeeComplianceRequirement.updateMany({
         where: { tenantId, employeeId, code: 'EMPLOYMENT_AGREEMENT' },
         data: {
@@ -1364,6 +1374,11 @@ export class EmployeesService {
     }
   }
 
+  private normalizeRequirementCode(code?: string | null) {
+    const normalized = (code ?? '').trim().toUpperCase();
+    return normalized.length > 0 ? normalized : null;
+  }
+
   private deriveDocumentLinks(documents: Array<{ id: string; category: string; metadata?: unknown }>) {
     const byMeaning = {
       w4DocumentId: null as string | null,
@@ -1377,7 +1392,12 @@ export class EmployeesService {
       const metadata = this.objectFromMaybeJson(document.metadata);
       const meaning = typeof metadata?.documentMeaning === 'string'
         ? metadata.documentMeaning
-        : this.classifyDocumentMeaning(typeof metadata?.section === 'string' ? metadata.section : '', document.category, '');
+        : this.classifyDocumentMeaning(
+          typeof metadata?.section === 'string' ? metadata.section : '',
+          document.category,
+          typeof metadata?.requirementCode === 'string' ? metadata.requirementCode : null,
+          '',
+        );
       if (!byMeaning.w4DocumentId && meaning === 'W4') byMeaning.w4DocumentId = document.id;
       if (!byMeaning.i9DocumentId && meaning === 'I9') byMeaning.i9DocumentId = document.id;
       if (!byMeaning.eVerifyDocumentId && meaning === 'EVERIFY') byMeaning.eVerifyDocumentId = document.id;
@@ -1463,7 +1483,8 @@ export class EmployeesService {
       return metadata.documentMeaning;
     }
     const section = typeof metadata?.section === 'string' ? metadata.section : '';
-    return this.classifyDocumentMeaning(section, document.category, '');
+    const requirementCode = typeof metadata?.requirementCode === 'string' ? metadata.requirementCode : null;
+    return this.classifyDocumentMeaning(section, document.category, requirementCode, '');
   }
 
   private objectFromMaybeJson(value: unknown) {
