@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { BranchAccessGuard } from '../common/guards/branch-access.guard';
@@ -99,6 +100,23 @@ export class EmployeesController {
   @RequirePermissions('employees.read')
   documents(@Req() request: RequestWithUser, @Param('id') id: string) {
     return this.employeesService.documentSummary(id, request.user, request.tenant!.id);
+  }
+
+  @Post(':id/documents')
+  @RequirePermissions('employees.update')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadDocument(
+    @Req() request: RequestWithUser,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { section?: string; documentType?: string; notes?: string; expiresAt?: string | null },
+  ) {
+    return this.employeesService.uploadDocument(id, request.user, request.tenant!.id, file, {
+      section: body.section ?? 'employment',
+      documentType: body.documentType ?? body.section ?? 'OTHER',
+      notes: body.notes,
+      expiresAt: body.expiresAt ?? null,
+    });
   }
 
   @Get(':id/audit')

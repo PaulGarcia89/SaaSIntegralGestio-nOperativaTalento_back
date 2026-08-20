@@ -15,12 +15,14 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
 import { BulkUpdateEmployeeStatusDto } from './dto/bulk-update-employee-status.dto';
 import { EmployeeSensitiveDataCryptoService } from './employee-sensitive-data-crypto.service';
+import { OnboardingDocumentStorageService } from '../onboarding/onboarding-document-storage.service';
 
 @Injectable()
 export class EmployeesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sensitiveCrypto: EmployeeSensitiveDataCryptoService,
+    private readonly documentStorage: OnboardingDocumentStorageService,
   ) {}
 
   async register(tenantId: string, dto: RegisterEmployeeDto) {
@@ -986,6 +988,105 @@ export class EmployeesService {
     };
   }
 
+  async uploadDocument(
+    id: string,
+    actor: JwtPayload,
+    tenantId: string,
+    file: Express.Multer.File,
+    dto: { section: string; documentType: string; notes?: string; expiresAt?: string | null },
+  ) {
+    if (!file) {
+      throw new BadRequestException('Debes adjuntar un archivo');
+    }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.mimetype)) {
+      throw new BadRequestException('El archivo debe ser PDF, JPG o PNG');
+    }
+
+    const employee = await this.ensureEmployeeExists(id, actor, tenantId);
+    const branch = await this.prisma.employeeBranch.findFirst({
+      where: { tenantId, employeeId: id, isPrimary: true, releasedAt: null },
+      select: { branchId: true },
+    });
+    if (!branch) {
+      throw new NotFoundException('No se encontró la sucursal principal del empleado');
+    }
+
+    const stored = await this.documentStorage.store(tenantId, id, file);
+    const section = this.normalizeDocumentSection(dto.section);
+    const documentType = (dto.documentType ?? dto.section ?? 'OTHER').trim().toUpperCase();
+
+    try {
+      const document = await this.prisma.employeeDocument.create({
+        data: {
+          tenantId,
+          branchId: branch.branchId,
+          employeeId: id,
+          category: documentType,
+          originalName: file.originalname,
+          storageKey: stored.key,
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          checksum: stored.checksum,
+          scanStatus: 'CLEAN',
+          status: 'PENDING_REVIEW',
+          sensitivity: section === 'tax' ? 'HIGHLY_SENSITIVE' : section === 'eligibility' ? 'SENSITIVE' : 'STANDARD',
+          expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+          metadata: {
+            source: 'employee-editor',
+            section,
+            notes: dto.notes?.trim() ?? null,
+          },
+          uploadedById: actor.sub,
+        },
+      });
+
+      await this.prisma.auditLog.create({
+        data: {
+          action: 'EMPLOYEE_DOCUMENT_UPLOADED',
+          domain: 'TENANT_OPERATIONS',
+          entityType: 'Employee',
+          entityId: employee.id,
+          tenantId,
+          targetTenantId: tenantId,
+          actorTenantId: actor.tenantId ?? tenantId,
+          actorScope: actor.scope === 'global' ? 'GLOBAL' : actor.scope === 'tenant' ? 'TENANT' : 'BRANCH',
+          actorRole: actor.role ?? null,
+          userId: actor.sub,
+          email: actor.email ?? null,
+          branchId: branch.branchId,
+          method: 'POST',
+          route: `/api/employees/${id}/documents`,
+          statusCode: 201,
+          after: {
+            documentId: document.id,
+            section,
+            documentType,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+          },
+        },
+      });
+
+      return {
+        id: document.id,
+        employeeId: id,
+        branchId: branch.branchId,
+        section,
+        category: document.category,
+        originalName: document.originalName,
+        mimeType: document.mimeType,
+        sizeBytes: document.sizeBytes,
+        status: document.status,
+        scanStatus: document.scanStatus,
+        createdAt: document.createdAt,
+        updatedAt: document.updatedAt,
+      };
+    } catch (error) {
+      await this.documentStorage.delete(stored.key).catch(() => undefined);
+      throw error;
+    }
+  }
+
   async employee360(id: string, actor: JwtPayload, tenantId: string) {
     const [overview, compliance, documents, audit] = await Promise.all([
       this.overview(id, actor, tenantId),
@@ -1504,6 +1605,14 @@ export class EmployeesService {
         releasedAt: new Date(),
       },
     });
+  }
+
+  private normalizeDocumentSection(section: string) {
+    const normalized = (section ?? '').trim().toLowerCase();
+    if (['tax', 'w4', 'ssn'].includes(normalized)) return 'tax';
+    if (['eligibility', 'i9', 'everify', 'e-verify'].includes(normalized)) return 'eligibility';
+    if (['florida', 'florida-new-hire', 'florida_new_hire', 'floridanewhire'].includes(normalized)) return 'floridaNewHire';
+    return 'employment';
   }
 
   private buildBranchScopedWhere(actor: JwtPayload, tenantId: string): Prisma.EmployeeWhereInput {

@@ -18,6 +18,6 @@ import { CandidateAuthGuard } from '../applications/candidate-auth.guard';
   imports: [JwtModule.register({}), TrainingModule, ApplicationsModule],
   controllers: [OnboardingController, CandidatePreboardingController],
   providers: [OnboardingService, OnboardingDocumentStorageService, OnboardingAutomationService, OnboardingAnalyticsService, OnboardingRetentionService, OnboardingPerformanceService, CandidatePreboardingService, CandidateAuthGuard, SubscriptionGuard, ModuleAccessGuard],
-  exports: [OnboardingService],
+  exports: [OnboardingService, OnboardingDocumentStorageService],
 })
 export class OnboardingModule {}

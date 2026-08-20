@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { EmployeeStatus } from '@prisma/client';
 import { EmployeesService } from './employees.service';
 import { EmployeeSensitiveDataCryptoService } from './employee-sensitive-data-crypto.service';
+import { OnboardingDocumentStorageService } from '../onboarding/onboarding-document-storage.service';
 
 describe('EmployeesService documentary records', () => {
   const tenantId = 'tenant-1';
@@ -49,7 +50,11 @@ describe('EmployeesService documentary records', () => {
         typeof operation === 'function' ? operation(tx) : Promise.all(operation),
       ),
     } as any;
-    return { service: new EmployeesService(prisma, new EmployeeSensitiveDataCryptoService()), prisma, tx };
+    const documentStorage = {
+      store: jest.fn().mockResolvedValue({ key: 'tenant-1/document.pdf', checksum: 'checksum-1' }),
+      delete: jest.fn().mockResolvedValue(undefined),
+    } as unknown as OnboardingDocumentStorageService;
+    return { service: new EmployeesService(prisma, new EmployeeSensitiveDataCryptoService(), documentStorage), prisma, tx, documentStorage };
   }
 
   it('registers an existing employee record and mirrors the job title on its primary branch', async () => {
