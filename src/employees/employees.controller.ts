@@ -77,6 +77,12 @@ export class EmployeesController {
     return this.employeesService.overview(id, request.user, request.tenant!.id);
   }
 
+  @Get(':id/editor')
+  @RequirePermissions('employees.read')
+  editor(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.employeesService.editor(id, request.user, request.tenant!.id);
+  }
+
   @Get(':id/360')
   @RequirePermissions('employees.read')
   employee360(@Req() request: RequestWithUser, @Param('id') id: string) {

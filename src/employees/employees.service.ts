@@ -652,6 +652,122 @@ export class EmployeesService {
     };
   }
 
+  async editor(id: string, actor: JwtPayload, tenantId: string) {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        id,
+        tenantId,
+        ...this.buildBranchScopedWhere(actor, tenantId),
+      },
+      include: {
+        branchAssignments: {
+          where: { tenantId, releasedAt: null },
+          include: { branch: true },
+          orderBy: [{ isPrimary: 'desc' }, { assignedAt: 'desc' }],
+        },
+        employmentProfile: true,
+        payrollProfile: true,
+        taxProfile: true,
+        workEligibilityProfile: true,
+        floridaNewHireReport: true,
+        complianceRequirements: {
+          orderBy: [{ required: 'desc' }, { createdAt: 'asc' }],
+        },
+      },
+    });
+
+    if (!employee) {
+      throw new NotFoundException('Registro de empleado no encontrado');
+    }
+
+    const primaryAssignment = employee.branchAssignments.find((assignment) => assignment.isPrimary)
+      ?? employee.branchAssignments[0]
+      ?? null;
+
+    return {
+      employee: {
+        id: employee.id,
+        employeeNumber: employee.employeeNumber,
+        name: employee.name,
+        status: employee.status,
+        personal: {
+          legalFirstName: employee.legalFirstName,
+          middleName: employee.middleName,
+          legalLastName: employee.legalLastName,
+          preferredName: employee.preferredName,
+          dateOfBirth: employee.dateOfBirth,
+        },
+        contact: {
+          workEmail: employee.workEmail ?? employee.email,
+          personalEmail: employee.personalEmail,
+          phone: employee.phone,
+          addressLine1: employee.addressLine1,
+          addressLine2: employee.addressLine2,
+          city: employee.city,
+          state: employee.state,
+          postalCode: employee.postalCode,
+          country: employee.country,
+        },
+        emergencyContact: {
+          name: employee.emergencyContactName,
+          relationship: employee.emergencyContactRelationship,
+          phone: employee.emergencyContactPhone,
+        },
+      },
+      employment: {
+        primaryBranchId: employee.employmentProfile?.branchId ?? primaryAssignment?.branchId ?? null,
+        jobTitle: employee.employmentProfile?.jobTitle ?? employee.jobTitle ?? primaryAssignment?.role ?? null,
+        department: employee.employmentProfile?.department ?? null,
+        supervisorUserId: employee.employmentProfile?.supervisorUserId ?? employee.supervisorUserId ?? null,
+        employmentType: employee.employmentProfile?.employmentType ?? null,
+        employmentStatus: employee.employmentProfile?.employmentStatus ?? null,
+        hireDate: employee.employmentProfile?.hireDate ?? null,
+        startDate: employee.employmentProfile?.startDate ?? null,
+        workerClassification: employee.employmentProfile?.workerClassification ?? null,
+      },
+      payroll: employee.payrollProfile ? {
+        payType: employee.payrollProfile.payType,
+        payRateMasked: employee.payrollProfile.payRateLast4 ? `***${employee.payrollProfile.payRateLast4}` : null,
+        payFrequency: employee.payrollProfile.payFrequency,
+        overtimeEligible: employee.payrollProfile.overtimeEligible,
+        regularHourlyRateMasked: employee.payrollProfile.regularHourlyRateLast4 ? `***${employee.payrollProfile.regularHourlyRateLast4}` : null,
+        workweekStartDay: employee.payrollProfile.workweekStartDay,
+        workweekStartTime: employee.payrollProfile.workweekStartTime,
+        paymentMethod: employee.payrollProfile.paymentMethod,
+        payrollProvider: employee.payrollProfile.payrollProvider,
+        payrollEmployeeId: employee.payrollProfile.payrollEmployeeId,
+        externalPayrollReference: employee.payrollProfile.externalPayrollReference,
+      } : null,
+      tax: employee.taxProfile ? {
+        ssnMasked: this.maskSensitiveSsn(employee.taxProfile.ssnEncrypted, employee.taxProfile.ssnLast4),
+        w4Status: employee.taxProfile.w4Status,
+        w2Reference: employee.taxProfile.w2Reference,
+      } : null,
+      eligibility: employee.workEligibilityProfile ? {
+        i9Status: employee.workEligibilityProfile.i9Status,
+        firstDayOfEmployment: employee.workEligibilityProfile.firstDayOfEmployment,
+        reverificationRequired: employee.workEligibilityProfile.reverificationRequired,
+        eVerifyRequired: employee.workEligibilityProfile.eVerifyRequired,
+        eVerifyStatus: employee.workEligibilityProfile.eVerifyStatus,
+      } : null,
+      floridaNewHire: employee.floridaNewHireReport ? {
+        required: employee.floridaNewHireReport.required,
+        status: employee.floridaNewHireReport.status,
+        dueDate: employee.floridaNewHireReport.dueDate,
+      } : null,
+      requirements: employee.complianceRequirements.map((requirement) => ({
+        id: requirement.id,
+        code: requirement.code,
+        title: requirement.title,
+        category: requirement.category,
+        status: requirement.status,
+        required: requirement.required,
+        dueDate: requirement.dueDate,
+        expiresAt: requirement.expiresAt,
+      })),
+    };
+  }
+
   async payrollCompliance(id: string, actor: JwtPayload, tenantId: string) {
     const [employee, tenant, documentSummary, history, auditTrail] = await Promise.all([
       this.prisma.employee.findFirst({
