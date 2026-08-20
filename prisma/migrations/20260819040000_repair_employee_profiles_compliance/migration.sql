@@ -249,9 +249,6 @@ CREATE INDEX "EmployeeComplianceRequirement_tenantId_expiresAt_idx" ON "Employee
 CREATE UNIQUE INDEX "EmployeeComplianceRequirement_employeeId_code_key" ON "EmployeeComplianceRequirement"("employeeId", "code");
 
 -- CreateIndex
-CREATE INDEX "EmployeeDocument_tenantId_employeeId_status_idx" ON "EmployeeDocument"("tenantId", "employeeId", "status");
-
--- CreateIndex
 CREATE UNIQUE INDEX "Employee_tenantId_employeeNumber_key" ON "Employee"("tenantId", "employeeNumber");
 
 -- AddForeignKey
