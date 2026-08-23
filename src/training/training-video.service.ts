@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   Prisma,
+  TrainingContentBlockType,
   TrainingCourseStepType,
   TrainingProgressStatus,
   TrainingVideoEventType,
@@ -103,6 +104,7 @@ export class TrainingVideoService {
           videoUrl: dto.videoUrl,
           thumbnailUrl: dto.thumbnailUrl,
           durationSeconds: dto.durationSeconds,
+          estimatedMinutes: Math.max(1, Math.ceil(dto.durationSeconds / 60)),
           requiredCompletionPercentage: dto.requiredCompletionPercentage ?? 90,
           allowReplay: dto.allowReplay ?? false,
           isRequired: dto.isMandatory ?? true,
@@ -110,6 +112,26 @@ export class TrainingVideoService {
           publishedAt: dto.publishedAt ? new Date(dto.publishedAt) : undefined,
         },
       });
+      const videoBlock = await tx.trainingContentBlock.findFirst({
+        where: { lessonId: target.id, type: TrainingContentBlockType.VIDEO },
+        select: { id: true },
+      });
+      if (videoBlock) {
+        await tx.trainingContentBlock.update({
+          where: { id: videoBlock.id },
+          data: { title: dto.title, resourceUrl: dto.videoUrl ?? null, isRequired: dto.isMandatory ?? true },
+        });
+      } else {
+        await tx.trainingContentBlock.create({
+          data: {
+            lessonId: target.id,
+            type: TrainingContentBlockType.VIDEO,
+            title: dto.title,
+            resourceUrl: dto.videoUrl ?? null,
+            isRequired: dto.isMandatory ?? true,
+          },
+        });
+      }
       await tx.trainingCourse.update({
         where: { id: courseId },
         data: {
