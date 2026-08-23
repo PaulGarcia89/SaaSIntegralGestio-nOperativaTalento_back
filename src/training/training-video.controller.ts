@@ -145,6 +145,25 @@ export class TrainingVideoAdminController {
     return this.videos.createOrUpdateVideo(req.tenant!.id, req.user.sub, courseId, dto, file);
   }
 
+  @Get(':courseId/lessons/:lessonId/video')
+  @RequirePermissions('training.course.read')
+  async adminVideo(
+    @Req() req: RequestWithUser,
+    @Param('courseId') courseId: string,
+    @Param('lessonId') lessonId: string,
+    @Headers('range') range: string | undefined,
+    @Res() response: Response,
+  ) {
+    const asset = await this.videos.getAdminVideoAsset(req.tenant!.id, courseId, lessonId);
+    const buffer = await this.storage.readKey(asset.storageKey);
+    const requested = this.parseRange(range, buffer.length);
+    response.setHeader('Content-Type', 'video/mp4');
+    response.setHeader('Accept-Ranges', 'bytes');
+    response.setHeader('Content-Length', requested.end - requested.start + 1);
+    response.setHeader('Content-Range', `bytes ${requested.start}-${requested.end}/${buffer.length}`);
+    response.status(requested.partial ? 206 : 200).send(buffer.subarray(requested.start, requested.end + 1));
+  }
+
   @Get(':courseId/progress')
   @RequirePermissions('training.progress.read')
   progress(@Req() req: RequestWithUser, @Param('courseId') courseId: string) {

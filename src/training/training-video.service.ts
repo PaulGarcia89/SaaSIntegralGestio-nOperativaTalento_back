@@ -33,6 +33,15 @@ export class TrainingVideoService {
     private readonly storage: TrainingObjectStorageService,
   ) {}
 
+  async getAdminVideoAsset(tenantId: string, courseId: string, lessonId: string) {
+    const lesson = await this.prisma.trainingLesson.findFirst({
+      where: { id: lessonId, module: { course: { id: courseId, tenantId } } },
+      select: { videoStorageKey: true },
+    });
+    if (!lesson?.videoStorageKey) throw new NotFoundException('Video file is not available');
+    return { storageKey: lesson.videoStorageKey };
+  }
+
   async createOrUpdateVideo(
     tenantId: string,
     actorId: string,
