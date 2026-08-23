@@ -127,7 +127,10 @@ export class TrainingVideoController {
 @UseGuards(...trainingGuards)
 @RequireModule(ModuleCode.TRAINING)
 export class TrainingVideoAdminController {
-  constructor(private readonly videos: TrainingVideoService) {}
+  constructor(
+    private readonly videos: TrainingVideoService,
+    private readonly storage: TrainingObjectStorageService,
+  ) {}
 
   @Post(':courseId/video')
   @RequirePermissions('training.course.update')
