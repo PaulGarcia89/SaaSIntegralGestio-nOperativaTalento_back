@@ -164,6 +164,18 @@ export class TrainingVideoAdminController {
     response.status(requested.partial ? 206 : 200).send(buffer.subarray(requested.start, requested.end + 1));
   }
 
+  private parseRange(range: string | undefined, size: number) {
+    if (!range) return { start: 0, end: size - 1, partial: false };
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match) return { start: 0, end: size - 1, partial: false };
+    const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]) - 1);
+    const end = match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > end || start >= size) {
+      return { start: 0, end: size - 1, partial: false };
+    }
+    return { start, end, partial: true };
+  }
+
   @Get(':courseId/progress')
   @RequirePermissions('training.progress.read')
   progress(@Req() req: RequestWithUser, @Param('courseId') courseId: string) {
