@@ -711,6 +711,15 @@ enum TrainingCourseStepType {
   TASK
 }
 
+enum TrainingVideoEventType {
+  PLAY
+  PAUSE
+  SEEK
+  HEARTBEAT
+  ENDED
+  COMPLETED
+}
+
 enum TrainingCourseStatus {
   DRAFT
   IN_REVIEW
@@ -1297,6 +1306,8 @@ model Tenant {
   trainingProgressRecords       TrainingProgress[]
   trainingStepProgressRecords   TrainingStepProgress[]
   trainingLessonProgressRecords TrainingLessonProgress[]
+  trainingVideoProgressRecords  TrainingVideoProgress[]
+  trainingVideoProgressEvents    TrainingVideoProgressEvent[]
   trainingEvents                TrainingEvent[]
   trainingLibraryResources      TrainingLibraryResource[]
   trainingQuizAttempts          TrainingQuizAttempt[]
@@ -1428,6 +1439,8 @@ model User {
   trainingProgressRecords            TrainingProgress[]
   trainingStepProgressRecords        TrainingStepProgress[]
   trainingLessonProgressRecords      TrainingLessonProgress[]
+  trainingVideoProgressRecords       TrainingVideoProgress[]
+  trainingVideoProgressEvents        TrainingVideoProgressEvent[]
   trainingEventAttendances           TrainingEventAttendance[]
   trainingQuizAttempts               TrainingQuizAttempt[]
   trainingCertificates               TrainingCertificate[]
@@ -5746,8 +5759,17 @@ model TrainingCourseModule {
 model TrainingLesson {
   id               String                   @id @default(uuid())
   moduleId         String
+  type             TrainingCourseStepType   @default(READING)
   title            String
   description      String?
+  videoStorageKey  String?
+  videoUrl         String?
+  thumbnailUrl     String?
+  durationSeconds  Int?
+  requiredCompletionPercentage Int        @default(90)
+  allowReplay      Boolean                @default(false)
+  isActive         Boolean                @default(true)
+  publishedAt      DateTime?
   sortOrder        Int                      @default(0)
   estimatedMinutes Int?
   isRequired       Boolean                  @default(true)
@@ -5756,8 +5778,11 @@ model TrainingLesson {
   module           TrainingCourseModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   blocks           TrainingContentBlock[]
   progressRecords  TrainingLessonProgress[]
+  videoProgress    TrainingVideoProgress[]
+  videoEvents      TrainingVideoProgressEvent[]
 
   @@index([moduleId, sortOrder])
+  @@index([type, isActive])
 }
 
 model TrainingLessonProgress {
@@ -5868,6 +5893,8 @@ model TrainingAssignment {
   course          TrainingCourse?              @relation(fields: [courseId], references: [id], onDelete: Cascade)
   assignedBy      User?                        @relation("TrainingAssignmentsAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
   launch          TrainingLaunch?              @relation(fields: [launchId], references: [id], onDelete: SetNull)
+  videoProgress   TrainingVideoProgress[]
+  videoEvents     TrainingVideoProgressEvent[]
 
   @@unique([tenantId, userId, curriculumId])
   @@unique([tenantId, userId, courseId])
@@ -5875,6 +5902,59 @@ model TrainingAssignment {
   @@index([tenantId, dueAt])
   @@index([tenantId, startAt])
   @@index([launchId])
+}
+
+model TrainingVideoProgress {
+  id                     String                   @id @default(uuid())
+  tenantId               String
+  assignmentId           String
+  lessonId               String
+  userId                 String
+  lastPositionSeconds    Int                      @default(0)
+  watchedSeconds         Int                      @default(0)
+  highestPositionSeconds Int                      @default(0)
+  completionPercentage   Int                      @default(0)
+  playbackSessionId      String?
+  startedAt              DateTime?
+  lastHeartbeatAt        DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  tenant                 Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignment             TrainingAssignment      @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  lesson                 TrainingLesson          @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user                   User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events                 TrainingVideoProgressEvent[]
+
+  @@unique([assignmentId, lessonId])
+  @@index([tenantId, userId, updatedAt])
+  @@index([tenantId, assignmentId])
+  @@index([lessonId, completedAt])
+}
+
+model TrainingVideoProgressEvent {
+  id                 String                  @id @default(uuid())
+  tenantId           String
+  assignmentId       String
+  lessonId           String
+  userId             String
+  playbackSessionId  String
+  eventType          TrainingVideoEventType
+  currentTimeSeconds Int
+  durationSeconds    Int
+  occurredAt         DateTime                @default(now())
+  ipAddress          String?
+  userAgent          String?
+  progressId         String?
+  tenant             Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignment         TrainingAssignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  lesson             TrainingLesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  progress           TrainingVideoProgress? @relation(fields: [progressId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, assignmentId, occurredAt])
+  @@index([tenantId, userId, occurredAt])
+  @@index([playbackSessionId, occurredAt])
 }
 
 model TrainingLaunch {

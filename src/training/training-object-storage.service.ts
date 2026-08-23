@@ -42,6 +42,18 @@ export class TrainingObjectStorageService {
     return readFile(absolute);
   }
 
+  async readKey(key: string) {
+    if (this.client) {
+      const response = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+      if (!response.Body) throw new Error('Object body is empty');
+      return Buffer.from(await (response.Body as Readable).toArray());
+    }
+    const root = path.resolve(process.env.SCORM_STORAGE_ROOT ?? path.join(process.cwd(), 'storage', 'scorm'));
+    const absolute = path.resolve(root, key);
+    if (!absolute.startsWith(`${root}${path.sep}`)) throw new Error('Unsafe storage key');
+    return readFile(absolute);
+  }
+
   describe() {
     return { driver: this.driver, bucket: this.client ? this.bucket : null, encryption: this.client ? process.env.SCORM_S3_SSE !== 'false' : true };
   }

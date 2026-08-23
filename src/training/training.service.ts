@@ -349,6 +349,7 @@ export class TrainingService {
               include: {
                 blocks: { orderBy: { sortOrder: 'asc' } },
                 progressRecords: { where: { tenantId, userId } },
+                videoProgress: { where: { tenantId, userId } },
               },
             },
           },
@@ -432,6 +433,15 @@ export class TrainingService {
           isRequired: lesson.isRequired,
           completed: lesson.progressRecords[0]?.isCompleted ?? false,
           completedAt: lesson.progressRecords[0]?.completedAt ?? null,
+          videoProgress: lesson.videoProgress[0]
+            ? {
+                lastPositionSeconds: lesson.videoProgress[0].lastPositionSeconds,
+                watchedSeconds: lesson.videoProgress[0].watchedSeconds,
+                completionPercentage: lesson.videoProgress[0].completionPercentage,
+                playbackSessionId: lesson.videoProgress[0].playbackSessionId,
+                completedAt: lesson.videoProgress[0].completedAt,
+              }
+            : null,
           blocks: lesson.blocks,
         })),
       })),

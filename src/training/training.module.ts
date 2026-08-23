@@ -28,6 +28,8 @@ import { TrainingLaunchController } from './training-launch.controller';
 import { TrainingLaunchService } from './training-launch.service';
 import { TrainingOperationsController } from './training-operations.controller';
 import { TrainingOperationsService } from './training-operations.service';
+import { TrainingVideoController, TrainingVideoAdminController } from './training-video.controller';
+import { TrainingVideoService } from './training-video.service';
 
 @Module({
   imports: [PrismaModule],
@@ -43,6 +45,8 @@ import { TrainingOperationsService } from './training-operations.service';
     TrainingLearningPathController,
     TrainingLaunchController,
     TrainingOperationsController,
+    TrainingVideoController,
+    TrainingVideoAdminController,
   ],
   providers: [
     TrainingService,
@@ -61,6 +65,7 @@ import { TrainingOperationsService } from './training-operations.service';
     TrainingLearningPathService,
     TrainingLaunchService,
     TrainingOperationsService,
+    TrainingVideoService,
   ],
   exports: [TrainingService, TrainingAntivirusService, TrainingLearningPathService],
 })
