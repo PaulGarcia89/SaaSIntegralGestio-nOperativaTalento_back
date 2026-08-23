@@ -431,6 +431,13 @@ export class TrainingService {
           sortOrder: lesson.sortOrder,
           estimatedMinutes: lesson.estimatedMinutes,
           isRequired: lesson.isRequired,
+          type: lesson.type,
+          videoUrl: lesson.videoUrl ?? (lesson.videoStorageKey && course.assignments[0]
+            ? `/api/training/video/assignments/${course.assignments[0].id}/lessons/${lesson.id}/file`
+            : null),
+          thumbnailUrl: lesson.thumbnailUrl,
+          durationSeconds: lesson.durationSeconds,
+          requiredCompletionPercentage: lesson.requiredCompletionPercentage,
           completed: lesson.progressRecords[0]?.isCompleted ?? false,
           completedAt: lesson.progressRecords[0]?.completedAt ?? null,
           videoProgress: lesson.videoProgress[0]
