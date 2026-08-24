@@ -23,6 +23,29 @@ export class RestaurantInventoryService {
     if (from.type !== to.type) this.bad('Las unidades no son compatibles');
     return quantity * Number(from.conversionFactor) / Number(to.conversionFactor);
   }
+  async dashboard(tenantId: string, filters: { branchId?: string; warehouseId?: string; from?: string; to?: string }) {
+    const balanceWhere = { tenantId, ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.warehouseId ? { warehouseId: filters.warehouseId } : {}) };
+    const scope = { tenantId, ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.warehouseId ? { warehouseId: filters.warehouseId } : {}) };
+    const dateRange = filters.from || filters.to ? { ...(filters.from ? { gte: new Date(filters.from) } : {}), ...(filters.to ? { lte: new Date(filters.to) } : {}) } : undefined;
+    const [ingredients, balances, receipts, consumptions, wastes] = await Promise.all([
+      this.prisma.restaurantIngredient.findMany({ where: { tenantId, status: RestaurantInventoryStatus.ACTIVE }, select: { id: true, minimumStock: true } }),
+      this.prisma.restaurantInventoryBalance.findMany({ where: balanceWhere, select: { ingredientId: true, quantityOnHand: true, averageCost: true } }),
+      this.prisma.restaurantGoodsReceipt.findMany({ where: { ...scope, ...(dateRange ? { receivedAt: dateRange } : {}) }, orderBy: { receivedAt: 'desc' }, take: 5, include: { items: { select: { totalCost: true } } } }),
+      this.prisma.restaurantConsumptionRecord.findMany({ where: { ...scope, ...(dateRange ? { consumptionDate: dateRange } : {}) }, orderBy: { consumptionDate: 'desc' }, take: 5, include: { items: { select: { totalCost: true } } } }),
+      this.prisma.restaurantWasteRecord.findMany({ where: { ...scope, ...(dateRange ? { wasteDate: dateRange } : {}) }, orderBy: { wasteDate: 'desc' }, take: 5, include: { items: { select: { unitCostSnapshot: true, convertedInventoryQuantity: true } } } }),
+    ]);
+    const stockByIngredient = new Map<string, number>();
+    for (const balance of balances) stockByIngredient.set(balance.ingredientId, (stockByIngredient.get(balance.ingredientId) ?? 0) + Number(balance.quantityOnHand));
+    const belowMinimum = ingredients.filter((ingredient) => (stockByIngredient.get(ingredient.id) ?? 0) <= Number(ingredient.minimumStock)).length;
+    return {
+      totalValue: balances.reduce((sum, balance) => sum + Number(balance.quantityOnHand) * Number(balance.averageCost), 0),
+      activeIngredients: ingredients.length,
+      belowMinimum,
+      recentReceipts: receipts.map((receipt) => ({ id: receipt.id, reference: receipt.receiptNumber, status: receipt.status, date: receipt.receivedAt.toISOString(), total: receipt.items.reduce((sum, item) => sum + Number(item.totalCost), 0) })),
+      recentConsumption: consumptions.map((record) => ({ id: record.id, date: record.consumptionDate.toISOString(), totalCost: record.items.reduce((sum, item) => sum + Number(item.totalCost), 0), status: record.status })),
+      recentWaste: wastes.map((record) => ({ id: record.id, date: record.wasteDate.toISOString(), reason: record.reason, totalCost: record.items.reduce((sum, item) => sum + Number(item.unitCostSnapshot) * Number(item.convertedInventoryQuantity), 0), status: record.status })),
+    };
+  }
   async categories(tenantId: string) { return this.prisma.restaurantInventoryCategory.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }); }
   async createCategory(tenantId: string, dto: CreateCategoryDto) { return this.prisma.restaurantInventoryCategory.create({ data: { tenantId, name: dto.name, description: dto.description } }); }
   async units(tenantId: string) { return this.prisma.restaurantInventoryUnit.findMany({ where: { OR: [{ tenantId }, { tenantId: null }] }, orderBy: { name: 'asc' } }); }
