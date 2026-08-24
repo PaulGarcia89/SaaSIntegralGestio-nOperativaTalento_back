@@ -16,6 +16,6 @@ import { RestaurantReportsService } from './restaurant-reports.service';
 @RequireInventoryCapability(InventoryCapabilityCode.RESTAURANT_INVENTORY)
 export class RestaurantReportsController {
   constructor(private readonly reports: RestaurantReportsService) {}
-  @Get(':type') @RequirePermissions('inventory.report.view') report(@Req() r: RequestWithUser, @Param('type') type: string, @Query() query: any) { return this.reports.report(r.tenant!.id, type, query); }
+  @Get(':type') @RequirePermissions('inventory.read') report(@Req() r: RequestWithUser, @Param('type') type: string, @Query() query: any) { return this.reports.report(r.tenant!.id, type, query); }
   @Get(':type/export') @RequirePermissions('inventory.report.export') @AuditAction('RESTAURANT_INVENTORY_REPORT_EXPORTED') export(@Req() r: RequestWithUser, @Param('type') type: string, @Query() query: any) { return this.reports.exportCsv(r.tenant!.id, r.user.sub, type, query); }
 }
