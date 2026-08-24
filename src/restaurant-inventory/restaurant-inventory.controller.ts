@@ -16,7 +16,7 @@ import { CreateCategoryDto, CreateConsumptionDto, CreateIngredientDto, CreateRec
 @RequireInventoryCapability(InventoryCapabilityCode.RESTAURANT_INVENTORY)
 export class RestaurantInventoryController {
   constructor(private readonly service: RestaurantInventoryService) {}
-  @Get('dashboard') @RequirePermissions('inventory.view') dashboard(@Req() r: RequestWithUser, @Query('branchId') branchId?: string, @Query('warehouseId') warehouseId?: string, @Query('from') from?: string, @Query('to') to?: string) { return this.service.dashboard(r.tenant!.id, { branchId, warehouseId, from, to }); }
+  @Get('dashboard') @RequirePermissions('inventory.read') dashboard(@Req() r: RequestWithUser, @Query('branchId') branchId?: string, @Query('warehouseId') warehouseId?: string, @Query('from') from?: string, @Query('to') to?: string) { return this.service.dashboard(r.tenant!.id, { branchId, warehouseId, from, to }); }
   @Get('categories') @RequirePermissions('inventory.view') categories(@Req() r: RequestWithUser) { return this.service.categories(r.tenant!.id); }
   @Post('categories') @RequirePermissions('inventory.ingredient.manage') category(@Req() r: RequestWithUser, @Body() d: CreateCategoryDto) { return this.service.createCategory(r.tenant!.id, d); }
   @Get('units') @RequirePermissions('inventory.view') units(@Req() r: RequestWithUser) { return this.service.units(r.tenant!.id); }
