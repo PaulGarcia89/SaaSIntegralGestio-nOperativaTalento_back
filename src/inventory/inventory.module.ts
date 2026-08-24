@@ -5,9 +5,10 @@ import { TrainingModule } from '../training/training.module';
 import { InventoryController } from './inventory.controller';
 import { InventoryEvidenceStorageService } from './inventory-evidence-storage.service';
 import { InventoryService } from './inventory.service';
+import { InventoryCapabilitiesModule } from '../inventory-capabilities/inventory-capabilities.module';
 
 @Module({
-  imports: [TrainingModule],
+  imports: [TrainingModule, InventoryCapabilitiesModule],
   controllers: [InventoryController],
   providers: [InventoryService, InventoryEvidenceStorageService, SubscriptionGuard, ModuleAccessGuard],
   exports: [InventoryService],

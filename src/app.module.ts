@@ -49,6 +49,8 @@ import { AtsFileStorageModule } from './common/files/ats-file-storage.module';
 import { EnterpriseIntegrationsModule } from './enterprise-integrations/enterprise-integrations.module';
 import { ProductivityModule } from './productivity/productivity.module';
 import { CompanyRegistrationsModule } from './company-registrations/company-registrations.module';
+import { InventoryCapabilitiesModule } from './inventory-capabilities/inventory-capabilities.module';
+import { RestaurantInventoryModule } from './restaurant-inventory/restaurant-inventory.module';
 
 @Module({
   imports: [
@@ -86,6 +88,8 @@ import { CompanyRegistrationsModule } from './company-registrations/company-regi
     OnboardingModule,
     SignaturesModule,
     InventoryModule,
+    InventoryCapabilitiesModule,
+    RestaurantInventoryModule,
     DashboardModule,
     ReportsModule,
     TrainingModule,
