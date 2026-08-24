@@ -27,6 +27,10 @@ export class PlatformAccessService {
       where: { tenantId },
       orderBy: { moduleCode: 'asc' },
     });
+    const inventoryCapabilities = await this.prisma.tenantInventoryCapability.findMany({
+      where: { tenantId },
+      orderBy: { code: 'asc' },
+    });
 
     const planModules = subscription?.plan.planModules.map((entry) => entry.module.code) ?? [];
     const enabledModules = mergeEnabledModules(
@@ -68,6 +72,13 @@ export class PlatformAccessService {
         metadata: featureFlag.metadata,
         createdAt: featureFlag.createdAt,
         updatedAt: featureFlag.updatedAt,
+      })),
+      inventoryCapabilities: inventoryCapabilities.map((capability) => ({
+        code: capability.code,
+        enabled: capability.enabled,
+        activatedAt: capability.activatedAt,
+        deactivatedAt: capability.deactivatedAt,
+        metadata: capability.metadata,
       })),
       navigation: buildNavigation(enabledModules),
       dashboard: this.buildDashboardCards(enabledModules),
