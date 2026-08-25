@@ -11,6 +11,8 @@ import { RequestWithUser } from '../common/types/request-with-user.type';
 import { RestaurantInventoryService } from './restaurant-inventory.service';
 import { CreateCategoryDto, CreateConsumptionDto, CreateIngredientDto, CreateProductionDto, CreateReceiptDto, CreateRecipeDto, CreateStockCountDto, CreateSupplierDto, CreateTransferDto, CreateUnitDto, CreateWarehouseDto, CreateWasteDto, OverrideConfirmationDto, UpdateReceiptDto } from './dto/restaurant-inventory.dto';
 import { RestaurantInventoryContextGuard } from './restaurant-inventory-context.guard';
+import { RestaurantRecipeVersionService } from './restaurant-recipe-version.service';
+import { CreateRecipeVersionDto } from './dto/restaurant-inventory.dto';
 import { AuditAction } from '../audit/audit-action.decorator';
 import { CreateAdjustmentDto, CreateBranchDto, InventoryListQueryDto, UpdateBranchDto, UpdateCategoryDto, UpdateIngredientDto, UpdateSupplierDto, UpdateUnitDto, UpdateWarehouseDto } from './dto/restaurant-inventory.dto';
 
@@ -18,7 +20,7 @@ import { CreateAdjustmentDto, CreateBranchDto, InventoryListQueryDto, UpdateBran
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, PermissionGuard, InventoryCapabilityGuard, RestaurantInventoryContextGuard)
 @RequireInventoryCapability(InventoryCapabilityCode.RESTAURANT_INVENTORY)
 export class RestaurantInventoryController {
-  constructor(private readonly service: RestaurantInventoryService) {}
+  constructor(private readonly service: RestaurantInventoryService, private readonly recipeVersions: RestaurantRecipeVersionService) {}
   @Get('dashboard') @RequirePermissions('inventory.read') dashboard(@Req() r: RequestWithUser, @Query('branchId') branchId?: string, @Query('warehouseId') warehouseId?: string, @Query('from') from?: string, @Query('to') to?: string) { return this.service.dashboard(r.tenant!.id, { branchId, warehouseId, from, to }); }
   @Get('categories') @RequirePermissions('inventory.read') categories(@Req() r: RequestWithUser, @Query() q: InventoryListQueryDto) { return this.service.categories(r.tenant!.id, q); }
   @Post('categories') @RequirePermissions('inventory.create') @AuditAction('RESTAURANT_INVENTORY_CATEGORY_CREATED') category(@Req() r: RequestWithUser, @Body() d: CreateCategoryDto) { return this.service.createCategory(r.tenant!.id, d); }
@@ -46,6 +48,10 @@ export class RestaurantInventoryController {
   @Delete('branches/:id') @RequirePermissions('inventory.update') @AuditAction('RESTAURANT_INVENTORY_BRANCH_DELETED') deleteBranch(@Req() r: RequestWithUser, @Param('id') id: string) { return this.service.deleteBranch(r.tenant!.id, id); }
   @Get('recipes') @RequirePermissions('inventory.read') recipes(@Req() r: RequestWithUser) { return this.service.recipes(r.tenant!.id); }
   @Post('recipes') @RequirePermissions('inventory.create') recipe(@Req() r: RequestWithUser, @Body() d: CreateRecipeDto) { return this.service.createRecipe(r.tenant!.id, r.user.sub, d); }
+  @Get('recipes/:id/versions') @RequirePermissions('inventory.read') recipeVersionsList(@Req() r: RequestWithUser, @Param('id') id: string) { return this.recipeVersions.listVersions(r.tenant!.id, id); }
+  @Post('recipes/:id/versions') @RequirePermissions('inventory.create') @AuditAction('RESTAURANT_INVENTORY_RECIPE_VERSION_CREATED') createRecipeVersion(@Req() r: RequestWithUser, @Param('id') id: string, @Body() d: CreateRecipeVersionDto) { return this.recipeVersions.createVersion(r.tenant!.id, r.user.sub, id, d); }
+  @Post('recipes/:id/versions/:versionId/validate') @RequirePermissions('inventory.read') validateRecipeVersion(@Req() r: RequestWithUser, @Param('id') id: string, @Param('versionId') versionId: string) { return this.recipeVersions.validateVersion(r.tenant!.id, id, versionId); }
+  @Post('recipes/:id/versions/:versionId/publish') @RequirePermissions('inventory.confirm') @AuditAction('RESTAURANT_INVENTORY_RECIPE_VERSION_PUBLISHED') publishRecipeVersion(@Req() r: RequestWithUser, @Param('id') id: string, @Param('versionId') versionId: string) { return this.recipeVersions.publishVersion(r.tenant!.id, r.user.sub, id, versionId); }
   @Patch('recipes/:id/activate') @RequirePermissions('inventory.update') activateRecipe(@Req() r: RequestWithUser, @Param('id') id: string) { return this.service.activateRecipe(r.tenant!.id, id); }
   @Patch('recipes/:id/archive') @RequirePermissions('inventory.update') archiveRecipe(@Req() r: RequestWithUser, @Param('id') id: string) { return this.service.archiveRecipe(r.tenant!.id, id); }
   @Post('receipts/preview') @RequirePermissions('inventory.create') previewReceipt(@Req() r: RequestWithUser, @Body() d: CreateReceiptDto) { return this.service.previewReceipt(r.tenant!.id, d); }

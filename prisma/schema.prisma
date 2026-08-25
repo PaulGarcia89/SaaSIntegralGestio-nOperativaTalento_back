@@ -616,6 +616,24 @@ enum RestaurantRecipeStatus {
   ACTIVE
   ARCHIVED
 }
+enum RestaurantRecipeType {
+  MENU_ITEM
+  PREPARATION
+  YIELD
+}
+enum RestaurantRecipeVersionStatus {
+  DRAFT
+  PUBLISHED
+  SUPERSEDED
+}
+enum RestaurantRecipeComponentType {
+  INGREDIENT
+  SUB_RECIPE
+}
+enum RestaurantRecipeQuantityMode {
+  GROSS
+  USABLE
+}
 enum RestaurantShift {
   BREAKFAST
   LUNCH
@@ -6843,13 +6861,85 @@ model RestaurantRecipe {
   calculatedCost Decimal @db.Decimal(18, 6) @default(0)
   requiredStockPolicy RestaurantStockPolicy @default(BLOCK)
   version Int @default(1)
+  type RestaurantRecipeType @default(MENU_ITEM)
+  portions Decimal? @db.Decimal(18, 6)
+  portionQuantity Decimal? @db.Decimal(18, 6)
+  portionUnitId String?
+  currentVersionId String?
+  currentFoodCostPercentage Decimal? @db.Decimal(18, 6)
+  currentGrossMargin Decimal? @db.Decimal(18, 6)
+  currentCostCalculatedAt DateTime?
   status RestaurantRecipeStatus @default(DRAFT)
   createdBy String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   items RestaurantRecipeIngredient[]
+  versions RestaurantRecipeVersion[]
   @@unique([tenantId, code, version])
   @@index([tenantId, branchId, status])
+}
+
+model RestaurantRecipeVersion {
+  id String @id @default(uuid())
+  tenantId String
+  recipeId String
+  versionNumber Int
+  yieldQuantity Decimal @db.Decimal(18, 6)
+  yieldUnitId String
+  portions Decimal? @db.Decimal(18, 6)
+  portionQuantity Decimal? @db.Decimal(18, 6)
+  portionUnitId String?
+  sellingPriceSnapshot Decimal? @db.Decimal(18, 6)
+  batchCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
+  portionCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
+  foodCostPercentageSnapshot Decimal? @db.Decimal(18, 6)
+  grossMarginSnapshot Decimal? @db.Decimal(18, 6)
+  changeReason String?
+  status RestaurantRecipeVersionStatus @default(DRAFT)
+  publishedBy String?
+  publishedAt DateTime?
+  createdBy String
+  createdAt DateTime @default(now())
+  recipe RestaurantRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  components RestaurantRecipeComponent[]
+  steps RestaurantRecipeStep[]
+  @@unique([tenantId, recipeId, versionNumber])
+  @@index([tenantId, recipeId, status])
+}
+
+model RestaurantRecipeComponent {
+  id String @id @default(uuid())
+  tenantId String
+  recipeVersionId String
+  componentType RestaurantRecipeComponentType
+  ingredientId String?
+  subRecipeId String?
+  quantity Decimal @db.Decimal(18, 6)
+  unitId String
+  quantityMode RestaurantRecipeQuantityMode @default(GROSS)
+  yieldPercentage Decimal? @db.Decimal(8, 4)
+  wastePercentage Decimal? @db.Decimal(8, 4)
+  convertedGrossQuantity Decimal @db.Decimal(18, 6)
+  unitCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
+  totalCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
+  preparationInstructions String?
+  position Int @default(0)
+  recipeVersion RestaurantRecipeVersion @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  @@index([tenantId, recipeVersionId, position])
+  @@index([tenantId, ingredientId])
+  @@index([tenantId, subRecipeId])
+}
+
+model RestaurantRecipeStep {
+  id String @id @default(uuid())
+  tenantId String
+  recipeVersionId String
+  stepNumber Int
+  instruction String
+  imageUrl String?
+  estimatedMinutes Int?
+  recipeVersion RestaurantRecipeVersion @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  @@unique([recipeVersionId, stepNumber])
 }
 
 model RestaurantRecipeIngredient {
