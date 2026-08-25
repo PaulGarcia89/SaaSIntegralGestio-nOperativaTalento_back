@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  NotFoundException,
   Param,
   Post,
   Req,
@@ -101,7 +102,7 @@ export class TrainingVideoController {
     @Res() response: Response,
   ) {
     const asset = await this.videos.getVideoAsset(req.tenant!.id, req.user.sub, assignmentId, lessonId);
-    const buffer = await this.storage.readKey(asset.storageKey);
+    const buffer = await this.readVideo(asset.storageKey);
     const requested = this.parseRange(range, buffer.length);
     response.setHeader('Content-Type', 'video/mp4');
     response.setHeader('Accept-Ranges', 'bytes');
@@ -120,6 +121,17 @@ export class TrainingVideoController {
       return { start: 0, end: size - 1, partial: false };
     }
     return { start, end, partial: true };
+  }
+
+  private async readVideo(storageKey: string) {
+    try {
+      return await this.storage.readKey(storageKey);
+    } catch (error: any) {
+      if (error?.code === 'ENOENT' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) {
+        throw new NotFoundException('Video file is missing from configured storage');
+      }
+      throw error;
+    }
   }
 }
 
@@ -158,7 +170,7 @@ export class TrainingVideoAdminController {
     @Res() response: Response,
   ) {
     const asset = await this.videos.getAdminVideoAsset(req.tenant!.id, courseId, lessonId);
-    const buffer = await this.storage.readKey(asset.storageKey);
+    const buffer = await this.readVideo(asset.storageKey);
     const requested = this.parseRange(range, buffer.length);
     response.setHeader('Content-Type', 'video/mp4');
     response.setHeader('Accept-Ranges', 'bytes');
@@ -177,6 +189,17 @@ export class TrainingVideoAdminController {
       return { start: 0, end: size - 1, partial: false };
     }
     return { start, end, partial: true };
+  }
+
+  private async readVideo(storageKey: string) {
+    try {
+      return await this.storage.readKey(storageKey);
+    } catch (error: any) {
+      if (error?.code === 'ENOENT' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) {
+        throw new NotFoundException('Video file is missing from configured storage');
+      }
+      throw error;
+    }
   }
 
   @Get(':courseId/progress')
