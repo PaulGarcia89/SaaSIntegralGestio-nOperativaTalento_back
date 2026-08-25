@@ -13,6 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
 import { ModuleCode, TrainingVideoEventType } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { RequireModule } from '../common/decorators/module-access.decorator';
@@ -147,6 +148,7 @@ export class TrainingVideoAdminController {
   @Post(':courseId/video')
   @RequirePermissions('training.course.update')
   @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({ destination: '/tmp' }),
     limits: { fileSize: Number(process.env.TRAINING_VIDEO_MAX_UPLOAD_BYTES ?? 500 * 1024 * 1024), files: 1 },
     fileFilter: (_req, file, callback) => callback(null, file.mimetype === 'video/mp4' && file.originalname.toLowerCase().endsWith('.mp4')),
   }))

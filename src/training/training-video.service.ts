@@ -13,6 +13,7 @@ import {
   TrainingVideoEventType,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { unlink } from 'node:fs/promises';
 import { Request } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { TrainingObjectStorageService } from './training-object-storage.service';
@@ -88,7 +89,20 @@ export class TrainingVideoService {
     if (!lesson && dto.moduleId && !module) throw new NotFoundException('Training course module not found');
 
     const storageKey = file ? `videos/${tenantId}/${randomUUID()}.mp4` : undefined;
-    if (file && storageKey) await this.storage.put(storageKey, file.buffer, 'video/mp4');
+    if (file && storageKey) {
+      try {
+        if (file.path) {
+          await this.storage.putFile(storageKey, file.path, 'video/mp4');
+        } else if (file.buffer) {
+          // Keep compatibility with programmatic callers and existing tests.
+          await this.storage.put(storageKey, file.buffer, 'video/mp4');
+        } else {
+          throw new BadRequestException('Uploaded video has no readable contents');
+        }
+      } finally {
+        if (file.path) await unlink(file.path).catch(() => undefined);
+      }
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const targetModule = module ?? (await tx.trainingCourseModule.create({
