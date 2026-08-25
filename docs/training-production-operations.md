@@ -2,6 +2,10 @@
 
 ## Almacenamiento SCORM
 
+Las cargas de archivos MP4 están deshabilitadas en producción por defecto con
+`TRAINING_VIDEO_UPLOAD_ENABLED=false`. Actívelas únicamente después de
+configurar almacenamiento S3/R2 persistente y desplegar nuevamente.
+
 El entorno LAN usa `SCORM_STORAGE_DRIVER=filesystem` y un volumen persistente. Para producción:
 
 - `SCORM_STORAGE_DRIVER=s3`
