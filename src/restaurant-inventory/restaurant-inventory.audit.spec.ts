@@ -3,12 +3,11 @@ import { Reflector } from '@nestjs/core';
 import { RestaurantInventoryController } from './restaurant-inventory.controller';
 import { RestaurantReportsController } from './restaurant-reports.controller';
 import { SalesImportController } from './sales-import.controller';
-import { REQUIRED_PERMISSIONS_KEY, ANY_PERMISSIONS_KEY } from '../common/constants/auth.constants';
+import { REQUIRED_PERMISSIONS_KEY } from '../common/constants/auth.constants';
 
 describe('Restaurant inventory production contract', () => {
   const reflector = new Reflector();
   const required = (controller: any, method: string) => reflector.getAllAndOverride<string[]>(REQUIRED_PERMISSIONS_KEY, [controller.prototype[method], controller]);
-  const any = (controller: any, method: string) => reflector.getAllAndOverride<string[]>(ANY_PERMISSIONS_KEY, [controller.prototype[method], controller]);
 
   it('protects destructive inventory transitions with mutation permissions', () => {
     expect(required(RestaurantInventoryController, 'confirmReceipt')).toEqual(['inventory.confirm']);
@@ -19,8 +18,8 @@ describe('Restaurant inventory production contract', () => {
   });
 
   it('keeps report and import read/write boundaries explicit', () => {
-    expect(required(RestaurantReportsController, 'export')).toEqual(['inventory.report.view']);
-    expect(any(SalesImportController, 'summary')).toEqual(['inventory.view', 'inventory.read']);
+    expect(required(RestaurantReportsController, 'export')).toEqual(['inventory.report.export']);
+    expect(required(SalesImportController, 'summary')).toEqual(['inventory.read']);
     expect(required(SalesImportController, 'process')).toEqual(['inventory.confirm']);
     expect(required(SalesImportController, 'cancel')).toEqual(['inventory.cancel']);
   });

@@ -19,4 +19,11 @@ describe('RestaurantInventoryService conversions', () => {
       .mockResolvedValueOnce({ id: 'l', tenantId: 't1', type: 'VOLUME', conversionFactor: 1000 });
     await expect((service as any).convert(1, 'kg', 'l', 't1')).rejects.toMatchObject({ response: expect.objectContaining({ code: 'BAD_REQUEST' }) });
   });
+
+  it('preserves decimal precision when converting fractional quantities', async () => {
+    findFirst
+      .mockResolvedValueOnce({ id: 'kg', tenantId: 't1', type: 'WEIGHT', conversionFactor: 1000 })
+      .mockResolvedValueOnce({ id: 'g', tenantId: 't1', type: 'WEIGHT', conversionFactor: 1 });
+    await expect((service as any).convert(0.125, 'kg', 'g', 't1')).resolves.toBe(125);
+  });
 });

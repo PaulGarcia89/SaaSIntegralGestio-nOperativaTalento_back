@@ -48,7 +48,7 @@ export class AuditService {
       actorRole: request.user?.role ?? null,
       actorScope,
       actorTenantId,
-      branchId: request.branch?.id ?? request.user?.activeBranchId ?? null,
+      branchId: request.restaurantInventoryContext?.branchId ?? request.branch?.id ?? request.user?.activeBranchId ?? null,
       correlationId: request.requestId ?? null,
       email,
       domain,

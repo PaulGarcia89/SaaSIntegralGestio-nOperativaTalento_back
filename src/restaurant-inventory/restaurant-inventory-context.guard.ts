@@ -34,7 +34,9 @@ export class RestaurantInventoryContextGuard implements CanActivate {
         if (!this.hasBranchAccess(request, source[branchKey] as string)) throw new AppException('Branch is outside the user scope', ErrorCode.BRANCH_ACCESS_DENIED, HttpStatus.FORBIDDEN);
       }
     }
-    request.branch = branchIds[0] ? { id: branchIds[0], tenantId, name: '', location: '' } : request.branch;
+    const contextBranchId = branchIds[0] ?? request.user?.activeBranchId ?? null;
+    request.restaurantInventoryContext = { companyId: tenantId, branchId: contextBranchId, warehouseId: warehouseIds[0] ?? null };
+    request.branch = contextBranchId ? { id: contextBranchId, tenantId, name: '', location: '' } : request.branch;
     return true;
   }
 

@@ -8,10 +8,11 @@ import { RestaurantReportsController } from './restaurant-reports.controller';
 import { RestaurantReportsService } from './restaurant-reports.service';
 import { RestaurantInventoryContextGuard } from './restaurant-inventory-context.guard';
 import { RestaurantRecipeVersionService } from './restaurant-recipe-version.service';
+import { RestaurantInventoryResponseInterceptor } from './restaurant-inventory-response.interceptor';
 
 @Module({
   imports: [InventoryCapabilitiesModule],
   controllers: [RestaurantInventoryController, SalesImportController, RestaurantReportsController],
-  providers: [RestaurantInventoryService, RestaurantRecipeVersionService, SalesImportService, RestaurantReportsService, RestaurantInventoryContextGuard],
+  providers: [RestaurantInventoryService, RestaurantRecipeVersionService, SalesImportService, RestaurantReportsService, RestaurantInventoryContextGuard, RestaurantInventoryResponseInterceptor],
 })
 export class RestaurantInventoryModule {}

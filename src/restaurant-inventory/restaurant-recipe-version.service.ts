@@ -18,17 +18,25 @@ export class RestaurantRecipeVersionService {
     return unit;
   }
   private async validateComponent(db: Db, tenantId: string, component: RecipeVersionComponentDto) {
+    if (!Number.isFinite(Number(component.quantity)) || Number(component.quantity) <= 0) this.fail('La cantidad del componente debe ser mayor que cero');
+    if (component.wastePercentage != null && (component.wastePercentage < 0 || component.wastePercentage >= 100)) this.fail('Merma inválida');
+    if (component.quantityMode === RestaurantRecipeQuantityMode.USABLE && (component.yieldPercentage == null || component.yieldPercentage <= 0 || component.yieldPercentage > 100)) this.fail('Rendimiento inválido');
     if (component.componentType === RestaurantRecipeComponentType.INGREDIENT) {
       if (!component.ingredientId || component.subRecipeId) this.fail('Un componente INGREDIENT requiere ingredientId');
       const ingredient = await db.restaurantIngredient.findFirst({ where: { id: component.ingredientId, tenantId, status: RestaurantInventoryStatus.ACTIVE } });
       if (!ingredient) this.fail('Ingrediente no encontrado o inactivo');
-      await this.unit(db, tenantId, component.unitId);
+      const from = await this.unit(db, tenantId, component.unitId);
+      const to = await this.unit(db, tenantId, ingredient!.inventoryUnitId);
+      if (from.type !== to.type) this.fail('Unidad de componente incompatible con el ingrediente');
+      if (Number(ingredient!.currentAverageCost) <= 0) this.fail('El ingrediente no tiene un costo promedio válido');
       return;
     }
     if (!component.subRecipeId || component.ingredientId) this.fail('Un componente SUB_RECIPE requiere subRecipeId');
     const recipe = await db.restaurantRecipe.findFirst({ where: { id: component.subRecipeId, tenantId, status: { not: 'ARCHIVED' } } });
     if (!recipe) this.fail('Subreceta no encontrada');
-    await this.unit(db, tenantId, component.unitId);
+    const from = await this.unit(db, tenantId, component.unitId);
+    const to = await this.unit(db, tenantId, recipe!.yieldUnitId);
+    if (from.type !== to.type) this.fail('Unidad de componente incompatible con la subreceta');
   }
   async createVersion(tenantId: string, userId: string, recipeId: string, dto: CreateRecipeVersionDto) {
     const recipe = await this.prisma.restaurantRecipe.findFirst({ where: { id: recipeId, tenantId, status: { not: 'ARCHIVED' } } });
@@ -94,6 +102,19 @@ export class RestaurantRecipeVersionService {
     if (version.recipe.type !== RestaurantRecipeType.MENU_ITEM && !version.recipe.outputIngredientId) this.fail('PREPARATION y YIELD requieren outputIngredientId');
     if (!version.components.length) this.fail('La versión debe contener al menos un componente');
     if (version.yieldQuantity.lte(0)) this.fail('El rendimiento debe ser mayor que cero');
+    if (version.portions && version.portions.lte(0)) this.fail('Las porciones deben ser mayores que cero');
+    const yieldUnit = await this.unit(this.prisma, tenantId, version.yieldUnitId);
+    if (version.recipe.outputIngredientId) {
+      const output = await this.prisma.restaurantIngredient.findFirst({ where: { id: version.recipe.outputIngredientId, tenantId, status: RestaurantInventoryStatus.ACTIVE } });
+      if (!output) this.fail('Ingrediente de salida no encontrado o inactivo');
+      const outputUnit = await this.unit(this.prisma, tenantId, output!.inventoryUnitId);
+      if (yieldUnit.type !== outputUnit.type) this.fail('La unidad de rendimiento es incompatible con el ingrediente de salida');
+    }
+    for (const component of version.components) {
+      if (component.quantity.lte(0)) this.fail('La cantidad del componente debe ser mayor que cero');
+      if (component.wastePercentage && (component.wastePercentage.lt(0) || component.wastePercentage.gte(100))) this.fail('Merma inválida');
+      if (component.quantityMode === RestaurantRecipeQuantityMode.USABLE && (!component.yieldPercentage || component.yieldPercentage.lte(0) || component.yieldPercentage.gt(100))) this.fail('Rendimiento inválido');
+    }
     await this.componentGraph(tenantId, recipeId, versionId);
     const cost = await this.computeCost(tenantId, versionId);
     return { valid: true, errors: [], warnings: cost.foodCost == null ? ['La receta no tiene precio de venta para calcular food cost'] : [], cost: { batch: cost.batch, portion: cost.portionCost, foodCostPercentage: cost.foodCost, grossMargin: cost.margin } };
@@ -109,4 +130,34 @@ export class RestaurantRecipeVersionService {
     });
   }
   async listVersions(tenantId: string, recipeId: string) { return this.prisma.restaurantRecipeVersion.findMany({ where: { tenantId, recipeId }, orderBy: { versionNumber: 'desc' }, include: { components: { orderBy: { position: 'asc' } }, steps: { orderBy: { stepNumber: 'asc' } } } }); }
+
+  async detail(tenantId: string, recipeId: string) {
+    const recipe: any = await this.prisma.restaurantRecipe.findFirst({ where: { id: recipeId, tenantId }, include: { items: true, versions: { orderBy: { versionNumber: 'desc' }, include: { components: { orderBy: { position: 'asc' } }, steps: { orderBy: { stepNumber: 'asc' } } } } } });
+    if (!recipe) this.fail('Receta no encontrada');
+    const ingredientIds = [...new Set([...recipe.items.map((item: any) => item.ingredientId), ...recipe.versions.flatMap((version: any) => version.components.map((component: any) => component.ingredientId).filter(Boolean))])];
+    const unitIds = [...new Set([recipe.yieldUnitId, ...recipe.items.map((item: any) => item.unitId), ...recipe.versions.flatMap((version: any) => [version.yieldUnitId, ...version.components.map((component: any) => component.unitId)])])];
+    const [ingredients, units] = await Promise.all([
+      this.prisma.restaurantIngredient.findMany({ where: { tenantId, id: { in: ingredientIds } }, select: { id: true, name: true, sku: true } }),
+      this.prisma.restaurantInventoryUnit.findMany({ where: { id: { in: unitIds }, OR: [{ tenantId }, { tenantId: null }] }, select: { id: true, name: true, abbreviation: true } }),
+    ]);
+    const ingredientNames = new Map(ingredients.map((item) => [item.id, item]));
+    const unitNames = new Map(units.map((item) => [item.id, item]));
+    const enrich = (row: any) => ({ ...row, ingredient: row.ingredientId ? ingredientNames.get(row.ingredientId) ?? null : null, unit: unitNames.get(row.unitId) ?? null });
+    return { ...recipe, items: recipe.items.map(enrich), versions: recipe.versions.map((version: any) => ({ ...version, yieldUnit: unitNames.get(version.yieldUnitId) ?? null, components: version.components.map(enrich) })) };
+  }
+
+  async duplicateVersion(tenantId: string, userId: string, recipeId: string, versionId: string, changeReason?: string) {
+    const source: any = await this.prisma.restaurantRecipeVersion.findFirst({ where: { id: versionId, tenantId, recipeId }, include: { components: true, steps: true } });
+    if (!source) this.fail('Versión no encontrada');
+    const last = await this.prisma.restaurantRecipeVersion.findFirst({ where: { tenantId, recipeId }, orderBy: { versionNumber: 'desc' }, select: { versionNumber: true } });
+    return this.prisma.restaurantRecipeVersion.create({ data: { tenantId, recipeId, versionNumber: (last?.versionNumber ?? 0) + 1, yieldQuantity: source.yieldQuantity, yieldUnitId: source.yieldUnitId, portions: source.portions, portionQuantity: source.portionQuantity, portionUnitId: source.portionUnitId, sellingPriceSnapshot: source.sellingPriceSnapshot, changeReason: changeReason ?? `Duplicada desde versión ${source.versionNumber}`, createdBy: userId, components: { create: source.components.map((component: any) => ({ tenantId, componentType: component.componentType, ingredientId: component.ingredientId, subRecipeId: component.subRecipeId, quantity: component.quantity, unitId: component.unitId, quantityMode: component.quantityMode, yieldPercentage: component.yieldPercentage, wastePercentage: component.wastePercentage, convertedGrossQuantity: component.convertedGrossQuantity, unitCostSnapshot: component.unitCostSnapshot, totalCostSnapshot: component.totalCostSnapshot, preparationInstructions: component.preparationInstructions, position: component.position })) }, steps: { create: source.steps.map((step: any) => ({ tenantId, stepNumber: step.stepNumber, instruction: step.instruction, imageUrl: step.imageUrl, estimatedMinutes: step.estimatedMinutes })) } }, include: { components: true, steps: true } });
+  }
+
+  async compareVersions(tenantId: string, recipeId: string, leftId: string, rightId: string) {
+    const versions: any[] = await this.prisma.restaurantRecipeVersion.findMany({ where: { tenantId, recipeId, id: { in: [leftId, rightId] } }, include: { components: { orderBy: { position: 'asc' } }, steps: { orderBy: { stepNumber: 'asc' } } } });
+    if (versions.length !== 2) this.fail('Las versiones a comparar no pertenecen a la receta');
+    const left = versions.find((version) => version.id === leftId)!;
+    const right = versions.find((version) => version.id === rightId)!;
+    return { recipeId, from: left, to: right, changes: { yieldQuantity: [String(left.yieldQuantity), String(right.yieldQuantity)], portions: [left.portions ? String(left.portions) : null, right.portions ? String(right.portions) : null], batchCost: [String(left.batchCostSnapshot), String(right.batchCostSnapshot)], portionCost: [String(left.portionCostSnapshot), String(right.portionCostSnapshot)], componentCount: [left.components.length, right.components.length], stepCount: [left.steps.length, right.steps.length], status: [left.status, right.status] } };
+  }
 }

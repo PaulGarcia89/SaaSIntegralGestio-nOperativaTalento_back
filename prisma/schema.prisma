@@ -672,6 +672,7 @@ enum RestaurantStockCountStatus {
   DRAFT
   IN_PROGRESS
   REVIEW
+  IN_REVIEW
   APPROVED
   CANCELLED
 }
@@ -6825,8 +6826,25 @@ model RestaurantGoodsReceipt {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   items RestaurantGoodsReceiptItem[]
+  history RestaurantGoodsReceiptHistory[]
   @@unique([tenantId, receiptNumber])
   @@index([tenantId, branchId, warehouseId, status])
+}
+
+model RestaurantGoodsReceiptHistory {
+  id String @id @default(uuid())
+  tenantId String
+  receiptId String
+  action String
+  statusBefore RestaurantDocumentStatus?
+  statusAfter RestaurantDocumentStatus?
+  actorId String
+  reason String?
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+  receipt RestaurantGoodsReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  @@index([tenantId, receiptId, createdAt])
 }
 
 model RestaurantGoodsReceiptItem {
@@ -6990,6 +7008,7 @@ model RestaurantConsumptionRecordItem {
   quantitySold Decimal @db.Decimal(18, 6)
   unitCostSnapshot Decimal @db.Decimal(18, 6)
   totalCost Decimal @db.Decimal(18, 6)
+  sellingPriceSnapshot Decimal @db.Decimal(18, 6) @default(0)
   salesImportRowId String?
   consumptionRecord RestaurantConsumptionRecord @relation(fields: [consumptionRecordId], references: [id], onDelete: Cascade)
   @@index([consumptionRecordId])
@@ -7003,6 +7022,7 @@ model RestaurantWasteRecord {
   wasteNumber String
   wasteDate DateTime
   reason String
+  reasonId String?
   status RestaurantDocumentStatus @default(DRAFT)
   createdBy String
   confirmedBy String?
@@ -7012,8 +7032,24 @@ model RestaurantWasteRecord {
   overrideUsed Boolean @default(false)
   overrideJustification String?
   items RestaurantWasteRecordItem[]
+  reasonCatalog RestaurantWasteReason? @relation(fields: [reasonId], references: [id])
   @@unique([tenantId, wasteNumber])
   @@index([tenantId, branchId, warehouseId, wasteDate])
+}
+
+model RestaurantWasteReason {
+  id String @id @default(uuid())
+  tenantId String
+  code String
+  name String
+  description String?
+  status RestaurantInventoryStatus @default(ACTIVE)
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  records RestaurantWasteRecord[]
+  @@unique([tenantId, code])
+  @@index([tenantId, status, name])
 }
 
 model RestaurantWasteRecordItem {
@@ -7024,6 +7060,7 @@ model RestaurantWasteRecordItem {
   unitId String
   convertedInventoryQuantity Decimal @db.Decimal(18, 6)
   unitCostSnapshot Decimal @db.Decimal(18, 6)
+  lotId String?
   notes String?
   wasteRecord RestaurantWasteRecord @relation(fields: [wasteRecordId], references: [id], onDelete: Cascade)
   @@index([wasteRecordId])
@@ -7079,6 +7116,8 @@ model RestaurantProductionOrder {
   recipeId String
   plannedQuantity Decimal @db.Decimal(18, 6)
   actualYield Decimal? @db.Decimal(18, 6)
+  lotNumber String?
+  expirationDate DateTime?
   status RestaurantProductionStatus @default(DRAFT)
   productionDate DateTime
   createdBy String
@@ -7117,8 +7156,24 @@ model RestaurantStockCount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   items RestaurantStockCountItem[]
+  history RestaurantStockCountHistory[]
   @@unique([tenantId, countNumber])
   @@index([tenantId, warehouseId, status, countedAt])
+}
+
+model RestaurantStockCountHistory {
+  id String @id @default(uuid())
+  tenantId String
+  stockCountId String
+  action String
+  statusBefore RestaurantStockCountStatus?
+  statusAfter RestaurantStockCountStatus?
+  actorId String
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+  stockCount RestaurantStockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+  @@index([tenantId, stockCountId, createdAt])
 }
 
 model RestaurantStockCountItem {
