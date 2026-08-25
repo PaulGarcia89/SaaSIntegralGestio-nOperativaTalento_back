@@ -678,6 +678,7 @@ enum SalesImportRowStatus {
   VALID
   INVALID
   DUPLICATE
+  PROCESSING
   PROCESSED
   FAILED
 }
@@ -2947,6 +2948,7 @@ model Branch {
   location                      String
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
+  inventoryStatus               RestaurantInventoryStatus     @default(ACTIVE)
   tenant                        Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   employeeBranches              EmployeeBranch[]
   vacancies                     Vacancy[]
@@ -6763,6 +6765,7 @@ model RestaurantInventorySupplier {
   status RestaurantInventoryStatus @default(ACTIVE)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@unique([tenantId, name])
   @@index([tenantId, status])
 }
 
@@ -6882,6 +6885,8 @@ model RestaurantConsumptionRecord {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   salesImportId String?
+  overrideUsed Boolean @default(false)
+  overrideJustification String?
   items RestaurantConsumptionRecordItem[]
   @@unique([tenantId, recordNumber])
   @@index([tenantId, branchId, warehouseId, consumptionDate])
@@ -6914,6 +6919,8 @@ model RestaurantWasteRecord {
   confirmedAt DateTime?
   cancelledBy String?
   cancelledAt DateTime?
+  overrideUsed Boolean @default(false)
+  overrideJustification String?
   items RestaurantWasteRecordItem[]
   @@unique([tenantId, wasteNumber])
   @@index([tenantId, branchId, warehouseId, wasteDate])
@@ -6987,6 +6994,8 @@ model RestaurantProductionOrder {
   createdBy String
   confirmedBy String?
   confirmedAt DateTime?
+  overrideUsed Boolean @default(false)
+  overrideJustification String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   items RestaurantProductionOrderItem[]
@@ -7099,6 +7108,12 @@ model RestaurantSalesImport {
   createdBy String
   processedBy String?
   processedAt DateTime?
+  jobId String?
+  processedRows Int @default(0)
+  failedRows Int @default(0)
+  cancelRequested Boolean @default(false)
+  cancelledAt DateTime?
+  errorReportStorageKey String?
   rows RestaurantSalesImportRow[]
   @@unique([tenantId, fileHash])
   @@index([tenantId, branchId, status, importDate])
@@ -7118,8 +7133,13 @@ model RestaurantSalesImportRow {
   validationErrors Json?
   rawData Json?
   processedAt DateTime?
+  idempotencyKey String
+  attempts Int @default(0)
+  lastError String?
+  consumptionId String?
   salesImport RestaurantSalesImport @relation(fields: [salesImportId], references: [id], onDelete: Cascade)
   @@unique([salesImportId, rowNumber])
+  @@unique([salesImportId, idempotencyKey])
   @@index([salesImportId, validationStatus])
   @@index([externalSaleId, externalProductCode])
 }

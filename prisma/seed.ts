@@ -48,6 +48,7 @@ const permissionCatalog = [
   'training.analytics.read', 'training.compliance.manage', 'training.reports.export',
   'training.integrations.manage',
   'inventory.read', 'inventory.manage',
+  'inventory.view', 'inventory.create', 'inventory.update', 'inventory.confirm', 'inventory.cancel', 'inventory.override',
   'asset_inventory.read', 'asset_inventory.manage',
   'restaurant_inventory.read', 'restaurant_inventory.manage',
   'inventory.view', 'inventory.ingredient.manage', 'inventory.supplier.manage',

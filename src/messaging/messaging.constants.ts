@@ -5,6 +5,7 @@ export const MESSAGE_QUEUE_NAMES = {
   DOCUMENTS: 'documents',
   TRAINING: 'training',
   TRAINING_WEBHOOK: 'training-webhook',
+  SALES_IMPORT: 'sales-import',
 } as const;
 
 export type MessageQueueName =
@@ -17,4 +18,5 @@ export const MESSAGE_QUEUE_LIST: MessageQueueName[] = [
   MESSAGE_QUEUE_NAMES.DOCUMENTS,
   MESSAGE_QUEUE_NAMES.TRAINING,
   MESSAGE_QUEUE_NAMES.TRAINING_WEBHOOK,
+  MESSAGE_QUEUE_NAMES.SALES_IMPORT,
 ];

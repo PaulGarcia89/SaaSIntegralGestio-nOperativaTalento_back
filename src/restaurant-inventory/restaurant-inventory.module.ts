@@ -6,10 +6,11 @@ import { SalesImportController } from './sales-import.controller';
 import { SalesImportService } from './sales-import.service';
 import { RestaurantReportsController } from './restaurant-reports.controller';
 import { RestaurantReportsService } from './restaurant-reports.service';
+import { RestaurantInventoryContextGuard } from './restaurant-inventory-context.guard';
 
 @Module({
   imports: [InventoryCapabilitiesModule],
   controllers: [RestaurantInventoryController, SalesImportController, RestaurantReportsController],
-  providers: [RestaurantInventoryService, SalesImportService, RestaurantReportsService],
+  providers: [RestaurantInventoryService, SalesImportService, RestaurantReportsService, RestaurantInventoryContextGuard],
 })
 export class RestaurantInventoryModule {}
