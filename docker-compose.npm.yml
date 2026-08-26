@@ -13,6 +13,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - saas-internal
 
   redis:
     image: redis:7.4-alpine
@@ -25,6 +27,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - saas-internal
 
   backend:
     build:
@@ -50,8 +54,11 @@ services:
     volumes:
       - scorm_storage:/app/storage/scorm
       - document_storage:/app/storage/documents
-    ports:
-      - "127.0.0.1:3000:3000"
+    expose:
+      - "3000"
+    networks:
+      - saas-internal
+      - proxy-net
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 15s
@@ -73,11 +80,20 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:3001:3001"
+    expose:
+      - "3001"
+    networks:
+      - saas-internal
+      - proxy-net
 
 volumes:
   postgres_data:
   redis_data:
   scorm_storage:
   document_storage:
+
+networks:
+  proxy-net:
+    external: true
+  saas-internal:
+    external: true
