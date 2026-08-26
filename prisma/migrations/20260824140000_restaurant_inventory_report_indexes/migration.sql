@@ -14,4 +14,4 @@ CREATE INDEX IF NOT EXISTS "RestaurantInventoryMovement_tenantId_movementType_oc
   ON "RestaurantInventoryMovement" ("tenantId", "movementType", "occurredAt");
 
 CREATE INDEX IF NOT EXISTS "AuditLog_tenantId_action_createdAt_idx"
-  ON "AuditLog" ("tenantId", "action", "createdAt");
+  ON "audit_logs" ("tenantId", "action", "createdAt");
