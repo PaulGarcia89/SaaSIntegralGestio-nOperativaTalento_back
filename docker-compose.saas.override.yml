@@ -38,6 +38,7 @@ services:
 
   saas-backend:
     image: ghcr.io/paulgarcia89/saas-integral-backend:latest
+    pull_policy: always
     container_name: saas-backend
     restart: unless-stopped
     environment:
@@ -73,6 +74,7 @@ services:
 
   saas-frontend:
     image: ghcr.io/paulgarcia89/saas-integral-frontend:latest
+    pull_policy: always
     container_name: saas-frontend
     restart: unless-stopped
     environment:
