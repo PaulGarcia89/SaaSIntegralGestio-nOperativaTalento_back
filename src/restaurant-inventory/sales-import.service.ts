@@ -62,6 +62,82 @@ export class SalesImportService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.restaurantSalesImport.findFirst({ where: { id, tenantId }, include: { rows: { orderBy: { rowNumber: 'asc' } } } });
   }
 
+  private async importFile(tenantId: string, id: string) {
+    const imp = await this.prisma.restaurantSalesImport.findFirst({ where: { id, tenantId }, select: { fileName: true, fileStorageKey: true } });
+    if (!imp) this.fail('Importación no encontrada');
+    const baseDir = process.env.SALES_IMPORT_STORAGE_DIR ?? join('/tmp', 'restaurant-sales-imports');
+    const filePath = join(baseDir, imp!.fileStorageKey);
+    return { imp, rows: this.parse(await fs.readFile(filePath), imp!.fileName) };
+  }
+
+  async columns(tenantId: string, id: string) {
+    const { rows } = await this.importFile(tenantId, id);
+    return { headers: rows[0] ?? [], normalizedHeaders: (rows[0] ?? []).map((header) => this.normalize(header)), totalRows: Math.max(0, rows.length - 1) };
+  }
+
+  async configure(tenantId: string, _userId: string, id: string, dto: any) {
+    const imp = await this.prisma.restaurantSalesImport.findFirst({ where: { id, tenantId } });
+    if (!imp) this.fail('Importación no encontrada');
+    const { headers } = await this.columns(tenantId, id);
+    const mapping = dto?.columns ?? dto;
+    const required = ['sale', 'code', 'quantity', 'date'];
+    if (!mapping || required.some((key) => typeof mapping[key] !== 'string' && !Number.isInteger(mapping[key]))) this.fail('El mapeo requiere sale, code, quantity y date');
+    const indexes = Object.fromEntries(Object.entries(mapping).map(([key, value]) => [key, typeof value === 'number' ? value : headers.findIndex((header) => this.normalize(header) === this.normalize(value))]));
+    if (required.some((key) => Number(indexes[key]) < 0 || Number(indexes[key]) >= headers.length)) this.fail('El mapeo contiene columnas inexistentes');
+    const rows: any[] = await this.prisma.restaurantSalesImportRow.findMany({ where: { salesImportId: id }, orderBy: { rowNumber: 'asc' } });
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const raw = Array.isArray(row.rawData) ? row.rawData : [];
+      const externalSaleId = String(raw[Number(indexes.sale)] ?? '').trim();
+      const externalProductCode = String(raw[Number(indexes.code)] ?? '').trim();
+      const externalProductName = indexes.name === undefined || Number(indexes.name) < 0 ? null : String(raw[Number(indexes.name)] ?? '').trim();
+      const quantity = Number(String(raw[Number(indexes.quantity)] ?? '').replace(',', '.'));
+      const soldAt = this.date(raw[Number(indexes.date)]);
+      const duplicateKey = `${externalSaleId}|${externalProductCode}|${soldAt?.toISOString() ?? ''}`;
+      const errors: string[] = [];
+      if (!externalSaleId) errors.push('ID de venta requerido');
+      if (!externalProductCode) errors.push('Código de producto requerido');
+      if (!Number.isFinite(quantity) || quantity <= 0) errors.push('Cantidad inválida');
+      if (!soldAt) errors.push('Fecha inválida');
+      if (seen.has(duplicateKey)) errors.push('Venta duplicada');
+      seen.add(duplicateKey);
+      const rowKey = createHash('sha256').update(`${externalSaleId}|${externalProductCode}|${quantity}|${soldAt?.toISOString() ?? ''}`).digest('hex');
+      await this.prisma.restaurantSalesImportRow.update({ where: { id: row.id }, data: { externalSaleId, externalProductCode, externalProductName, quantity: Number.isFinite(quantity) ? quantity : 0, soldAt: soldAt ?? new Date(0), idempotencyKey: rowKey, validationStatus: errors.length ? (errors.includes('Venta duplicada') ? 'DUPLICATE' : 'INVALID') : 'VALID', validationErrors: errors, recipeId: null } });
+    }
+    const validRows = await this.prisma.restaurantSalesImportRow.count({ where: { salesImportId: id, validationStatus: 'VALID' } });
+    const invalidRows = await this.prisma.restaurantSalesImportRow.count({ where: { salesImportId: id, validationStatus: 'INVALID' } });
+    const duplicateRows = await this.prisma.restaurantSalesImportRow.count({ where: { salesImportId: id, validationStatus: 'DUPLICATE' } });
+    return this.prisma.restaurantSalesImport.update({ where: { id }, data: { columnMap: indexes as any, validRows, invalidRows, duplicateRows, status: validRows ? 'REQUIRES_MAPPING' : 'FAILED' }, include: { rows: { orderBy: { rowNumber: 'asc' } } } });
+  }
+
+  async mappings(tenantId: string, id?: string, branchId?: string) {
+    const where: any = { tenantId, ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}) };
+    if (id) {
+      const imp = await this.prisma.restaurantSalesImport.findFirst({ where: { id, tenantId }, select: { branchId: true } });
+      if (!imp) this.fail('Importación no encontrada');
+      where.OR = [{ branchId: imp!.branchId }, { branchId: null }];
+    }
+    return this.prisma.restaurantExternalProductMapping.findMany({ where, orderBy: [{ branchId: 'desc' }, { externalProductCode: 'asc' }] });
+  }
+
+  async preview(tenantId: string, id: string) {
+    const imp = await this.summary(tenantId, id);
+    if (!imp) this.fail('Importación no encontrada');
+    if (!['READY', 'REQUIRES_MAPPING'].includes(imp!.status)) this.fail('La importación no está lista para vista previa');
+    const rows = imp!.rows.filter((row) => row.validationStatus === 'VALID' && row.recipeId);
+    const grouped = new Map<string, number>();
+    for (const row of rows) grouped.set(row.recipeId!, (grouped.get(row.recipeId!) ?? 0) + Number(row.quantity));
+    const stock = await this.inventory.previewConsumption(tenantId, { branchId: imp!.branchId, warehouseId: imp!.warehouseId, consumptionDate: new Date().toISOString(), shift: 'OTHER', items: [...grouped.entries()].map(([recipeId, quantitySold]) => ({ recipeId, quantitySold })) } as any);
+    return { importId: id, rows: rows.map((row) => ({ rowNumber: row.rowNumber, productCode: row.externalProductCode, recipeId: row.recipeId, quantity: Number(row.quantity), soldAt: row.soldAt })), stock, canProcess: rows.length > 0 && stock.ingredients?.every((item: any) => item.shortageQuantity <= 0) };
+  }
+
+  async history(tenantId: string, filters: { branchId?: string; page?: number; pageSize?: number } = {}) {
+    const page = Math.max(1, Number(filters.page ?? 1)); const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize ?? 25)));
+    const where = { tenantId, ...(filters.branchId ? { branchId: filters.branchId } : {}) };
+    const [items, total] = await Promise.all([this.prisma.restaurantSalesImport.findMany({ where, orderBy: { importDate: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }), this.prisma.restaurantSalesImport.count({ where })]);
+    return { items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
+  }
+
   async progress(tenantId: string, id: string) {
     const imp = await this.summary(tenantId, id);
     if (!imp) this.fail('Importación no encontrada');
@@ -73,6 +149,12 @@ export class SalesImportService implements OnModuleInit, OnModuleDestroy {
     const imp = await this.summary(tenantId, id);
     if (!imp) this.fail('Importación no encontrada');
     return imp!.rows.filter((row) => ['INVALID', 'DUPLICATE', 'FAILED'].includes(row.validationStatus)).map((row) => ({ row: row.rowNumber, externalSaleId: row.externalSaleId, externalProductCode: row.externalProductCode, status: row.validationStatus, errors: row.validationErrors, lastError: row.lastError, attempts: row.attempts }));
+  }
+
+  async errorsCsv(tenantId: string, id: string) {
+    const rows = await this.errors(tenantId, id);
+    const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    return ['row,external_sale_id,external_product_code,status,errors', ...rows.map((row: any) => [row.row, row.externalSaleId, row.externalProductCode, row.status, (row.errors ?? []).join(' | ')].map(escape).join(','))].join('\n');
   }
 
   async mapProduct(tenantId: string, _userId: string, dto: any) {

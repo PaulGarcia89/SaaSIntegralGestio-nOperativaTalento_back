@@ -15,6 +15,44 @@ export class RestaurantReportsService {
   private period(f: RestaurantReportFilters) { if (!f.from && !f.to) return undefined; const from = f.from ? new Date(f.from) : undefined; const to = f.to ? new Date(f.to) : undefined; if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from > to)) this.bad('Rango de fechas inválido'); return { gte: from, lte: to }; }
   private page(f: RestaurantReportFilters) { const page = Math.max(1, Number(f.page) || 1); const pageSize = Math.min(200, Math.max(1, Number(f.pageSize) || 50)); return { page, pageSize }; }
   private flatten(row: any) { const result: Record<string, string | number | null> = {}; for (const [key, value] of Object.entries(row ?? {})) { if (value instanceof Date) result[key] = value.toISOString(); else if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) result[key] = value as any; } return result; }
+  async variance(tenantId: string, f: { branchId?: string; warehouseId?: string; ingredientId?: string; categoryId?: string; periodStart?: string; periodEnd?: string; page?: number; pageSize?: number; sortBy?: string; sortOrder?: 'asc' | 'desc' }) {
+    const start = f.periodStart ? new Date(f.periodStart) : undefined;
+    const end = f.periodEnd ? new Date(f.periodEnd) : undefined;
+    if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime())) || (start && end && start > end)) this.bad('Rango de fechas inválido');
+    const ingredientWhere: any = { tenantId, ...(f.ingredientId ? { id: f.ingredientId } : {}), ...(f.categoryId ? { categoryId: f.categoryId } : {}) };
+    const scope: any = { tenantId, ...(f.branchId ? { branchId: f.branchId } : {}), ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}) };
+    const counts = await this.prisma.restaurantStockCount.findMany({
+      where: { ...scope, status: 'APPROVED', ...(start || end ? { countedAt: { gte: start, lte: end } } : {}) },
+      orderBy: { countedAt: 'desc' },
+      include: { items: true },
+    });
+    const latest = new Map<string, any>();
+    for (const count of counts) for (const item of count.items) if (!latest.has(item.ingredientId)) latest.set(item.ingredientId, { count, item });
+    const ingredients = await this.prisma.restaurantIngredient.findMany({ where: ingredientWhere, select: { id: true, sku: true, name: true, categoryId: true, inventoryUnitId: true } });
+    const selected = ingredients.filter((ingredient) => latest.has(ingredient.id));
+    const movements = await this.prisma.restaurantInventoryMovement.findMany({
+      where: { ...scope, ingredientId: { in: selected.map((ingredient) => ingredient.id) }, ...(end ? { occurredAt: { lte: end } } : {}) },
+      orderBy: { occurredAt: 'asc' },
+    });
+    const balances = await this.prisma.restaurantInventoryBalance.findMany({ where: { ...scope, ingredientId: { in: selected.map((ingredient) => ingredient.id) } } });
+    const users = await this.prisma.user.findMany({ where: { tenantId, id: { in: [...new Set([...latest.values()].map((row) => row.count.createdBy))] } }, select: { id: true, firstName: true, lastName: true, email: true } });
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const rows = selected.map((ingredient) => {
+      const snapshot = latest.get(ingredient.id);
+      const countAt = snapshot.count.countedAt as Date;
+      const theoretical = movements.filter((movement) => movement.ingredientId === ingredient.id && new Date(movement.occurredAt) <= countAt).reduce((sum, movement) => sum + (movement.direction === 'IN' ? Number(movement.quantity) : -Number(movement.quantity)), 0);
+      const counted = Number(snapshot.item.countedQuantity);
+      const averageCost = Number(balances.find((balance) => balance.ingredientId === ingredient.id)?.averageCost ?? snapshot.item.averageCost ?? 0);
+      const absolute = counted - theoretical;
+      const percentage = theoretical === 0 ? (absolute === 0 ? 0 : null) : (absolute / Math.abs(theoretical)) * 100;
+      const user = userMap.get(snapshot.count.createdBy);
+      return { ingredient: { id: ingredient.id, sku: ingredient.sku, name: ingredient.name, categoryId: ingredient.categoryId, inventoryUnitId: ingredient.inventoryUnitId }, theoreticalQuantity: Number(theoretical.toFixed(6)), countedQuantity: Number(counted.toFixed(6)), absoluteVariance: Number(absolute.toFixed(6)), percentageVariance: percentage === null ? null : Number(percentage.toFixed(4)), theoreticalCost: Number((theoretical * averageCost).toFixed(2)), realCost: Number((counted * averageCost).toFixed(2)), monetaryDifference: Number((absolute * averageCost).toFixed(2)), lastCount: { id: snapshot.count.id, number: snapshot.count.countNumber, countedAt: countAt, status: snapshot.count.status }, responsibleUser: user ? { id: user.id, name: `${user.firstName} ${user.lastName}`.trim(), email: user.email } : { id: snapshot.count.createdBy, name: null, email: null }, reviewStatus: Math.abs(percentage ?? 0) > 5 ? 'REVIEW_REQUIRED' : 'WITHIN_TOLERANCE' };
+    });
+    const sortBy = f.sortBy ?? 'ingredient.name'; const desc = f.sortOrder === 'desc';
+    rows.sort((a: any, b: any) => { const value = (row: any) => sortBy === 'ingredient.name' ? row.ingredient.name : row[sortBy] ?? ''; const left = value(a); const right = value(b); return (typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right), undefined, { numeric: true })) * (desc ? -1 : 1); });
+    const page = Math.max(1, Number(f.page) || 1); const pageSize = Math.min(200, Math.max(1, Number(f.pageSize) || 50)); const total = rows.length;
+    return { rows: rows.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)), filters: { branchId: f.branchId ?? null, warehouseId: f.warehouseId ?? null, ingredientId: f.ingredientId ?? null, categoryId: f.categoryId ?? null, periodStart: start?.toISOString() ?? null, periodEnd: end?.toISOString() ?? null } };
+  }
   async advancedDashboard(tenantId: string, f: RestaurantReportFilters) {
     const scope = this.scope(tenantId, f);
     const period = this.period(f);

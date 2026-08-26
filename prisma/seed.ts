@@ -62,6 +62,23 @@ const permissionCatalog = [
   'inventory.sales_import.create', 'inventory.sales_import.validate', 'inventory.sales_import.map',
   'inventory.sales_import.process', 'inventory.sales_import.reverse', 'inventory.sales_import.view',
   'inventory.report.export',
+  'restaurant_inventory.receipts.create', 'restaurant_inventory.receipts.confirm',
+  'restaurant_inventory.recipes.manage', 'restaurant_inventory.operations.create',
+  'restaurant_inventory.operations.confirm', 'restaurant_inventory.counts.approve',
+  'restaurant_inventory.adjustments.create', 'restaurant_inventory.transfers.manage',
+  'restaurant_inventory.settings.manage',
+  'restaurant_inventory.purchase_orders.create', 'restaurant_inventory.purchase_orders.update',
+  'restaurant_inventory.purchase_orders.submit', 'restaurant_inventory.purchase_orders.approve',
+  'restaurant_inventory.purchase_orders.reject', 'restaurant_inventory.purchase_orders.cancel',
+  'restaurant_inventory.purchase_orders.receive', 'restaurant_inventory.price_history.view',
+  'restaurant_inventory.purchase_suggestions.view', 'restaurant_inventory.invoices.upload',
+  'restaurant_inventory.invoices.process', 'restaurant_inventory.invoices.reconcile',
+  'restaurant_inventory.invoices.approve',
+  'restaurant_inventory.variance.view', 'restaurant_inventory.expiry_alerts.view',
+  'restaurant_inventory.stock_counts.create', 'restaurant_inventory.stock_counts.schedule',
+  'restaurant_inventory.shrinkage.view', 'restaurant_inventory.audit.view',
+  'restaurant_inventory.audit.read',
+  'restaurant_inventory.commercial.view', 'restaurant_inventory.commissary.manage', 'restaurant_inventory.budgets.manage',
   'productivity.view', 'productivity.manage',
   'users.read', 'users.create', 'users.update', 'users.delete',
   'employees.read', 'employees.create', 'employees.update', 'employees.delete',
@@ -111,6 +128,11 @@ const supervisorPermissionCatalog = permissionCatalog.filter((permission) =>
   permission === 'applications.read' ||
   permission === 'training.read' ||
   permission === 'inventory.read' ||
+  permission === 'restaurant_inventory.expiry_alerts.view' ||
+  permission === 'restaurant_inventory.variance.view' ||
+  permission === 'restaurant_inventory.shrinkage.view' ||
+  permission === 'restaurant_inventory.audit.read' ||
+  permission === 'restaurant_inventory.commercial.view' ||
   permission === 'asset_inventory.read' ||
   permission === 'notifications.read_own' ||
   permission === 'notifications.update_own',

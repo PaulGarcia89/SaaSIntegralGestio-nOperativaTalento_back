@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { ModuleCode } from '@prisma/client';
 import { RequireModule } from '../common/decorators/module-access.decorator';
@@ -12,12 +12,13 @@ import { TenantGuard } from '../common/guards/tenant.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
 import { CreateSignaturePackageDto, CreateSignatureTemplateDto, SubmitSignatureConsentDto } from './dto/signatures.dto';
 import { SignaturesService } from './signatures.service';
+import { DocuSealService } from './docuseal.service';
 
 @Controller('signatures')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
 @RequireModule(ModuleCode.ONBOARDING)
 export class SignaturesController {
-  constructor(private readonly service: SignaturesService) {}
+  constructor(private readonly service: SignaturesService, private readonly docuSeal: DocuSealService) {}
 
   @Get('providers') @RequirePermissions('applications.read')
   providers() { return this.service.providersOverview(); }
@@ -51,6 +52,15 @@ export class SignaturesController {
     request.auditAction = 'SIGNATURE_REMINDER_SENT';
     return this.service.remind(request.tenant!.id, request.user.sub, id, request.requestId);
   }
+
+  @Get('docuseal/templates') @RequirePermissions('employees.read')
+  docuSealTemplates() { return { configured: this.docuSeal.isConfigured(), templates: this.docuSeal.templates() }; }
+
+  @Post('docuseal/submissions') @RequirePermissions('employees.update')
+  docuSealSubmission(@Req() request: RequestWithUser, @Body() body: { employeeId?: string; templateKey?: string }) {
+    if (!body.employeeId || !body.templateKey) throw new BadRequestException('employeeId y templateKey son obligatorios');
+    return this.docuSeal.createEmployeeSubmission(request.tenant!.id, request.user.sub, body.employeeId, body.templateKey);
+  }
 }
 
 @Controller('public/signatures')
@@ -65,5 +75,16 @@ export class PublicSignaturesController {
     const forwarded = request.headers['x-forwarded-for'];
     const ip = typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : request.ip;
     return this.service.sign(token, dto, { ip, userAgent: request.headers['user-agent'], requestId: request.headers['x-request-id'] as string | undefined });
+  }
+}
+
+@Controller('webhooks/docuseal')
+export class DocuSealWebhookController {
+  constructor(private readonly docuSeal: DocuSealService) {}
+
+  @Post()
+  webhook(@Body() payload: { event_type?: string; data?: Record<string, unknown> }, @Headers('x-docuseal-webhook-secret') headerSecret?: string, @Query('secret') querySecret?: string) {
+    this.docuSeal.assertWebhookSecret(headerSecret ?? querySecret);
+    return this.docuSeal.handleWebhook(payload as never);
   }
 }

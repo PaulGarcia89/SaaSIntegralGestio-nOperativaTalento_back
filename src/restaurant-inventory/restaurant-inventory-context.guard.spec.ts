@@ -31,4 +31,12 @@ describe('RestaurantInventoryContextGuard', () => {
       user: { scope: AccessScope.BRANCH, allowedBranchIds: ['branch-1'], isGlobalContext: false },
     }))).resolves.toBe(true);
   });
+
+  it('rejects a document whose warehouse belongs to another branch', async () => {
+    const document = { findFirst: jest.fn().mockResolvedValue({ branchId: 'branch-1', warehouseId: 'warehouse-2' }) };
+    const guarded = new RestaurantInventoryContextGuard({ branch, restaurantInventoryWarehouse: warehouse, restaurantGoodsReceipt: document } as any);
+    branch.findFirst.mockResolvedValue({ id: 'branch-1' });
+    warehouse.findFirst.mockResolvedValue({ id: 'warehouse-2', branchId: 'branch-2' });
+    await expect(guarded.canActivate(context({ params: { id: 'receipt-1' }, route: { path: '/restaurant-inventory/receipts/:id/confirm' }, query: {}, body: {}, tenant: { id: 'tenant-1' }, user: { scope: AccessScope.TENANT, allowedBranchIds: ['branch-1'], isGlobalContext: false } }))).rejects.toMatchObject({ response: { code: ErrorCode.BRANCH_ACCESS_DENIED } });
+  });
 });

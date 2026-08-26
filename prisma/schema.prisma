@@ -601,39 +601,47 @@ enum RestaurantInventoryUnitType {
   VOLUME
   UNIT
 }
+
 enum RestaurantInventoryStatus {
   ACTIVE
   INACTIVE
   ARCHIVED
 }
+
 enum RestaurantDocumentStatus {
   DRAFT
   CONFIRMED
   CANCELLED
 }
+
 enum RestaurantRecipeStatus {
   DRAFT
   ACTIVE
   ARCHIVED
 }
+
 enum RestaurantRecipeType {
   MENU_ITEM
   PREPARATION
   YIELD
 }
+
 enum RestaurantRecipeVersionStatus {
   DRAFT
   PUBLISHED
   SUPERSEDED
 }
+
 enum RestaurantRecipeComponentType {
   INGREDIENT
   SUB_RECIPE
 }
+
 enum RestaurantRecipeQuantityMode {
   GROSS
   USABLE
 }
+
 enum RestaurantShift {
   BREAKFAST
   LUNCH
@@ -641,6 +649,7 @@ enum RestaurantShift {
   NIGHT
   OTHER
 }
+
 enum RestaurantMovementType {
   GOODS_RECEIPT
   CONSUMPTION
@@ -648,26 +657,31 @@ enum RestaurantMovementType {
   REVERSAL
   MANUAL_ADJUSTMENT
 }
+
 enum RestaurantMovementDirection {
   IN
   OUT
 }
+
 enum RestaurantStockPolicy {
   BLOCK
   WARN
   ALLOW_NEGATIVE
 }
+
 enum RestaurantLotStatus {
   ACTIVE
   DEPLETED
   EXPIRED
   BLOCKED
 }
+
 enum RestaurantProductionStatus {
   DRAFT
   CONFIRMED
   CANCELLED
 }
+
 enum RestaurantStockCountStatus {
   DRAFT
   IN_PROGRESS
@@ -676,12 +690,67 @@ enum RestaurantStockCountStatus {
   APPROVED
   CANCELLED
 }
+
+enum RestaurantStockCountKind {
+  FULL
+  PARTIAL
+  SCHEDULED
+}
+
+enum RestaurantStockCountRecurrence {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum RestaurantStockCountScheduleStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum RestaurantShrinkageAlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  FALSE_POSITIVE
+}
+
+enum RestaurantShrinkageAlertType {
+  WASTE
+  COUNT_VARIANCE
+  UNEXPLAINED_LOSS
+  ADJUSTMENT
+}
+
+enum RestaurantCommercialBudgetStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum RestaurantCommercialBudgetOveragePolicy {
+  BLOCK
+  WARN
+  REQUIRE_APPROVAL
+}
+
+enum RestaurantCommissaryStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum RestaurantTransferStatus {
   DRAFT
   SENT
   RECEIVED
   CANCELLED
 }
+
 enum SalesImportStatus {
   UPLOADED
   VALIDATING
@@ -693,6 +762,7 @@ enum SalesImportStatus {
   FAILED
   CANCELLED
 }
+
 enum SalesImportRowStatus {
   VALID
   INVALID
@@ -701,9 +771,53 @@ enum SalesImportRowStatus {
   PROCESSED
   FAILED
 }
+
 enum ExternalMappingStatus {
   ACTIVE
   INACTIVE
+}
+
+enum RestaurantPurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  REJECTED
+  CANCELLED
+}
+
+enum RestaurantPurchaseDifferenceType {
+  QUANTITY_SHORTAGE
+  QUANTITY_EXCESS
+  PRICE_INCREASE
+  PRICE_DECREASE
+  UNIT_MISMATCH
+  UNEXPECTED_ITEM
+  INVOICE_QTY_MISMATCH
+  INVOICE_PRICE_MISMATCH
+  INVOICE_TOTAL_MISMATCH
+  SUPPLIER_MISMATCH
+  PURCHASE_ORDER_MISMATCH
+  UNMATCHED_LINE
+}
+
+enum RestaurantPurchaseDifferenceStatus {
+  WITHIN_TOLERANCE
+  REVIEW_REQUIRED
+  APPROVED
+  REJECTED
+}
+
+enum RestaurantInvoiceStatus {
+  UPLOADED
+  PROCESSING
+  REVIEW_REQUIRED
+  MATCHED
+  APPROVED
+  REJECTED
+  FAILED
 }
 
 enum NotificationType {
@@ -1860,8 +1974,8 @@ model PublicApplicationDraft {
   vacancy            Vacancy           @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
   candidateAccount   CandidateAccount? @relation(fields: [candidateAccountId], references: [id], onDelete: Cascade)
 
-  @@index([vacancyId, expiresAt])
   @@unique([candidateAccountId, vacancyId])
+  @@index([vacancyId, expiresAt])
 }
 
 model PublicRequestRateLimit {
@@ -2967,7 +3081,7 @@ model Branch {
   location                      String
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
-  inventoryStatus               RestaurantInventoryStatus     @default(ACTIVE)
+  inventoryStatus               RestaurantInventoryStatus      @default(ACTIVE)
   tenant                        Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   employeeBranches              EmployeeBranch[]
   vacancies                     Vacancy[]
@@ -6734,555 +6848,929 @@ model TrainingForecastSnapshot {
 }
 
 model RestaurantInventoryCategory {
-  id String @id @default(uuid())
-  tenantId String
-  name String
+  id          String                    @id @default(uuid())
+  tenantId    String
+  name        String
   description String?
-  status RestaurantInventoryStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status      RestaurantInventoryStatus @default(ACTIVE)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
   @@unique([tenantId, name])
   @@index([tenantId, status])
 }
 
 model RestaurantInventoryUnit {
-  id String @id @default(uuid())
-  tenantId String?
-  name String
-  abbreviation String
-  type RestaurantInventoryUnitType
-  baseUnitId String?
-  conversionFactor Decimal @db.Decimal(18, 6)
-  decimalPrecision Int @default(3)
-  status RestaurantInventoryStatus @default(ACTIVE)
+  id               String                      @id @default(uuid())
+  tenantId         String?
+  name             String
+  abbreviation     String
+  type             RestaurantInventoryUnitType
+  baseUnitId       String?
+  conversionFactor Decimal                     @db.Decimal(18, 6)
+  decimalPrecision Int                         @default(3)
+  status           RestaurantInventoryStatus   @default(ACTIVE)
+
   @@unique([tenantId, abbreviation])
   @@index([tenantId, type])
 }
 
 model RestaurantInventoryWarehouse {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  name String
-  code String
-  status RestaurantInventoryStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String                    @id @default(uuid())
+  tenantId  String
+  branchId  String
+  name      String
+  code      String
+  status    RestaurantInventoryStatus @default(ACTIVE)
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+
   @@unique([tenantId, code])
   @@index([tenantId, branchId, status])
 }
 
 model RestaurantInventorySupplier {
-  id String @id @default(uuid())
-  tenantId String
-  name String
-  contactName String?
-  email String?
-  phone String?
-  address String?
-  taxId String?
-  status RestaurantInventoryStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String                    @id @default(uuid())
+  tenantId     String
+  name         String
+  contactName  String?
+  email        String?
+  phone        String?
+  address      String?
+  taxId        String?
+  leadTimeDays Int                       @default(1)
+  status       RestaurantInventoryStatus @default(ACTIVE)
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+
   @@unique([tenantId, name])
   @@index([tenantId, status])
 }
 
 model RestaurantIngredient {
-  id String @id @default(uuid())
-  tenantId String
-  categoryId String?
-  sku String
-  name String
-  description String?
-  inventoryUnitId String
-  purchaseUnitId String
-  purchaseConversionFactor Decimal @db.Decimal(18, 6)
-  minimumStock Decimal @db.Decimal(18, 6) @default(0)
-  currentAverageCost Decimal @db.Decimal(18, 6) @default(0)
-  status RestaurantInventoryStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                       String                    @id @default(uuid())
+  tenantId                 String
+  categoryId               String?
+  sku                      String
+  name                     String
+  description              String?
+  inventoryUnitId          String
+  purchaseUnitId           String
+  purchaseConversionFactor Decimal                   @db.Decimal(18, 6)
+  minimumStock             Decimal                   @default(0) @db.Decimal(18, 6)
+  parLevel                 Decimal                   @default(0) @db.Decimal(18, 6)
+  targetCoverageDays       Decimal                   @default(7) @db.Decimal(10, 2)
+  currentAverageCost       Decimal                   @default(0) @db.Decimal(18, 6)
+  status                   RestaurantInventoryStatus @default(ACTIVE)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+
   @@unique([tenantId, sku])
   @@index([tenantId, status, name])
+  @@index([tenantId, categoryId, status])
 }
 
 model RestaurantGoodsReceipt {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  supplierId String?
-  receiptNumber String
+  id                    String                          @id @default(uuid())
+  tenantId              String
+  branchId              String
+  warehouseId           String
+  supplierId            String?
+  receiptNumber         String
   supplierInvoiceNumber String?
-  receivedAt DateTime
-  status RestaurantDocumentStatus @default(DRAFT)
-  notes String?
-  createdBy String
-  confirmedBy String?
-  confirmedAt DateTime?
-  cancelledBy String?
-  cancelledAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  items RestaurantGoodsReceiptItem[]
-  history RestaurantGoodsReceiptHistory[]
+  receivedAt            DateTime
+  status                RestaurantDocumentStatus        @default(DRAFT)
+  notes                 String?
+  purchaseOrderId       String?
+  createdBy             String
+  confirmedBy           String?
+  confirmedAt           DateTime?
+  cancelledBy           String?
+  cancelledAt           DateTime?
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
+  items                 RestaurantGoodsReceiptItem[]
+  history               RestaurantGoodsReceiptHistory[]
+
   @@unique([tenantId, receiptNumber])
   @@index([tenantId, branchId, warehouseId, status])
 }
 
 model RestaurantGoodsReceiptHistory {
-  id String @id @default(uuid())
-  tenantId String
-  receiptId String
-  action String
+  id           String                    @id @default(uuid())
+  tenantId     String
+  receiptId    String
+  action       String
   statusBefore RestaurantDocumentStatus?
-  statusAfter RestaurantDocumentStatus?
-  actorId String
-  reason String?
-  before Json?
-  after Json?
-  createdAt DateTime @default(now())
-  receipt RestaurantGoodsReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  statusAfter  RestaurantDocumentStatus?
+  actorId      String
+  reason       String?
+  before       Json?
+  after        Json?
+  createdAt    DateTime                  @default(now())
+  receipt      RestaurantGoodsReceipt    @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
   @@index([tenantId, receiptId, createdAt])
 }
 
 model RestaurantGoodsReceiptItem {
-  id String @id @default(uuid())
-  receiptId String
-  ingredientId String
-  purchaseQuantity Decimal @db.Decimal(18, 6)
-  purchaseUnitId String
-  conversionFactor Decimal @db.Decimal(18, 6)
-  inventoryQuantity Decimal @db.Decimal(18, 6)
-  unitCost Decimal @db.Decimal(18, 6)
-  totalCost Decimal @db.Decimal(18, 6)
-  lotNumber String?
-  expirationDate DateTime?
-  receipt RestaurantGoodsReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  id                  String                 @id @default(uuid())
+  receiptId           String
+  ingredientId        String
+  purchaseQuantity    Decimal                @db.Decimal(18, 6)
+  purchaseUnitId      String
+  conversionFactor    Decimal                @db.Decimal(18, 6)
+  inventoryQuantity   Decimal                @db.Decimal(18, 6)
+  unitCost            Decimal                @db.Decimal(18, 6)
+  totalCost           Decimal                @db.Decimal(18, 6)
+  lotNumber           String?
+  expirationDate      DateTime?
+  purchaseOrderLineId String?
+  receipt             RestaurantGoodsReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
   @@index([receiptId])
   @@index([ingredientId])
 }
 
+model RestaurantPurchaseOrder {
+  id          String                        @id @default(uuid())
+  tenantId    String
+  branchId    String
+  warehouseId String
+  supplierId  String
+  code        String
+  currency    String                        @default("USD")
+  expectedAt  DateTime?
+  notes       String?
+  totalAmount Decimal                       @default(0) @db.Decimal(18, 6)
+  status      RestaurantPurchaseOrderStatus @default(DRAFT)
+  createdBy   String
+  submittedBy String?
+  submittedAt DateTime?
+  approvedBy  String?
+  approvedAt  DateTime?
+  rejectedBy  String?
+  rejectedAt  DateTime?
+  cancelledBy String?
+  cancelledAt DateTime?
+  receivedAt  DateTime?
+  createdAt   DateTime                      @default(now())
+  updatedAt   DateTime                      @updatedAt
+  lines       RestaurantPurchaseOrderLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, branchId, warehouseId, status])
+}
+
+model RestaurantPurchaseOrderLine {
+  id               String                  @id @default(uuid())
+  purchaseOrderId  String
+  ingredientId     String
+  unitId           String
+  quantity         Decimal                 @db.Decimal(18, 6)
+  unitCost         Decimal                 @db.Decimal(18, 6)
+  receivedQuantity Decimal                 @default(0) @db.Decimal(18, 6)
+  totalAmount      Decimal                 @db.Decimal(18, 6)
+  purchaseOrder    RestaurantPurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@index([ingredientId])
+}
+
+model RestaurantPurchaseOrderDifference {
+  id                        String                             @id @default(uuid())
+  tenantId                  String
+  purchaseOrderId           String
+  purchaseOrderLineId       String?
+  receiptId                 String?
+  differenceType            RestaurantPurchaseDifferenceType
+  orderedQuantity           Decimal                            @db.Decimal(18, 6)
+  receivedQuantity          Decimal                            @db.Decimal(18, 6)
+  orderedUnitCost           Decimal                            @db.Decimal(18, 6)
+  receivedUnitCost          Decimal                            @db.Decimal(18, 6)
+  quantityDifference        Decimal                            @db.Decimal(18, 6)
+  priceDifference           Decimal                            @db.Decimal(18, 6)
+  quantityDifferencePercent Decimal                            @db.Decimal(10, 4)
+  priceDifferencePercent    Decimal                            @db.Decimal(10, 4)
+  tolerancePercent          Decimal                            @default(0) @db.Decimal(10, 4)
+  status                    RestaurantPurchaseDifferenceStatus @default(REVIEW_REQUIRED)
+  reason                    String?
+  approvedBy                String?
+  approvedAt                DateTime?
+  rejectedBy                String?
+  rejectedAt                DateTime?
+  createdAt                 DateTime                           @default(now())
+
+  @@index([tenantId, purchaseOrderId, status])
+}
+
+model RestaurantPurchasePriceHistory {
+  id                String   @id @default(uuid())
+  tenantId          String
+  branchId          String?
+  warehouseId       String?
+  ingredientId      String
+  supplierId        String?
+  unitId            String
+  purchaseUnitCost  Decimal  @db.Decimal(18, 6)
+  inventoryUnitCost Decimal  @db.Decimal(18, 6)
+  quantity          Decimal  @db.Decimal(18, 6)
+  sourceType        String
+  sourceId          String
+  purchasedAt       DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([tenantId, ingredientId, purchasedAt])
+  @@index([tenantId, supplierId, purchasedAt])
+}
+
+model RestaurantCommercialBudget {
+  id              String                          @id @default(uuid())
+  tenantId        String
+  branchId        String
+  warehouseId     String?
+  categoryId      String?
+  supplierId      String?
+  code            String
+  periodStart     DateTime
+  periodEnd       DateTime
+  budgetAmount    Decimal                         @db.Decimal(18, 6)
+  committedAmount Decimal                         @default(0) @db.Decimal(18, 6)
+  receivedAmount  Decimal                         @default(0) @db.Decimal(18, 6)
+  overagePolicy   RestaurantCommercialBudgetOveragePolicy @default(BLOCK)
+  reason          String?
+  status          RestaurantCommercialBudgetStatus @default(DRAFT)
+  notes           String?
+  createdBy       String
+  approvedBy      String?
+  approvedAt      DateTime?
+  closedBy        String?
+  closedAt        DateTime?
+  cancelledBy     String?
+  cancelledAt     DateTime?
+  createdAt       DateTime                        @default(now())
+  updatedAt       DateTime                        @updatedAt
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, branchId, warehouseId, categoryId, supplierId, periodStart, periodEnd])
+  @@index([tenantId, branchId, warehouseId, periodStart, periodEnd, status])
+  @@index([tenantId, categoryId, supplierId, periodStart, periodEnd])
+}
+
+model RestaurantCommissary {
+  id                  String                    @id @default(uuid())
+  tenantId            String
+  name                String
+  code                String
+  centralBranchId     String?
+  centralWarehouseId  String?
+  productionCapacity  Decimal                   @db.Decimal(18, 6)
+  productionCalendar  Json?
+  status              RestaurantCommissaryStatus @default(INACTIVE)
+  createdBy           String
+  updatedBy           String?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  servedBranches      RestaurantCommissaryBranch[]
+  allowedIngredients  RestaurantCommissaryIngredient[]
+  producedRecipes     RestaurantCommissaryRecipe[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status, name])
+  @@index([tenantId, centralBranchId, centralWarehouseId])
+}
+
+model RestaurantCommissaryBranch {
+  id            String             @id @default(uuid())
+  tenantId      String
+  commissaryId  String
+  branchId      String
+  createdAt     DateTime           @default(now())
+  commissary    RestaurantCommissary @relation(fields: [commissaryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, commissaryId, branchId])
+  @@index([tenantId, branchId])
+}
+
+model RestaurantCommissaryIngredient {
+  id            String             @id @default(uuid())
+  tenantId      String
+  commissaryId  String
+  ingredientId  String
+  createdAt     DateTime           @default(now())
+  commissary    RestaurantCommissary @relation(fields: [commissaryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, commissaryId, ingredientId])
+  @@index([tenantId, ingredientId])
+}
+
+model RestaurantCommissaryRecipe {
+  id            String             @id @default(uuid())
+  tenantId      String
+  commissaryId  String
+  recipeId      String
+  createdAt     DateTime           @default(now())
+  commissary    RestaurantCommissary @relation(fields: [commissaryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, commissaryId, recipeId])
+  @@index([tenantId, recipeId])
+}
+
+model RestaurantInvoice {
+  id              String                  @id @default(uuid())
+  tenantId        String
+  branchId        String
+  warehouseId     String
+  supplierId      String?
+  supplierName    String?
+  invoiceNumber   String?
+  invoiceDate     DateTime?
+  currency        String                  @default("USD")
+  subtotal        Decimal?                @db.Decimal(18, 6)
+  taxAmount       Decimal?                @db.Decimal(18, 6)
+  totalAmount     Decimal?                @db.Decimal(18, 6)
+  confidence      Decimal?                @db.Decimal(10, 6)
+  fileName        String
+  fileHash        String
+  fileStorageKey  String
+  status          RestaurantInvoiceStatus @default(UPLOADED)
+  purchaseOrderId String?
+  receiptId       String?
+  ocrPayload      Json?
+  createdBy       String
+  processedBy     String?
+  approvedBy      String?
+  rejectedBy      String?
+  processedAt     DateTime?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  lines           RestaurantInvoiceLine[]
+
+  @@unique([tenantId, supplierId, invoiceNumber])
+  @@index([tenantId, branchId, warehouseId, status])
+  @@index([tenantId, fileHash])
+}
+
+model RestaurantInvoiceLine {
+  id                  String            @id @default(uuid())
+  invoiceId           String
+  externalSku         String?
+  description         String?
+  quantity            Decimal           @db.Decimal(18, 6)
+  unit                String?
+  unitCost            Decimal           @db.Decimal(18, 6)
+  totalCost           Decimal           @db.Decimal(18, 6)
+  ingredientId        String?
+  purchaseOrderLineId String?
+  invoice             RestaurantInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
 model RestaurantRecipe {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String?
-  code String
-  name String
-  description String?
-  categoryId String?
-  outputIngredientId String?
-  yieldQuantity Decimal @db.Decimal(18, 6)
-  yieldUnitId String
-  sellingPrice Decimal? @db.Decimal(18, 6)
-  calculatedCost Decimal @db.Decimal(18, 6) @default(0)
-  requiredStockPolicy RestaurantStockPolicy @default(BLOCK)
-  version Int @default(1)
-  type RestaurantRecipeType @default(MENU_ITEM)
-  portions Decimal? @db.Decimal(18, 6)
-  portionQuantity Decimal? @db.Decimal(18, 6)
-  portionUnitId String?
-  currentVersionId String?
-  currentFoodCostPercentage Decimal? @db.Decimal(18, 6)
-  currentGrossMargin Decimal? @db.Decimal(18, 6)
-  currentCostCalculatedAt DateTime?
-  status RestaurantRecipeStatus @default(DRAFT)
-  createdBy String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  items RestaurantRecipeIngredient[]
-  versions RestaurantRecipeVersion[]
+  id                        String                       @id @default(uuid())
+  tenantId                  String
+  branchId                  String?
+  code                      String
+  name                      String
+  description               String?
+  categoryId                String?
+  outputIngredientId        String?
+  yieldQuantity             Decimal                      @db.Decimal(18, 6)
+  yieldUnitId               String
+  sellingPrice              Decimal?                     @db.Decimal(18, 6)
+  calculatedCost            Decimal                      @default(0) @db.Decimal(18, 6)
+  requiredStockPolicy       RestaurantStockPolicy        @default(BLOCK)
+  version                   Int                          @default(1)
+  type                      RestaurantRecipeType         @default(MENU_ITEM)
+  portions                  Decimal?                     @db.Decimal(18, 6)
+  portionQuantity           Decimal?                     @db.Decimal(18, 6)
+  portionUnitId             String?
+  currentVersionId          String?
+  currentFoodCostPercentage Decimal?                     @db.Decimal(18, 6)
+  currentGrossMargin        Decimal?                     @db.Decimal(18, 6)
+  currentCostCalculatedAt   DateTime?
+  status                    RestaurantRecipeStatus       @default(DRAFT)
+  createdBy                 String
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+  items                     RestaurantRecipeIngredient[]
+  versions                  RestaurantRecipeVersion[]
+
   @@unique([tenantId, code, version])
   @@index([tenantId, branchId, status])
 }
 
 model RestaurantRecipeVersion {
-  id String @id @default(uuid())
-  tenantId String
-  recipeId String
-  versionNumber Int
-  yieldQuantity Decimal @db.Decimal(18, 6)
-  yieldUnitId String
-  portions Decimal? @db.Decimal(18, 6)
-  portionQuantity Decimal? @db.Decimal(18, 6)
-  portionUnitId String?
-  sellingPriceSnapshot Decimal? @db.Decimal(18, 6)
-  batchCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
-  portionCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
-  foodCostPercentageSnapshot Decimal? @db.Decimal(18, 6)
-  grossMarginSnapshot Decimal? @db.Decimal(18, 6)
-  changeReason String?
-  status RestaurantRecipeVersionStatus @default(DRAFT)
-  publishedBy String?
-  publishedAt DateTime?
-  createdBy String
-  createdAt DateTime @default(now())
-  recipe RestaurantRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-  components RestaurantRecipeComponent[]
-  steps RestaurantRecipeStep[]
+  id                         String                        @id @default(uuid())
+  tenantId                   String
+  recipeId                   String
+  versionNumber              Int
+  yieldQuantity              Decimal                       @db.Decimal(18, 6)
+  yieldUnitId                String
+  portions                   Decimal?                      @db.Decimal(18, 6)
+  portionQuantity            Decimal?                      @db.Decimal(18, 6)
+  portionUnitId              String?
+  sellingPriceSnapshot       Decimal?                      @db.Decimal(18, 6)
+  batchCostSnapshot          Decimal                       @default(0) @db.Decimal(18, 6)
+  portionCostSnapshot        Decimal                       @default(0) @db.Decimal(18, 6)
+  foodCostPercentageSnapshot Decimal?                      @db.Decimal(18, 6)
+  grossMarginSnapshot        Decimal?                      @db.Decimal(18, 6)
+  changeReason               String?
+  status                     RestaurantRecipeVersionStatus @default(DRAFT)
+  publishedBy                String?
+  publishedAt                DateTime?
+  createdBy                  String
+  createdAt                  DateTime                      @default(now())
+  recipe                     RestaurantRecipe              @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  components                 RestaurantRecipeComponent[]
+  steps                      RestaurantRecipeStep[]
+
   @@unique([tenantId, recipeId, versionNumber])
   @@index([tenantId, recipeId, status])
 }
 
 model RestaurantRecipeComponent {
-  id String @id @default(uuid())
-  tenantId String
-  recipeVersionId String
-  componentType RestaurantRecipeComponentType
-  ingredientId String?
-  subRecipeId String?
-  quantity Decimal @db.Decimal(18, 6)
-  unitId String
-  quantityMode RestaurantRecipeQuantityMode @default(GROSS)
-  yieldPercentage Decimal? @db.Decimal(8, 4)
-  wastePercentage Decimal? @db.Decimal(8, 4)
-  convertedGrossQuantity Decimal @db.Decimal(18, 6)
-  unitCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
-  totalCostSnapshot Decimal @db.Decimal(18, 6) @default(0)
+  id                      String                        @id @default(uuid())
+  tenantId                String
+  recipeVersionId         String
+  componentType           RestaurantRecipeComponentType
+  ingredientId            String?
+  subRecipeId             String?
+  quantity                Decimal                       @db.Decimal(18, 6)
+  unitId                  String
+  quantityMode            RestaurantRecipeQuantityMode  @default(GROSS)
+  yieldPercentage         Decimal?                      @db.Decimal(8, 4)
+  wastePercentage         Decimal?                      @db.Decimal(8, 4)
+  convertedGrossQuantity  Decimal                       @db.Decimal(18, 6)
+  unitCostSnapshot        Decimal                       @default(0) @db.Decimal(18, 6)
+  totalCostSnapshot       Decimal                       @default(0) @db.Decimal(18, 6)
   preparationInstructions String?
-  position Int @default(0)
-  recipeVersion RestaurantRecipeVersion @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  position                Int                           @default(0)
+  recipeVersion           RestaurantRecipeVersion       @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+
   @@index([tenantId, recipeVersionId, position])
   @@index([tenantId, ingredientId])
   @@index([tenantId, subRecipeId])
 }
 
 model RestaurantRecipeStep {
-  id String @id @default(uuid())
-  tenantId String
-  recipeVersionId String
-  stepNumber Int
-  instruction String
-  imageUrl String?
+  id               String                  @id @default(uuid())
+  tenantId         String
+  recipeVersionId  String
+  stepNumber       Int
+  instruction      String
+  imageUrl         String?
   estimatedMinutes Int?
-  recipeVersion RestaurantRecipeVersion @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  recipeVersion    RestaurantRecipeVersion @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+
   @@unique([recipeVersionId, stepNumber])
 }
 
 model RestaurantRecipeIngredient {
-  id String @id @default(uuid())
-  recipeId String
-  ingredientId String
-  quantity Decimal @db.Decimal(18, 6)
-  unitId String
-  convertedInventoryQuantity Decimal @db.Decimal(18, 6)
-  wastePercentage Decimal? @db.Decimal(8, 4)
-  calculatedCost Decimal @db.Decimal(18, 6) @default(0)
-  position Int @default(0)
-  recipe RestaurantRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  id                         String           @id @default(uuid())
+  recipeId                   String
+  ingredientId               String
+  quantity                   Decimal          @db.Decimal(18, 6)
+  unitId                     String
+  convertedInventoryQuantity Decimal          @db.Decimal(18, 6)
+  wastePercentage            Decimal?         @db.Decimal(8, 4)
+  calculatedCost             Decimal          @default(0) @db.Decimal(18, 6)
+  position                   Int              @default(0)
+  recipe                     RestaurantRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
   @@index([recipeId, position])
   @@index([ingredientId])
 }
 
 model RestaurantConsumptionRecord {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  recordNumber String
-  consumptionDate DateTime
-  shift RestaurantShift
-  status RestaurantDocumentStatus @default(DRAFT)
-  notes String?
-  createdBy String
-  confirmedBy String?
-  confirmedAt DateTime?
-  cancelledBy String?
-  cancelledAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  salesImportId String?
-  overrideUsed Boolean @default(false)
+  id                    String                            @id @default(uuid())
+  tenantId              String
+  branchId              String
+  warehouseId           String
+  recordNumber          String
+  consumptionDate       DateTime
+  shift                 RestaurantShift
+  status                RestaurantDocumentStatus          @default(DRAFT)
+  notes                 String?
+  createdBy             String
+  confirmedBy           String?
+  confirmedAt           DateTime?
+  cancelledBy           String?
+  cancelledAt           DateTime?
+  createdAt             DateTime                          @default(now())
+  updatedAt             DateTime                          @updatedAt
+  salesImportId         String?
+  overrideUsed          Boolean                           @default(false)
   overrideJustification String?
-  items RestaurantConsumptionRecordItem[]
+  items                 RestaurantConsumptionRecordItem[]
+
   @@unique([tenantId, recordNumber])
   @@index([tenantId, branchId, warehouseId, consumptionDate])
+  @@index([tenantId, branchId, warehouseId, status, consumptionDate])
 }
 
 model RestaurantConsumptionRecordItem {
-  id String @id @default(uuid())
-  consumptionRecordId String
-  recipeId String
-  recipeVersion Int
-  quantitySold Decimal @db.Decimal(18, 6)
-  unitCostSnapshot Decimal @db.Decimal(18, 6)
-  totalCost Decimal @db.Decimal(18, 6)
-  sellingPriceSnapshot Decimal @db.Decimal(18, 6) @default(0)
-  salesImportRowId String?
-  consumptionRecord RestaurantConsumptionRecord @relation(fields: [consumptionRecordId], references: [id], onDelete: Cascade)
+  id                   String                      @id @default(uuid())
+  consumptionRecordId  String
+  recipeId             String
+  recipeVersion        Int
+  quantitySold         Decimal                     @db.Decimal(18, 6)
+  unitCostSnapshot     Decimal                     @db.Decimal(18, 6)
+  totalCost            Decimal                     @db.Decimal(18, 6)
+  sellingPriceSnapshot Decimal                     @default(0) @db.Decimal(18, 6)
+  salesImportRowId     String?
+  consumptionRecord    RestaurantConsumptionRecord @relation(fields: [consumptionRecordId], references: [id], onDelete: Cascade)
+
   @@index([consumptionRecordId])
 }
 
 model RestaurantWasteRecord {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  wasteNumber String
-  wasteDate DateTime
-  reason String
-  reasonId String?
-  status RestaurantDocumentStatus @default(DRAFT)
-  createdBy String
-  confirmedBy String?
-  confirmedAt DateTime?
-  cancelledBy String?
-  cancelledAt DateTime?
-  overrideUsed Boolean @default(false)
+  id                    String                      @id @default(uuid())
+  tenantId              String
+  branchId              String
+  warehouseId           String
+  wasteNumber           String
+  wasteDate             DateTime
+  reason                String
+  reasonId              String?
+  status                RestaurantDocumentStatus    @default(DRAFT)
+  createdBy             String
+  confirmedBy           String?
+  confirmedAt           DateTime?
+  cancelledBy           String?
+  cancelledAt           DateTime?
+  overrideUsed          Boolean                     @default(false)
   overrideJustification String?
-  items RestaurantWasteRecordItem[]
-  reasonCatalog RestaurantWasteReason? @relation(fields: [reasonId], references: [id])
+  items                 RestaurantWasteRecordItem[]
+  reasonCatalog         RestaurantWasteReason?      @relation(fields: [reasonId], references: [id])
+
   @@unique([tenantId, wasteNumber])
   @@index([tenantId, branchId, warehouseId, wasteDate])
 }
 
 model RestaurantWasteReason {
-  id String @id @default(uuid())
-  tenantId String
-  code String
-  name String
+  id          String                    @id @default(uuid())
+  tenantId    String
+  code        String
+  name        String
   description String?
-  status RestaurantInventoryStatus @default(ACTIVE)
-  createdBy String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  records RestaurantWasteRecord[]
+  status      RestaurantInventoryStatus @default(ACTIVE)
+  createdBy   String
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  records     RestaurantWasteRecord[]
+
   @@unique([tenantId, code])
   @@index([tenantId, status, name])
 }
 
 model RestaurantWasteRecordItem {
-  id String @id @default(uuid())
-  wasteRecordId String
-  ingredientId String
-  quantity Decimal @db.Decimal(18, 6)
-  unitId String
-  convertedInventoryQuantity Decimal @db.Decimal(18, 6)
-  unitCostSnapshot Decimal @db.Decimal(18, 6)
-  lotId String?
-  notes String?
-  wasteRecord RestaurantWasteRecord @relation(fields: [wasteRecordId], references: [id], onDelete: Cascade)
+  id                         String                @id @default(uuid())
+  wasteRecordId              String
+  ingredientId               String
+  quantity                   Decimal               @db.Decimal(18, 6)
+  unitId                     String
+  convertedInventoryQuantity Decimal               @db.Decimal(18, 6)
+  unitCostSnapshot           Decimal               @db.Decimal(18, 6)
+  lotId                      String?
+  notes                      String?
+  wasteRecord                RestaurantWasteRecord @relation(fields: [wasteRecordId], references: [id], onDelete: Cascade)
+
   @@index([wasteRecordId])
 }
 
 model RestaurantInventoryMovement {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  ingredientId String
-  lotId String?
-  movementType RestaurantMovementType
-  direction RestaurantMovementDirection
-  quantity Decimal @db.Decimal(18, 6)
-  unitCost Decimal @db.Decimal(18, 6)
-  totalCost Decimal @db.Decimal(18, 6)
-  referenceType String
-  referenceId String
+  id                   String                      @id @default(uuid())
+  tenantId             String
+  branchId             String
+  warehouseId          String
+  ingredientId         String
+  lotId                String?
+  movementType         RestaurantMovementType
+  direction            RestaurantMovementDirection
+  quantity             Decimal                     @db.Decimal(18, 6)
+  unitCost             Decimal                     @db.Decimal(18, 6)
+  totalCost            Decimal                     @db.Decimal(18, 6)
+  referenceType        String
+  referenceId          String
   reversalOfMovementId String?
-  occurredAt DateTime @default(now())
-  createdBy String
-  metadata Json?
-  @@index([tenantId, branchId, warehouseId, ingredientId, occurredAt])
+  occurredAt           DateTime                    @default(now())
+  createdBy            String
+  metadata             Json?
+
   @@unique([tenantId, referenceType, referenceId, ingredientId, movementType])
+  @@index([tenantId, branchId, warehouseId, ingredientId, occurredAt])
+  @@index([tenantId, branchId, warehouseId, occurredAt, referenceType, movementType])
 }
 
 model RestaurantInventoryLot {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  ingredientId String
-  lotNumber String
-  expirationDate DateTime?
-  receivedAt DateTime
-  initialQuantity Decimal @db.Decimal(18, 6)
-  remainingQuantity Decimal @db.Decimal(18, 6)
-  unitCost Decimal @db.Decimal(18, 6)
-  status RestaurantLotStatus @default(ACTIVE)
+  id                  String              @id @default(uuid())
+  tenantId            String
+  branchId            String
+  warehouseId         String
+  ingredientId        String
+  lotNumber           String
+  expirationDate      DateTime?
+  receivedAt          DateTime
+  initialQuantity     Decimal             @db.Decimal(18, 6)
+  remainingQuantity   Decimal             @db.Decimal(18, 6)
+  unitCost            Decimal             @db.Decimal(18, 6)
+  status              RestaurantLotStatus @default(ACTIVE)
   sourceReceiptItemId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
   @@unique([tenantId, warehouseId, ingredientId, lotNumber])
   @@index([tenantId, warehouseId, ingredientId, status, expirationDate, receivedAt])
 }
 
-model RestaurantProductionOrder {
+model RestaurantExpiryAlertAcknowledgement {
   id String @id @default(uuid())
   tenantId String
-  branchId String
-  warehouseId String
-  recipeId String
-  plannedQuantity Decimal @db.Decimal(18, 6)
-  actualYield Decimal? @db.Decimal(18, 6)
-  lotNumber String?
-  expirationDate DateTime?
-  status RestaurantProductionStatus @default(DRAFT)
-  productionDate DateTime
-  createdBy String
-  confirmedBy String?
-  confirmedAt DateTime?
-  overrideUsed Boolean @default(false)
+  lotId String
+  acknowledgedBy String
+  acknowledgedAt DateTime @default(now())
+  @@unique([tenantId, lotId])
+  @@index([tenantId, acknowledgedAt])
+}
+
+model RestaurantInventoryAuditLog {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String?
+  warehouseId    String?
+  actorId        String?
+  actorName      String?
+  action         String
+  entityType     String?
+  entityId       String?
+  before         Json?
+  after          Json?
+  reason         String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+  requestId      String?
+  idempotencyKey String?
+  hash           String
+  previousHash   String?
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, actorId, createdAt])
+  @@index([tenantId, action, createdAt])
+  @@index([tenantId, entityType, entityId, createdAt])
+  @@unique([tenantId, requestId, action])
+}
+
+model RestaurantProductionOrder {
+  id                    String                          @id @default(uuid())
+  tenantId              String
+  branchId              String
+  warehouseId           String
+  recipeId              String
+  plannedQuantity       Decimal                         @db.Decimal(18, 6)
+  actualYield           Decimal?                        @db.Decimal(18, 6)
+  lotNumber             String?
+  expirationDate        DateTime?
+  status                RestaurantProductionStatus      @default(DRAFT)
+  productionDate        DateTime
+  createdBy             String
+  confirmedBy           String?
+  confirmedAt           DateTime?
+  overrideUsed          Boolean                         @default(false)
   overrideJustification String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  items RestaurantProductionOrderItem[]
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
+  items                 RestaurantProductionOrderItem[]
+
   @@index([tenantId, branchId, warehouseId, status, productionDate])
 }
 
 model RestaurantProductionOrderItem {
-  id String @id @default(uuid())
+  id                String                      @id @default(uuid())
   productionOrderId String
-  ingredientId String
-  quantity Decimal @db.Decimal(18, 6)
-  unitCost Decimal @db.Decimal(18, 6)
-  direction RestaurantMovementDirection
-  productionOrder RestaurantProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  ingredientId      String
+  quantity          Decimal                     @db.Decimal(18, 6)
+  unitCost          Decimal                     @db.Decimal(18, 6)
+  direction         RestaurantMovementDirection
+  productionOrder   RestaurantProductionOrder   @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
   @@index([productionOrderId])
 }
 
 model RestaurantStockCount {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  countNumber String
-  countedAt DateTime
-  status RestaurantStockCountStatus @default(DRAFT)
-  createdBy String
-  approvedBy String?
-  approvedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  items RestaurantStockCountItem[]
-  history RestaurantStockCountHistory[]
+  id           String                        @id @default(uuid())
+  tenantId     String
+  branchId     String
+  warehouseId  String
+  countNumber  String
+  countedAt    DateTime
+  status       RestaurantStockCountStatus    @default(DRAFT)
+  kind         RestaurantStockCountKind      @default(FULL)
+  scheduledFor DateTime?
+  closedAt     DateTime?
+  closedBy     String?
+  scope        Json?
+  scheduleId   String?
+  createdBy    String
+  approvedBy   String?
+  approvedAt   DateTime?
+  createdAt    DateTime                      @default(now())
+  updatedAt    DateTime                      @updatedAt
+  items        RestaurantStockCountItem[]
+  history      RestaurantStockCountHistory[]
+
   @@unique([tenantId, countNumber])
   @@index([tenantId, warehouseId, status, countedAt])
+  @@index([tenantId, branchId, warehouseId, kind, scheduledFor])
+  @@index([tenantId, scheduleId])
+  @@index([tenantId, branchId, warehouseId, status, countedAt])
+}
+
+model RestaurantStockCountSchedule {
+  id          String                              @id @default(uuid())
+  tenantId    String
+  branchId    String
+  warehouseId String
+  recurrence  RestaurantStockCountRecurrence
+  nextRunAt   DateTime
+  lastRunAt   DateTime?
+  status      RestaurantStockCountScheduleStatus @default(ACTIVE)
+  scope       Json
+  createdBy   String
+  updatedBy   String?
+  createdAt   DateTime                            @default(now())
+  updatedAt   DateTime                            @updatedAt
+
+  @@index([tenantId, branchId, warehouseId, status, nextRunAt])
 }
 
 model RestaurantStockCountHistory {
-  id String @id @default(uuid())
-  tenantId String
+  id           String                      @id @default(uuid())
+  tenantId     String
   stockCountId String
-  action String
+  action       String
   statusBefore RestaurantStockCountStatus?
-  statusAfter RestaurantStockCountStatus?
-  actorId String
-  before Json?
-  after Json?
-  createdAt DateTime @default(now())
-  stockCount RestaurantStockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+  statusAfter  RestaurantStockCountStatus?
+  actorId      String
+  before       Json?
+  after        Json?
+  createdAt    DateTime                    @default(now())
+  stockCount   RestaurantStockCount        @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+
   @@index([tenantId, stockCountId, createdAt])
 }
 
 model RestaurantStockCountItem {
-  id String @id @default(uuid())
-  stockCountId String
-  ingredientId String
-  systemQuantity Decimal @db.Decimal(18, 6)
-  countedQuantity Decimal @db.Decimal(18, 6)
-  varianceQuantity Decimal @db.Decimal(18, 6)
-  averageCost Decimal @db.Decimal(18, 6)
-  varianceValue Decimal @db.Decimal(18, 6)
-  reason String?
-  notes String?
-  stockCount RestaurantStockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+  id               String               @id @default(uuid())
+  stockCountId     String
+  ingredientId     String
+  systemQuantity   Decimal              @db.Decimal(18, 6)
+  countedQuantity  Decimal              @db.Decimal(18, 6)
+  varianceQuantity Decimal              @db.Decimal(18, 6)
+  averageCost      Decimal              @db.Decimal(18, 6)
+  varianceValue    Decimal              @db.Decimal(18, 6)
+  reason           String?
+  notes            String?
+  stockCount       RestaurantStockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+
   @@index([stockCountId])
 }
 
+model RestaurantShrinkageAlert {
+  id               String                         @id @default(uuid())
+  tenantId         String
+  branchId         String
+  warehouseId      String
+  ingredientId     String
+  stockCountId     String?
+  sourceReferenceId String?
+  sourceType       RestaurantShrinkageAlertType
+  periodStart      DateTime
+  periodEnd        DateTime
+  thresholdPercent Decimal                        @db.Decimal(9, 4)
+  thresholdValue   Decimal                        @db.Decimal(18, 6)
+  varianceQuantity Decimal                        @db.Decimal(18, 6)
+  varianceValue    Decimal                        @db.Decimal(18, 6)
+  variancePercent  Decimal                        @db.Decimal(9, 4)
+  status           RestaurantShrinkageAlertStatus @default(OPEN)
+  reason           String?
+  acknowledgedBy   String?
+  acknowledgedAt   DateTime?
+  resolvedBy       String?
+  resolvedAt       DateTime?
+  resolutionReason String?
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+
+  @@index([tenantId, branchId, warehouseId, status, createdAt])
+  @@index([tenantId, ingredientId, createdAt])
+  @@index([tenantId, sourceType, periodStart, periodEnd])
+  @@unique([tenantId, sourceReferenceId, ingredientId, sourceType])
+}
+
 model RestaurantStockTransfer {
-  id String @id @default(uuid())
-  tenantId String
-  sourceBranchId String
-  sourceWarehouseId String
-  destinationBranchId String
+  id                     String                        @id @default(uuid())
+  tenantId               String
+  sourceBranchId         String
+  sourceWarehouseId      String
+  destinationBranchId    String
   destinationWarehouseId String
-  status RestaurantTransferStatus @default(DRAFT)
-  sentAt DateTime?
-  receivedAt DateTime?
-  createdBy String
-  sentBy String?
-  receivedBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  items RestaurantStockTransferItem[]
+  status                 RestaurantTransferStatus      @default(DRAFT)
+  sentAt                 DateTime?
+  receivedAt             DateTime?
+  createdBy              String
+  sentBy                 String?
+  receivedBy             String?
+  createdAt              DateTime                      @default(now())
+  updatedAt              DateTime                      @updatedAt
+  items                  RestaurantStockTransferItem[]
+
   @@index([tenantId, status, sourceWarehouseId, destinationWarehouseId])
 }
 
 model RestaurantStockTransferItem {
-  id String @id @default(uuid())
-  transferId String
+  id           String                  @id @default(uuid())
+  transferId   String
   ingredientId String
-  lotId String?
-  quantity Decimal @db.Decimal(18, 6)
-  unitCost Decimal @db.Decimal(18, 6)
-  transfer RestaurantStockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  lotId        String?
+  quantity     Decimal                 @db.Decimal(18, 6)
+  unitCost     Decimal                 @db.Decimal(18, 6)
+  transfer     RestaurantStockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
   @@index([transferId])
 }
 
 model RestaurantInventoryBalance {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  ingredientId String
-  quantityOnHand Decimal @db.Decimal(18, 6) @default(0)
-  averageCost Decimal @db.Decimal(18, 6) @default(0)
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  warehouseId    String
+  ingredientId   String
+  quantityOnHand Decimal  @default(0) @db.Decimal(18, 6)
+  averageCost    Decimal  @default(0) @db.Decimal(18, 6)
+  updatedAt      DateTime @updatedAt
+
   @@unique([tenantId, branchId, warehouseId, ingredientId])
   @@index([tenantId, warehouseId, quantityOnHand])
+  @@index([tenantId, branchId, warehouseId, updatedAt])
 }
 
 model RestaurantSalesImport {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String
-  warehouseId String
-  fileName String
-  fileHash String
-  fileStorageKey String
-  importDate DateTime @default(now())
-  salesDateFrom DateTime?
-  salesDateTo DateTime?
-  status SalesImportStatus @default(UPLOADED)
-  totalRows Int @default(0)
-  validRows Int @default(0)
-  invalidRows Int @default(0)
-  duplicateRows Int @default(0)
-  createdBy String
-  processedBy String?
-  processedAt DateTime?
-  jobId String?
-  processedRows Int @default(0)
-  failedRows Int @default(0)
-  cancelRequested Boolean @default(false)
-  cancelledAt DateTime?
+  id                    String                     @id @default(uuid())
+  tenantId              String
+  branchId              String
+  warehouseId           String
+  fileName              String
+  fileHash              String
+  fileStorageKey        String
+  importDate            DateTime                   @default(now())
+  salesDateFrom         DateTime?
+  salesDateTo           DateTime?
+  status                SalesImportStatus          @default(UPLOADED)
+  totalRows             Int                        @default(0)
+  validRows             Int                        @default(0)
+  invalidRows           Int                        @default(0)
+  duplicateRows         Int                        @default(0)
+  createdBy             String
+  processedBy           String?
+  processedAt           DateTime?
+  jobId                 String?
+  processedRows         Int                        @default(0)
+  failedRows            Int                        @default(0)
+  cancelRequested       Boolean                    @default(false)
+  cancelledAt           DateTime?
   errorReportStorageKey String?
-  rows RestaurantSalesImportRow[]
+  columnMap             Json?
+  rows                  RestaurantSalesImportRow[]
+
   @@unique([tenantId, fileHash])
   @@index([tenantId, branchId, status, importDate])
 }
 
 model RestaurantSalesImportRow {
-  id String @id @default(uuid())
-  salesImportId String
-  rowNumber Int
-  externalSaleId String
+  id                  String                @id @default(uuid())
+  salesImportId       String
+  rowNumber           Int
+  externalSaleId      String
   externalProductCode String
   externalProductName String?
-  quantity Decimal @db.Decimal(18, 6)
-  soldAt DateTime
-  recipeId String?
-  validationStatus SalesImportRowStatus @default(INVALID)
-  validationErrors Json?
-  rawData Json?
-  processedAt DateTime?
-  idempotencyKey String
-  attempts Int @default(0)
-  lastError String?
-  consumptionId String?
-  salesImport RestaurantSalesImport @relation(fields: [salesImportId], references: [id], onDelete: Cascade)
+  quantity            Decimal               @db.Decimal(18, 6)
+  soldAt              DateTime
+  recipeId            String?
+  validationStatus    SalesImportRowStatus  @default(INVALID)
+  validationErrors    Json?
+  rawData             Json?
+  processedAt         DateTime?
+  idempotencyKey      String
+  attempts            Int                   @default(0)
+  lastError           String?
+  consumptionId       String?
+  salesImport         RestaurantSalesImport @relation(fields: [salesImportId], references: [id], onDelete: Cascade)
+
   @@unique([salesImportId, rowNumber])
   @@unique([salesImportId, idempotencyKey])
   @@index([salesImportId, validationStatus])
@@ -7290,16 +7778,34 @@ model RestaurantSalesImportRow {
 }
 
 model RestaurantExternalProductMapping {
-  id String @id @default(uuid())
-  tenantId String
-  branchId String?
-  externalSystem String
+  id                  String                @id @default(uuid())
+  tenantId            String
+  branchId            String?
+  externalSystem      String
   externalProductCode String
   externalProductName String?
-  recipeId String
-  status ExternalMappingStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  recipeId            String
+  status              ExternalMappingStatus @default(ACTIVE)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
   @@unique([tenantId, branchId, externalSystem, externalProductCode])
   @@index([tenantId, externalSystem, status])
+}
+
+model RestaurantInventoryIdempotencyRecord {
+  id             String   @id @default(uuid())
+  tenantId       String
+  userId         String
+  endpoint       String
+  method         String
+  idempotencyKey String
+  payloadHash    String
+  statusCode     Int      @default(200)
+  responseJson   Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, userId, method, endpoint, idempotencyKey])
+  @@index([tenantId, createdAt])
 }
