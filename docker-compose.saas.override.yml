@@ -35,13 +35,9 @@ services:
       - saas-internal
 
   saas-backend:
-    build:
-      context: ${BACKEND_CONTEXT:-./backend}
-      dockerfile: Dockerfile
+    image: ghcr.io/paulgarcia89/saas-integral-backend:latest
     container_name: saas-backend
     restart: unless-stopped
-    env_file:
-      - ${BACKEND_ENV_FILE:-./backend/.env.self-hosted}
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -70,11 +66,7 @@ services:
       retries: 10
 
   saas-frontend:
-    build:
-      context: ${FRONTEND_CONTEXT:-./frontend-app}
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: /api
+    image: ghcr.io/paulgarcia89/saas-integral-frontend:latest
     container_name: saas-frontend
     restart: unless-stopped
     environment:
