@@ -138,8 +138,13 @@ export class CandidateAuthService {
       const existingIdentity = await tx.applicantIdentity.findUnique({ where: { email: account.email }, include: { profile: true } });
       const existingData = existingIdentity?.profile?.reusableData;
       const current = existingData && typeof existingData === 'object' && !Array.isArray(existingData) ? existingData as Record<string, unknown> : {};
-      const applicationProfile = this.mergeApplicationProfile(current, dto.applicationProfile);
-      const ssn = this.normalizeSsn(dto.socialSecurityNumber);
+      const applicationProfileInput = { ...(dto.applicationProfile ?? {}) };
+      const embeddedSsn = applicationProfileInput.socialSecurityNumber;
+      delete applicationProfileInput.socialSecurityNumber;
+      const applicationProfile = this.mergeApplicationProfile(current, applicationProfileInput);
+      const ssn = this.normalizeSsn(
+        dto.socialSecurityNumber ?? (typeof embeddedSsn === 'string' ? embeddedSsn : undefined),
+      );
       const identity = existingIdentity ?? await tx.applicantIdentity.create({ data: { email: account.email, legacyAccountId: accountId, profile: { create: {} } }, include: { profile: true } });
       const savedProfile = await tx.applicantProfile.upsert({
         where: { identityId: identity.id },
