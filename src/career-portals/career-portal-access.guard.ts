@@ -18,7 +18,7 @@ export class CareerPortalAccessGuard implements CanActivate {
     if (portal.access === CareerPortalAccess.PUBLIC) return true;
     const applicant = await this.authenticate(request);
     const companyAccess = portal.tenantId ? await this.prisma.companyApplicant.findFirst({ where: { tenantId: portal.tenantId, identityId: applicant.sub }, select: { id: true } }) : null;
-    if (companyAccess) return true;
+    if (portal.access === CareerPortalAccess.PRIVATE || companyAccess) return true;
     const invitationToken = this.readInvitationToken(request);
     if (!invitationToken) throw new ForbiddenException('A valid portal invitation is required');
     const invitation = await this.prisma.applicantInvitation.findFirst({
