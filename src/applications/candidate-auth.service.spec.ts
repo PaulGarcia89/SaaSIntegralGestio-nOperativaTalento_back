@@ -47,4 +47,17 @@ describe('CandidateAuthService', () => {
       actionUrl: expect.stringContaining('/candidate/reset-password?token='),
     }));
   });
+
+  it('returns reusable application data without exposing the social security number', async () => {
+    prisma.candidateAccount.findUnique.mockResolvedValue({
+      id: 'account-1', email: 'candidate@example.com', fullName: 'Candidate', phone: null, city: null,
+      linkedinUrl: null, portfolioUrl: null, locale: 'es', timezone: 'UTC', statusUpdates: true,
+      interviewReminders: true, offerNotifications: true, marketingConsent: false, profileSource: 'MANUAL',
+      externalIdentities: [], applicantIdentity: { profile: { reusableData: { educationLevel: 'UNIVERSIDAD' }, socialSecurityNumberLast4: '6789', updatedAt: new Date('2026-01-01') } },
+    });
+    const result = await service.profile('account-1');
+    expect(result.applicationProfile).toEqual({ educationLevel: 'UNIVERSIDAD' });
+    expect(result.socialSecurityNumberMasked).toBe('***-**-6789');
+    expect(result).not.toHaveProperty('socialSecurityNumber');
+  });
 });

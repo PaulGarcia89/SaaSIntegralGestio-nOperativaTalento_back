@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Optional, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -7,6 +7,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { CandidateLoginDto, CandidateProfileDto, CandidateRegisterDto } from './dto/candidate-auth.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Prisma } from '@prisma/client';
+import { EmployeeSensitiveDataCryptoService } from '../employees/employee-sensitive-data-crypto.service';
 
 export interface CandidateTokenPayload {
   sub: string;
@@ -23,6 +24,7 @@ export class CandidateAuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
+    @Optional() private readonly sensitiveData?: EmployeeSensitiveDataCryptoService,
   ) {}
 
   async register(dto: CandidateRegisterDto) {
@@ -116,15 +118,60 @@ export class CandidateAuthService {
         portfolioUrl: true, locale: true, timezone: true, statusUpdates: true,
         interviewReminders: true, offerNotifications: true, marketingConsent: true,
         profileSource: true, externalIdentities: { select: { provider: true } },
+        applicantIdentity: { include: { profile: true } },
       },
     });
     if (!account) throw new UnauthorizedException('Candidate account not found');
-    return account;
+    const reusable = account.applicantIdentity?.profile?.reusableData;
+    return {
+      ...account,
+      applicationProfile: reusable && typeof reusable === 'object' && !Array.isArray(reusable) ? reusable : {},
+      socialSecurityNumberMasked: this.crypto().maskSsn(account.applicantIdentity?.profile?.socialSecurityNumberLast4),
+      updatedAt: account.applicantIdentity?.profile?.updatedAt ?? new Date(),
+    };
   }
 
   async updateProfile(accountId: string, dto: CandidateProfileDto) {
     await this.prisma.$transaction(async (tx) => {
-      await tx.candidateAccount.update({ where: { id: accountId }, data: { ...dto, profileSource: 'MANUAL' } });
+      const account = await tx.candidateAccount.findUnique({ where: { id: accountId }, select: { id: true, email: true } });
+      if (!account) throw new UnauthorizedException('Candidate account not found');
+      const existingIdentity = await tx.applicantIdentity.findUnique({ where: { email: account.email }, include: { profile: true } });
+      const existingData = existingIdentity?.profile?.reusableData;
+      const current = existingData && typeof existingData === 'object' && !Array.isArray(existingData) ? existingData as Record<string, unknown> : {};
+      const applicationProfile = this.mergeApplicationProfile(current, dto.applicationProfile);
+      const ssn = this.normalizeSsn(dto.socialSecurityNumber);
+      const identity = existingIdentity ?? await tx.applicantIdentity.create({ data: { email: account.email, legacyAccountId: accountId, profile: { create: {} } }, include: { profile: true } });
+      const savedProfile = await tx.applicantProfile.upsert({
+        where: { identityId: identity.id },
+        update: {
+          reusableData: Object.keys(applicationProfile).length ? applicationProfile as Prisma.InputJsonValue : undefined,
+          ...(ssn ? { encryptedSocialSecurityNumber: this.crypto().encrypt(ssn), socialSecurityNumberLast4: ssn.slice(-4) } : {}),
+          version: { increment: 1 },
+        },
+        create: {
+          identityId: identity.id,
+          reusableData: Object.keys(applicationProfile).length ? applicationProfile as Prisma.InputJsonValue : undefined,
+          ...(ssn ? { encryptedSocialSecurityNumber: this.crypto().encrypt(ssn), socialSecurityNumberLast4: ssn.slice(-4) } : {}),
+        },
+      });
+      await tx.candidateAccount.update({
+        where: { id: accountId },
+        data: {
+          ...(this.nonEmpty(dto.fullName) ? { fullName: dto.fullName } : {}),
+          ...(this.nonEmpty(dto.phone) ? { phone: dto.phone } : {}),
+          ...(this.nonEmpty(dto.city) ? { city: dto.city } : {}),
+          ...(this.nonEmpty(dto.linkedinUrl) ? { linkedinUrl: dto.linkedinUrl } : {}),
+          ...(this.nonEmpty(dto.portfolioUrl) ? { portfolioUrl: dto.portfolioUrl } : {}),
+          ...(dto.locale !== undefined ? { locale: dto.locale } : {}),
+          ...(dto.timezone !== undefined ? { timezone: dto.timezone } : {}),
+          ...(dto.statusUpdates !== undefined ? { statusUpdates: dto.statusUpdates } : {}),
+          ...(dto.interviewReminders !== undefined ? { interviewReminders: dto.interviewReminders } : {}),
+          ...(dto.offerNotifications !== undefined ? { offerNotifications: dto.offerNotifications } : {}),
+          ...(dto.marketingConsent !== undefined ? { marketingConsent: dto.marketingConsent } : {}),
+          profileSource: 'MANUAL',
+        },
+      });
+      if (ssn) await tx.auditLog.create({ data: { action: 'CANDIDATE_SSN_UPDATED', entityType: 'ApplicantProfile', entityId: savedProfile.id, route: '/candidate-auth/profile', method: 'PATCH', statusCode: 200, after: { socialSecurityNumberMasked: this.crypto().maskSsn(ssn.slice(-4)) } } });
       const profileData = {
         ...(dto.fullName !== undefined ? { fullName: dto.fullName } : {}),
         ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
@@ -142,6 +189,31 @@ export class CandidateAuthService {
     });
     return this.profile(accountId);
   }
+
+  private mergeApplicationProfile(current: Record<string, unknown>, incoming?: Record<string, unknown>) {
+    if (!incoming) return current;
+    const allowed = new Set(['lastName', 'address', 'apartmentNumber', 'state', 'zipCode', 'dateOfBirth', 'emergencyContactName', 'emergencyContactRelationship', 'emergencyContactPhone', 'is18OrOlder', 'authorizedToWorkInUS', 'workedForCompany', 'workedForCompanyExplanation', 'familyWorksForCompany', 'familyWorksForCompanyExplanation', 'felonyConviction', 'felonyConvictionExplanation', 'educationLevel', 'schoolName', 'schoolLocation', 'previousEmployerCompany', 'previousEmployerPosition', 'previousEmployerAddress', 'previousEmployerLocation', 'previousEmployerStartDate', 'previousEmployerEndDate', 'previousEmployerEndingSalary', 'previousEmployerSupervisor', 'previousEmployerPhone', 'previousEmployerLeavingReason', 'previousEmployerMayContactSupervisor', 'employmentPreference', 'shiftPreference', 'employmentType', 'desiredHourlyWage', 'reference1Name', 'reference1Relationship', 'reference1Phone', 'reference2Name', 'reference2Relationship', 'reference2Phone', 'reference3Name', 'reference3Relationship', 'reference3Phone']);
+    const result = { ...current };
+    for (const [key, value] of Object.entries(incoming)) {
+      if (!allowed.has(key)) throw new BadRequestException(`Invalid application profile field: ${key}`);
+      if (value === null || (typeof value === 'string' && !value.trim())) continue;
+      if (typeof value === 'string' && value.length > 2000) throw new BadRequestException(`Application profile field is too long: ${key}`);
+      if (['is18OrOlder', 'authorizedToWorkInUS', 'workedForCompany', 'familyWorksForCompany', 'felonyConviction', 'previousEmployerMayContactSupervisor'].includes(key) && typeof value !== 'boolean') throw new BadRequestException(`Invalid boolean for application profile field: ${key}`);
+      if (['previousEmployerStartDate', 'previousEmployerEndDate', 'dateOfBirth'].includes(key) && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)))) throw new BadRequestException(`Invalid date for application profile field: ${key}`);
+      result[key] = value;
+    }
+    return result;
+  }
+
+  private normalizeSsn(value?: string) {
+    if (!value?.trim()) return null;
+    const normalized = value.replace(/\D/g, '');
+    if (!/^\d{9}$/.test(normalized)) throw new BadRequestException('Invalid social security number');
+    return normalized;
+  }
+
+  private nonEmpty(value?: string) { return value !== undefined && value.trim().length > 0; }
+  private crypto() { return this.sensitiveData ?? new EmployeeSensitiveDataCryptoService(); }
 
   async startSocial(providerInput: string, returnUrl?: string) {
     const provider = providerInput.toUpperCase();
