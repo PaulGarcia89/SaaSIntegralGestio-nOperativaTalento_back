@@ -554,7 +554,7 @@ test('plain employees are owner-scoped even inside an assigned branch', async ()
         return null;
       },
     },
-  } as any);
+  } as any, {} as any, {} as any);
   const employeeActor = actorFixture('BRANCH_USER', {
     email: 'employee.owner@example.test',
   });

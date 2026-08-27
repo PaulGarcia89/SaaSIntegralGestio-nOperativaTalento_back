@@ -209,7 +209,7 @@ export class ApplicationsService {
     authenticatedEmail: string,
     dto: CreatePublicApplicationDto,
     resume?: Express.Multer.File,
-    consentContext?: { ip?: string; userAgent?: string },
+    consentContext?: { ip?: string; userAgent?: string; portalId?: string },
   ) {
     if (dto.website) throw new BadRequestException('No fue posible validar la postulación');
     const startedAt = dto.formStartedAt ? new Date(dto.formStartedAt).getTime() : 0;
@@ -228,6 +228,19 @@ export class ApplicationsService {
       where: {
         id: vacancyId,
         status: "OPEN",
+        publications: {
+          some: {
+            status: "PUBLISHED",
+            publishedAt: { lte: new Date() },
+            OR: [
+              ...(consentContext?.portalId
+                ? [{ portalId: consentContext.portalId }]
+                : [{ channel: "PUBLIC_MARKETPLACE" as const, portalId: null }]),
+              ...(consentContext?.portalId ? [] : [{ channel: "BRANDED_CAREER_SITE" as const, portalId: null }]),
+            ],
+            AND: [{ OR: [{ closesAt: null }, { closesAt: { gt: new Date() } }] }],
+          },
+        },
       },
       select: {
         id: true,
@@ -2033,10 +2046,23 @@ export class ApplicationsService {
     schema: Prisma.JsonValue | null,
     responses: Record<string, unknown> | undefined,
   ) {
+    const source = responses ?? {};
+    const fixedKeys = new Set([
+      "educationLevel", "educationInstitution", "educationStatus", "educationStartDate",
+      "educationEndDate", "educationDescription", "schoolName", "schoolLocation",
+      "is18OrOlder", "authorizedToWorkInUS", "workedForCompany", "familyWorksForCompany",
+      "felonyConviction", "workedForCompanyExplanation", "familyWorksForCompanyExplanation",
+      "felonyConvictionExplanation", "employmentPreference", "shiftPreference", "employmentType",
+      "desiredHourlyWage", "availability", "workAuthorization", "relocation", "preferredWorkMode",
+    ]);
+    for (const [key, value] of Object.entries(source)) {
+      if (fixedKeys.has(key)) this.validateFixedDynamicResponse(key, value);
+    }
+
     if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-      return responses && Object.keys(responses).length > 0
-        ? responses
-        : undefined;
+      const unknown = Object.keys(source).filter((key) => !fixedKeys.has(key));
+      if (unknown.length) throw new BadRequestException(`Unknown dynamic fields: ${unknown.join(", ")}`);
+      return Object.keys(source).length > 0 ? source : undefined;
     }
 
     const sections = Array.isArray((schema as { sections?: unknown }).sections)
@@ -2051,14 +2077,18 @@ export class ApplicationsService {
       Array.isArray(section.fields) ? section.fields : [],
     );
 
-    if (fields.length === 0) {
-      return responses && Object.keys(responses).length > 0
-        ? responses
-        : undefined;
-    }
+    const allowedKeys = new Set([
+      ...fixedKeys,
+      ...fields.map((field) => typeof field.key === "string" ? field.key : "").filter(Boolean),
+    ]);
+    const unknown = Object.keys(source).filter((key) => !allowedKeys.has(key));
+    if (unknown.length) throw new BadRequestException(`Unknown dynamic fields: ${unknown.join(", ")}`);
+    if (fields.length === 0) return Object.keys(source).length > 0 ? source : undefined;
 
-    const source = responses ?? {};
     const normalized: Record<string, unknown> = {};
+    for (const key of fixedKeys) {
+      if (source[key] !== undefined && source[key] !== null && source[key] !== "") normalized[key] = source[key];
+    }
 
     for (const field of fields) {
       const key = typeof field.key === "string" ? field.key : "";
@@ -2098,7 +2128,7 @@ export class ApplicationsService {
       switch (type) {
         case "NUMBER": {
           const numeric = Number(rawValue);
-          if (Number.isNaN(numeric)) {
+          if (!Number.isFinite(numeric)) {
             throw new BadRequestException(
               `Invalid number for dynamic field: ${label}`,
             );
@@ -2149,6 +2179,33 @@ export class ApplicationsService {
     }
 
     return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }
+
+  private validateFixedDynamicResponse(key: string, value: unknown) {
+    if (value === null || value === undefined) return;
+    if ([
+      "relocation", "workAuthorization", "is18OrOlder", "authorizedToWorkInUS",
+      "workedForCompany", "familyWorksForCompany", "felonyConviction",
+    ].includes(key) && typeof value !== "boolean") {
+      throw new BadRequestException(`Invalid boolean for dynamic field: ${key}`);
+    }
+    if (key === "educationLevel" && !["PRIMARIA", "SECUNDARIA", "GED", "UNIVERSIDAD", "OTRO"].includes(String(value))) {
+      throw new BadRequestException(`Invalid education level for dynamic field: ${key}`);
+    }
+    if (key === "desiredHourlyWage") {
+      const amount = Number(value);
+      if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000) {
+        throw new BadRequestException(`Invalid number for dynamic field: ${key}`);
+      }
+    }
+    if (["educationStartDate", "educationEndDate"].includes(key)) {
+      if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+        throw new BadRequestException(`Invalid date for dynamic field: ${key}`);
+      }
+    }
+    if (typeof value === "string" && (value.length > 2000 || /<\s*script|<[^>]+>/i.test(value))) {
+      throw new BadRequestException(`Invalid text for dynamic field: ${key}`);
+    }
   }
 
   private async scanResume(buffer: Buffer) {

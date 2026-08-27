@@ -50,6 +50,7 @@ export class PublicApplicationsController {
       {
         ip: request.ip,
         userAgent: request.headers['user-agent'],
+        portalId: request.candidate.portalId,
       },
     );
   }

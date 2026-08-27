@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { CareerPortalAccess, CareerPortalType } from '@prisma/client';
@@ -6,6 +6,8 @@ import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ApplicantLoginDto, ApplicantRegisterDto } from './dto/applicant-auth.dto';
+import { AppException } from '../common/errors/app-exception';
+import { ErrorCode } from '../common/errors/error-code.enum';
 
 export interface ApplicantTokenPayload {
   sub: string;
@@ -30,7 +32,13 @@ export class ApplicantAuthService {
       this.prisma.applicantIdentity.findUnique({ where: { email } }),
       this.prisma.candidateAccount.findUnique({ where: { email }, include: { candidates: true } }),
     ]);
-    if (identity || legacy) throw new ConflictException('Applicant account already exists');
+    if (identity || legacy) {
+      throw new AppException(
+        'Applicant account already exists',
+        ErrorCode.APPLICANT_ACCOUNT_EXISTS,
+        HttpStatus.CONFLICT,
+      );
+    }
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const created = await this.prisma.$transaction(async (tx) => {
       const account = await tx.candidateAccount.create({ data: { email, passwordHash } });
@@ -73,6 +81,12 @@ export class ApplicantAuthService {
       include: { identity: true },
     });
     if (!session || session.status !== 'ACTIVE' || session.expiresAt <= new Date()) {
+      if (session?.status === 'REVOKED') {
+        await this.prisma.portalApplicantSession.updateMany({
+          where: { identityId: session.identityId, portalId: session.portalId, status: 'ACTIVE' },
+          data: { status: 'REVOKED', revokedAt: new Date() },
+        });
+      }
       throw new UnauthorizedException('Applicant refresh token is invalid or expired');
     }
     const next = await this.prisma.$transaction(async (tx) => {
@@ -121,7 +135,12 @@ export class ApplicantAuthService {
 
   private async resolvePortal(slug?: string, invitationToken?: string) {
     const portal = await this.prisma.careerPortal.findFirst({
-      where: { isActive: true, ...(slug ? { slug } : { type: CareerPortalType.MARKETPLACE }) },
+      where: {
+        isActive: true,
+        ...(slug
+          ? { OR: [{ slug }, { tenant: { slug } }] }
+          : { type: CareerPortalType.MARKETPLACE }),
+      },
     });
     if (!portal) throw new NotFoundException('Career portal not found');
     if (portal.access === CareerPortalAccess.INVITATION_ONLY) {

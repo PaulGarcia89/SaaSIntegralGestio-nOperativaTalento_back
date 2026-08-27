@@ -56,7 +56,13 @@ export class CandidateAuthGuard implements CanActivate {
         if (!identity?.legacyAccountId) throw new Error('Applicant has no legacy account');
         const account = await this.prisma.candidateAccount.findFirst({ where: { id: identity.legacyAccountId, email: applicant.email, isActive: true }, select: { id: true } });
         if (!account) throw new Error('Candidate account is inactive');
-        request.candidate = { sub: account.id, email: applicant.email, audience: 'candidate' };
+        request.candidate = {
+          sub: account.id,
+          email: applicant.email,
+          audience: 'candidate',
+          portalId: applicant.portalId,
+          sid: applicant.sid,
+        };
         return true;
       } catch {
         throw legacyError instanceof UnauthorizedException ? legacyError : new UnauthorizedException('Candidate token is invalid or expired');

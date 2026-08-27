@@ -12,6 +12,8 @@ export interface CandidateTokenPayload {
   sub: string;
   email: string;
   audience: 'candidate';
+  portalId?: string;
+  sid?: string;
 }
 
 @Injectable()

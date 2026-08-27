@@ -5,8 +5,9 @@ describe('ApplicantAuthService', () => {
     const firstSession = { id: 'session-1', identityId: 'identity-1', portalId: 'portal-1', status: 'ACTIVE', expiresAt: new Date(Date.now() + 60_000), identity: { id: 'identity-1', email: 'candidate@example.com' } };
     const prisma = {
       portalApplicantSession: {
-        findUnique: jest.fn().mockResolvedValueOnce(firstSession).mockResolvedValueOnce(null),
+        findUnique: jest.fn().mockResolvedValueOnce(firstSession).mockResolvedValueOnce({ ...firstSession, status: 'REVOKED' }),
         update: jest.fn(),
+        updateMany: jest.fn(),
         create: jest.fn().mockResolvedValue({ id: 'session-2' }),
       },
       applicantIdentity: { findUnique: jest.fn().mockResolvedValue({ id: 'identity-1', email: 'candidate@example.com', status: 'ACTIVE', profile: null, companyApplicants: [] }) },
@@ -19,5 +20,9 @@ describe('ApplicantAuthService', () => {
     expect(first.accessToken).toBe('access-token');
     expect(prisma.portalApplicantSession.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'session-1' }, data: expect.objectContaining({ status: 'REVOKED' }) }));
     await expect(service.refresh('refresh-token')).rejects.toThrow('Applicant refresh token is invalid or expired');
+    expect(prisma.portalApplicantSession.updateMany).toHaveBeenCalledWith({
+      where: { identityId: 'identity-1', portalId: 'portal-1', status: 'ACTIVE' },
+      data: expect.objectContaining({ status: 'REVOKED' }),
+    });
   });
 });
