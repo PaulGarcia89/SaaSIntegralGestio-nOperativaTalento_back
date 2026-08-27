@@ -228,6 +228,37 @@ enum CandidateCrmStatus {
   ARCHIVED
 }
 
+enum JobPublicationChannel {
+  PUBLIC_MARKETPLACE
+  PRIVATE_COMPANY_PORTAL
+  BRANDED_CAREER_SITE
+}
+
+enum CareerPortalType {
+  MARKETPLACE
+  COMPANY_PORTAL
+  CAREER_SITE
+}
+
+enum CareerPortalAccess {
+  PUBLIC
+  PRIVATE
+  INVITATION_ONLY
+}
+
+enum JobPublicationStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+  ARCHIVED
+}
+
+enum ApplicantSessionStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
 enum TalentActivityType {
   NOTE
   EMAIL
@@ -1225,6 +1256,7 @@ model Tenant {
   name                          String
   slug                          String                            @unique
   status                        TenantStatus                      @default(ACTIVE)
+  marketplaceEnabled            Boolean                           @default(true)
   createdAt                     DateTime                          @default(now())
   updatedAt                     DateTime                          @updatedAt
   users                         User[]
@@ -1249,6 +1281,10 @@ model Tenant {
   employees                     Employee[]
   employeeBranches              EmployeeBranch[]
   vacancies                     Vacancy[]
+  careerPortals                 CareerPortal[]
+  companyApplicants              CompanyApplicant[]
+  applicantInvitations           ApplicantInvitation[]
+  jobPublications                JobPublication[]
   vacancyFormTemplates          VacancyFormTemplate[]
   vacancyStages                 VacancyStage[]
   vacancyResponsibles           VacancyResponsible[]
@@ -3415,6 +3451,7 @@ model Vacancy {
   employeeReferrals      EmployeeReferral[]
   publicApplicationDrafts PublicApplicationDraft[]
   candidateConversionEvents CandidateConversionEvent[]
+  publications             JobPublication[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
@@ -3422,6 +3459,161 @@ model Vacancy {
   @@index([tenantId, createdByUserId])
   @@index([tenantId, requisitionId])
   @@index([clonedFromVacancyId])
+}
+
+model ApplicantIdentity {
+  id                 String                  @id @default(uuid())
+  email              String                  @unique
+  legacyAccountId    String?                 @unique
+  passwordHash       String?
+  emailVerifiedAt    DateTime?
+  status             String                  @default("ACTIVE")
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  profile            ApplicantProfile?
+  companyApplicants  CompanyApplicant[]
+  sessions           PortalApplicantSession[]
+  invitations        ApplicantInvitation[]
+  legacyAccount      CandidateAccount?       @relation(fields: [legacyAccountId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+model ApplicantProfile {
+  id                 String             @id @default(uuid())
+  identityId         String             @unique
+  fullName           String?
+  phone              String?
+  city               String?
+  linkedinUrl        String?
+  portfolioUrl       String?
+  resumeUrl          String?
+  locale             String             @default("es")
+  timezone           String             @default("UTC")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  identity           ApplicantIdentity  @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  tenantLinks        CompanyApplicant[]
+
+  @@index([city])
+}
+
+model CompanyApplicant {
+  id                 String             @id @default(uuid())
+  tenantId           String
+  identityId         String
+  profileId          String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  identity           ApplicantIdentity  @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  profile            ApplicantProfile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, identityId])
+  @@index([tenantId, createdAt])
+}
+
+model CareerPortal {
+  id                 String             @id @default(uuid())
+  tenantId           String?
+  slug               String             @unique
+  name               String
+  type               CareerPortalType
+  access             CareerPortalAccess @default(PUBLIC)
+  domain             String?
+  subdomain          String?
+  pathPrefix         String?
+  isActive            Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  tenant             Tenant?            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branding           CareerPortalBranding?
+  publications       JobPublication[]
+  sessions           PortalApplicantSession[]
+  invitations        ApplicantInvitation[]
+
+  @@index([tenantId, isActive])
+  @@index([domain, isActive])
+  @@index([subdomain, isActive])
+}
+
+model CareerPortalBranding {
+  id                 String       @id @default(uuid())
+  portalId           String       @unique
+  logoUrl            String?
+  faviconUrl         String?
+  primaryColor       String?
+  secondaryColor     String?
+  accentColor        String?
+  backgroundColor    String?
+  textColor          String?
+  fontFamily         String?
+  customCss           String?
+  seoTitle           String?
+  heroImageUrl       String?
+  footerText         String?
+  supportEmail       String?
+  title              String?
+  subtitle           String?
+  seoDescription     String?
+  portal             CareerPortal @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  updatedAt          DateTime     @updatedAt
+}
+
+model JobPublication {
+  id                 String                 @id @default(uuid())
+  tenantId           String
+  vacancyId          String
+  portalId           String?
+  channel            JobPublicationChannel
+  status             JobPublicationStatus   @default(DRAFT)
+  publicSlug         String
+  publishedAt        DateTime?
+  closesAt           DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vacancy            Vacancy                @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  portal             CareerPortal?          @relation(fields: [portalId], references: [id], onDelete: Cascade)
+
+  @@unique([channel, publicSlug])
+  @@unique([vacancyId, channel, portalId])
+  @@index([tenantId, channel, status])
+  @@index([portalId, status, publishedAt])
+}
+
+model PortalApplicantSession {
+  id                 String                @id @default(uuid())
+  identityId         String
+  portalId           String
+  refreshTokenHash   String                @unique
+  status             ApplicantSessionStatus @default(ACTIVE)
+  expiresAt          DateTime
+  lastUsedAt         DateTime?
+  revokedAt          DateTime?
+  createdAt          DateTime              @default(now())
+  identity           ApplicantIdentity     @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  portal             CareerPortal          @relation(fields: [portalId], references: [id], onDelete: Cascade)
+
+  @@index([identityId, status, expiresAt])
+  @@index([portalId, status])
+}
+
+model ApplicantInvitation {
+  id                 String          @id @default(uuid())
+  tenantId           String
+  portalId           String?
+  identityId         String?
+  email              String
+  tokenHash          String          @unique
+  expiresAt          DateTime
+  acceptedAt         DateTime?
+  createdAt          DateTime        @default(now())
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  portal             CareerPortal?   @relation(fields: [portalId], references: [id], onDelete: SetNull)
+  identity           ApplicantIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, email, expiresAt])
 }
 
 model VacancyLocation {
@@ -4076,6 +4268,7 @@ model CandidateAccount {
   externalIdentities          CandidateExternalIdentity[]
   publicApplicationDrafts     PublicApplicationDraft[]
   uploadedOnboardingDocuments EmployeeDocument[]
+  applicantIdentity           ApplicantIdentity?
 }
 
 model CandidateAccountToken {

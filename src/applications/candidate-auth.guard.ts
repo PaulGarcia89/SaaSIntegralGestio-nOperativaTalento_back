@@ -46,8 +46,21 @@ export class CandidateAuthGuard implements CanActivate {
       });
       if (!account) throw new Error('Candidate account is inactive');
       return true;
-    } catch {
-      throw new UnauthorizedException('Candidate token is invalid or expired');
+    } catch (legacyError) {
+      try {
+        const applicant = await this.jwt.verifyAsync<{ sub: string; email: string; audience: 'applicant'; portalId: string; sid: string }>(token, {
+          secret: this.config.get<string>('APPLICANT_JWT_SECRET') ?? this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+          audience: 'applicant',
+        });
+        const identity = await this.prisma.applicantIdentity.findFirst({ where: { id: applicant.sub, email: applicant.email, status: 'ACTIVE' }, select: { legacyAccountId: true } });
+        if (!identity?.legacyAccountId) throw new Error('Applicant has no legacy account');
+        const account = await this.prisma.candidateAccount.findFirst({ where: { id: identity.legacyAccountId, email: applicant.email, isActive: true }, select: { id: true } });
+        if (!account) throw new Error('Candidate account is inactive');
+        request.candidate = { sub: account.id, email: applicant.email, audience: 'candidate' };
+        return true;
+      } catch {
+        throw legacyError instanceof UnauthorizedException ? legacyError : new UnauthorizedException('Candidate token is invalid or expired');
+      }
     }
   }
 }

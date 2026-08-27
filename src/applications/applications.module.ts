@@ -19,6 +19,9 @@ import { TalentCrmController } from './talent-crm.controller';
 import { TalentCrmService } from './talent-crm.service';
 import { RecruitmentModule } from '../recruitment/recruitment.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { ApplicantAuthController } from './applicant-auth.controller';
+import { ApplicantAuthGuard } from './applicant-auth.guard';
+import { ApplicantAuthService } from './applicant-auth.service';
 
 @Module({
   imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule, RecruitmentModule, DomainEventsModule],
@@ -28,6 +31,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     CandidateAuthController,
     CandidateApplicationsController,
     TalentCrmController,
+    ApplicantAuthController,
   ],
   providers: [
     ApplicationsService,
@@ -40,6 +44,8 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     ApplicationSlaService,
     ApplicationSlaSchedulerService,
     TalentCrmService,
+    ApplicantAuthService,
+    ApplicantAuthGuard,
   ],
 })
 export class ApplicationsModule {}
