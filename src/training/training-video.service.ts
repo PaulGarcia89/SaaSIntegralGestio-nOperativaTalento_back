@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
   Prisma,
@@ -13,6 +14,7 @@ import {
   TrainingVideoEventType,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { unlink } from 'node:fs/promises';
 import { Request } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { TrainingObjectStorageService } from './training-object-storage.service';
@@ -52,6 +54,10 @@ export class TrainingVideoService {
     if (!file && !dto.videoUrl) {
       throw new BadRequestException('A video file or an authorized video URL is required');
     }
+    if (file && !this.isFileUploadEnabled()) {
+      if (file.path) await unlink(file.path).catch(() => undefined);
+      throw new ServiceUnavailableException('Video file uploads are temporarily disabled');
+    }
     if (file && (file.mimetype !== 'video/mp4' || !file.originalname.toLowerCase().endsWith('.mp4'))) {
       throw new BadRequestException('Only MP4 video files are supported');
     }
@@ -88,7 +94,20 @@ export class TrainingVideoService {
     if (!lesson && dto.moduleId && !module) throw new NotFoundException('Training course module not found');
 
     const storageKey = file ? `videos/${tenantId}/${randomUUID()}.mp4` : undefined;
-    if (file && storageKey) await this.storage.put(storageKey, file.buffer, 'video/mp4');
+    if (file && storageKey) {
+      try {
+        if (file.path) {
+          await this.storage.putFile(storageKey, file.path, 'video/mp4');
+        } else if (file.buffer) {
+          // Keep compatibility with programmatic callers and existing tests.
+          await this.storage.put(storageKey, file.buffer, 'video/mp4');
+        } else {
+          throw new BadRequestException('Uploaded video has no readable contents');
+        }
+      } finally {
+        if (file.path) await unlink(file.path).catch(() => undefined);
+      }
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const targetModule = module ?? (await tx.trainingCourseModule.create({
@@ -395,5 +414,11 @@ export class TrainingVideoService {
     if (url.protocol !== 'https:' && process.env.NODE_ENV === 'production') return false;
     const hosts = (process.env.TRAINING_VIDEO_ALLOWED_HOSTS ?? '').split(',').map((host) => host.trim()).filter(Boolean);
     return hosts.length > 0 ? hosts.includes(url.hostname) : process.env.NODE_ENV !== 'production';
+  }
+
+  private isFileUploadEnabled() {
+    const configured = process.env.TRAINING_VIDEO_UPLOAD_ENABLED;
+    if (configured !== undefined) return configured.toLowerCase() === 'true';
+    return process.env.NODE_ENV !== 'production';
   }
 }

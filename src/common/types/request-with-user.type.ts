@@ -18,6 +18,11 @@ export type RequestWithUser = Request & {
     isGlobalRoute: boolean;
     resolvedTenantId: string | null;
   };
+  restaurantInventoryContext?: {
+    companyId: string;
+    branchId: string | null;
+    warehouseId: string | null;
+  };
   tenant?: {
     id: string;
     slug: string;

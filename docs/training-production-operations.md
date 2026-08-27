@@ -2,6 +2,10 @@
 
 ## Almacenamiento SCORM
 
+Las cargas de archivos MP4 están deshabilitadas en producción por defecto con
+`TRAINING_VIDEO_UPLOAD_ENABLED=false`. Actívelas únicamente después de
+configurar almacenamiento S3/R2 persistente y desplegar nuevamente.
+
 El entorno LAN usa `SCORM_STORAGE_DRIVER=filesystem` y un volumen persistente. Para producción:
 
 - `SCORM_STORAGE_DRIVER=s3`
@@ -37,3 +41,18 @@ Respaldar conjuntamente PostgreSQL y el bucket/volumen SCORM. Probar restauracio
 - Uso de almacenamiento mayor al 80%.
 - Crecimiento anormal de paquetes o entregas.
 - Cola `training-webhook` con retraso superior a cinco minutos.
+## Video storage on Railway
+
+Training video metadata is stored in PostgreSQL, but MP4 bytes must not use the container filesystem. Configure the following Railway variables before uploading videos:
+
+```env
+SCORM_STORAGE_DRIVER=s3
+SCORM_S3_BUCKET=<bucket>
+SCORM_S3_REGION=auto
+SCORM_S3_ENDPOINT=<s3-or-r2-endpoint>
+SCORM_S3_ACCESS_KEY_ID=<access-key>
+SCORM_S3_SECRET_ACCESS_KEY=<secret-key>
+SCORM_S3_FORCE_PATH_STYLE=false
+```
+
+Existing lessons whose files were uploaded with the filesystem driver must be uploaded again or migrated to the bucket. Missing objects now return `404` instead of `500`, but the database record cannot reconstruct a deleted MP4.

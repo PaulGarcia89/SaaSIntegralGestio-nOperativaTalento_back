@@ -50,6 +50,8 @@ import { EnterpriseIntegrationsModule } from './enterprise-integrations/enterpri
 import { ProductivityModule } from './productivity/productivity.module';
 import { CompanyRegistrationsModule } from './company-registrations/company-registrations.module';
 import { CareerPortalsModule } from './career-portals/career-portals.module';
+import { InventoryCapabilitiesModule } from './inventory-capabilities/inventory-capabilities.module';
+import { RestaurantInventoryModule } from './restaurant-inventory/restaurant-inventory.module';
 
 @Module({
   imports: [
@@ -88,6 +90,8 @@ import { CareerPortalsModule } from './career-portals/career-portals.module';
     OnboardingModule,
     SignaturesModule,
     InventoryModule,
+    InventoryCapabilitiesModule,
+    RestaurantInventoryModule,
     DashboardModule,
     ReportsModule,
     TrainingModule,

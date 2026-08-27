@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  NotFoundException,
   Param,
   Post,
   Req,
@@ -12,6 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
 import { ModuleCode, TrainingVideoEventType } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { RequireModule } from '../common/decorators/module-access.decorator';
@@ -101,7 +103,7 @@ export class TrainingVideoController {
     @Res() response: Response,
   ) {
     const asset = await this.videos.getVideoAsset(req.tenant!.id, req.user.sub, assignmentId, lessonId);
-    const buffer = await this.storage.readKey(asset.storageKey);
+    const buffer = await this.readVideo(asset.storageKey);
     const requested = this.parseRange(range, buffer.length);
     response.setHeader('Content-Type', 'video/mp4');
     response.setHeader('Accept-Ranges', 'bytes');
@@ -121,6 +123,17 @@ export class TrainingVideoController {
     }
     return { start, end, partial: true };
   }
+
+  private async readVideo(storageKey: string) {
+    try {
+      return await this.storage.readKey(storageKey);
+    } catch (error: any) {
+      if (error?.code === 'ENOENT' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) {
+        throw new NotFoundException('Video file is missing from configured storage');
+      }
+      throw error;
+    }
+  }
 }
 
 @Controller('training/admin/courses')
@@ -135,6 +148,7 @@ export class TrainingVideoAdminController {
   @Post(':courseId/video')
   @RequirePermissions('training.course.update')
   @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({ destination: '/tmp' }),
     limits: { fileSize: Number(process.env.TRAINING_VIDEO_MAX_UPLOAD_BYTES ?? 500 * 1024 * 1024), files: 1 },
     fileFilter: (_req, file, callback) => callback(null, file.mimetype === 'video/mp4' && file.originalname.toLowerCase().endsWith('.mp4')),
   }))
@@ -158,7 +172,7 @@ export class TrainingVideoAdminController {
     @Res() response: Response,
   ) {
     const asset = await this.videos.getAdminVideoAsset(req.tenant!.id, courseId, lessonId);
-    const buffer = await this.storage.readKey(asset.storageKey);
+    const buffer = await this.readVideo(asset.storageKey);
     const requested = this.parseRange(range, buffer.length);
     response.setHeader('Content-Type', 'video/mp4');
     response.setHeader('Accept-Ranges', 'bytes');
@@ -177,6 +191,17 @@ export class TrainingVideoAdminController {
       return { start: 0, end: size - 1, partial: false };
     }
     return { start, end, partial: true };
+  }
+
+  private async readVideo(storageKey: string) {
+    try {
+      return await this.storage.readKey(storageKey);
+    } catch (error: any) {
+      if (error?.code === 'ENOENT' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) {
+        throw new NotFoundException('Video file is missing from configured storage');
+      }
+      throw error;
+    }
   }
 
   @Get(':courseId/progress')

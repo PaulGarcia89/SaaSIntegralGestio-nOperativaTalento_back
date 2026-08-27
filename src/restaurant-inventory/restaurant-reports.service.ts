@@ -1,0 +1,124 @@
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { PrismaService } from '../common/prisma/prisma.service';
+import { AppException } from '../common/errors/app-exception';
+import { ErrorCode } from '../common/errors/error-code.enum';
+
+export interface RestaurantReportFilters { branchId?: string; warehouseId?: string; ingredientId?: string; categoryId?: string; recipeId?: string; supplierId?: string; from?: string; to?: string; page?: number; pageSize?: number; sort?: string; direction?: 'asc' | 'desc'; }
+
+const REPORT_TYPES = new Set(['kardex', 'valued-stock', 'receipts-by-supplier', 'consumption-by-recipe', 'consumption-by-ingredient', 'recipe-cost', 'theoretical-vs-real', 'waste-by-reason', 'expiry', 'count-variances', 'rotation', 'low-stock', 'purchase-suggestions', 'profitability', 'audit']);
+
+@Injectable()
+export class RestaurantReportsService {
+  constructor(private readonly prisma: PrismaService) {}
+  private bad(message: string): never { throw new AppException(message, ErrorCode.BAD_REQUEST, HttpStatus.BAD_REQUEST); }
+  private scope(tenantId: string, f: RestaurantReportFilters) { return { tenantId, ...(f.branchId ? { branchId: f.branchId } : {}), ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}) }; }
+  private period(f: RestaurantReportFilters) { if (!f.from && !f.to) return undefined; const from = f.from ? new Date(f.from) : undefined; const to = f.to ? new Date(f.to) : undefined; if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from > to)) this.bad('Rango de fechas inválido'); return { gte: from, lte: to }; }
+  private page(f: RestaurantReportFilters) { const page = Math.max(1, Number(f.page) || 1); const pageSize = Math.min(200, Math.max(1, Number(f.pageSize) || 50)); return { page, pageSize }; }
+  private flatten(row: any) { const result: Record<string, string | number | null> = {}; for (const [key, value] of Object.entries(row ?? {})) { if (value instanceof Date) result[key] = value.toISOString(); else if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) result[key] = value as any; } return result; }
+  async variance(tenantId: string, f: { branchId?: string; warehouseId?: string; ingredientId?: string; categoryId?: string; periodStart?: string; periodEnd?: string; page?: number; pageSize?: number; sortBy?: string; sortOrder?: 'asc' | 'desc' }) {
+    const start = f.periodStart ? new Date(f.periodStart) : undefined;
+    const end = f.periodEnd ? new Date(f.periodEnd) : undefined;
+    if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime())) || (start && end && start > end)) this.bad('Rango de fechas inválido');
+    const ingredientWhere: any = { tenantId, ...(f.ingredientId ? { id: f.ingredientId } : {}), ...(f.categoryId ? { categoryId: f.categoryId } : {}) };
+    const scope: any = { tenantId, ...(f.branchId ? { branchId: f.branchId } : {}), ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}) };
+    const counts = await this.prisma.restaurantStockCount.findMany({
+      where: { ...scope, status: 'APPROVED', ...(start || end ? { countedAt: { gte: start, lte: end } } : {}) },
+      orderBy: { countedAt: 'desc' },
+      include: { items: true },
+    });
+    const latest = new Map<string, any>();
+    for (const count of counts) for (const item of count.items) if (!latest.has(item.ingredientId)) latest.set(item.ingredientId, { count, item });
+    const ingredients = await this.prisma.restaurantIngredient.findMany({ where: ingredientWhere, select: { id: true, sku: true, name: true, categoryId: true, inventoryUnitId: true } });
+    const selected = ingredients.filter((ingredient) => latest.has(ingredient.id));
+    const movements = await this.prisma.restaurantInventoryMovement.findMany({
+      where: { ...scope, ingredientId: { in: selected.map((ingredient) => ingredient.id) }, ...(end ? { occurredAt: { lte: end } } : {}) },
+      orderBy: { occurredAt: 'asc' },
+    });
+    const balances = await this.prisma.restaurantInventoryBalance.findMany({ where: { ...scope, ingredientId: { in: selected.map((ingredient) => ingredient.id) } } });
+    const users = await this.prisma.user.findMany({ where: { tenantId, id: { in: [...new Set([...latest.values()].map((row) => row.count.createdBy))] } }, select: { id: true, firstName: true, lastName: true, email: true } });
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const rows = selected.map((ingredient) => {
+      const snapshot = latest.get(ingredient.id);
+      const countAt = snapshot.count.countedAt as Date;
+      const theoretical = movements.filter((movement) => movement.ingredientId === ingredient.id && new Date(movement.occurredAt) <= countAt).reduce((sum, movement) => sum + (movement.direction === 'IN' ? Number(movement.quantity) : -Number(movement.quantity)), 0);
+      const counted = Number(snapshot.item.countedQuantity);
+      const averageCost = Number(balances.find((balance) => balance.ingredientId === ingredient.id)?.averageCost ?? snapshot.item.averageCost ?? 0);
+      const absolute = counted - theoretical;
+      const percentage = theoretical === 0 ? (absolute === 0 ? 0 : null) : (absolute / Math.abs(theoretical)) * 100;
+      const user = userMap.get(snapshot.count.createdBy);
+      return { ingredient: { id: ingredient.id, sku: ingredient.sku, name: ingredient.name, categoryId: ingredient.categoryId, inventoryUnitId: ingredient.inventoryUnitId }, theoreticalQuantity: Number(theoretical.toFixed(6)), countedQuantity: Number(counted.toFixed(6)), absoluteVariance: Number(absolute.toFixed(6)), percentageVariance: percentage === null ? null : Number(percentage.toFixed(4)), theoreticalCost: Number((theoretical * averageCost).toFixed(2)), realCost: Number((counted * averageCost).toFixed(2)), monetaryDifference: Number((absolute * averageCost).toFixed(2)), lastCount: { id: snapshot.count.id, number: snapshot.count.countNumber, countedAt: countAt, status: snapshot.count.status }, responsibleUser: user ? { id: user.id, name: `${user.firstName} ${user.lastName}`.trim(), email: user.email } : { id: snapshot.count.createdBy, name: null, email: null }, reviewStatus: Math.abs(percentage ?? 0) > 5 ? 'REVIEW_REQUIRED' : 'WITHIN_TOLERANCE' };
+    });
+    const sortBy = f.sortBy ?? 'ingredient.name'; const desc = f.sortOrder === 'desc';
+    rows.sort((a: any, b: any) => { const value = (row: any) => sortBy === 'ingredient.name' ? row.ingredient.name : row[sortBy] ?? ''; const left = value(a); const right = value(b); return (typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right), undefined, { numeric: true })) * (desc ? -1 : 1); });
+    const page = Math.max(1, Number(f.page) || 1); const pageSize = Math.min(200, Math.max(1, Number(f.pageSize) || 50)); const total = rows.length;
+    return { rows: rows.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)), filters: { branchId: f.branchId ?? null, warehouseId: f.warehouseId ?? null, ingredientId: f.ingredientId ?? null, categoryId: f.categoryId ?? null, periodStart: start?.toISOString() ?? null, periodEnd: end?.toISOString() ?? null } };
+  }
+  async advancedDashboard(tenantId: string, f: RestaurantReportFilters) {
+    const scope = this.scope(tenantId, f);
+    const period = this.period(f);
+    const [balances, ingredients, lots, recipes, movements, waste, counts] = await Promise.all([
+      this.prisma.restaurantInventoryBalance.findMany({ where: scope }),
+      this.prisma.restaurantIngredient.findMany({ where: { tenantId }, select: { id: true, name: true, minimumStock: true } }),
+      this.prisma.restaurantInventoryLot.findMany({ where: { ...scope, remainingQuantity: { gt: 0 } }, orderBy: { expirationDate: 'asc' }, take: 10 }),
+      this.prisma.restaurantRecipe.findMany({ where: { tenantId, status: 'ACTIVE' }, take: 10 }),
+      this.prisma.restaurantInventoryMovement.findMany({ where: { ...scope, direction: 'OUT', ...(period ? { occurredAt: period } : {}) }, orderBy: { occurredAt: 'asc' }, take: 100 }),
+      this.prisma.restaurantWasteRecord.findMany({ where: { ...scope, status: 'CONFIRMED', ...(period ? { wasteDate: period } : {}) }, include: { items: true } }),
+      this.prisma.restaurantStockCount.findMany({ where: { ...scope, status: 'APPROVED', ...(period ? { countedAt: period } : {}) }, include: { items: true } }),
+    ]);
+    const criticalIngredients = ingredients.map((ingredient) => ({ name: ingredient.name, stock: balances.filter((balance) => balance.ingredientId === ingredient.id).reduce((sum, balance) => sum + Number(balance.quantityOnHand), 0), minimum: Number(ingredient.minimumStock) })).filter((item) => item.stock <= item.minimum).slice(0, 10);
+    const inventoryValue = balances.reduce((sum, balance) => sum + Number(balance.quantityOnHand) * Number(balance.averageCost), 0);
+    const periodConsumption = movements.reduce((sum, movement) => sum + Number(movement.totalCost), 0);
+    const wasteValue = waste.reduce((sum, record) => sum + record.items.reduce((itemSum, item) => itemSum + Number(item.convertedInventoryQuantity) * Number(item.unitCostSnapshot), 0), 0);
+    const inventoryDifference = counts.reduce((sum, count) => sum + count.items.reduce((itemSum, item) => itemSum + Number(item.varianceValue), 0), 0);
+    return { inventoryValue, periodConsumption, waste: wasteValue, inventoryDifference, criticalIngredients, upcomingExpirations: lots.map((lot: any) => ({ name: lot.ingredientId, lot: lot.lotNumber, expiresAt: lot.expirationDate, quantity: Number(lot.remainingQuantity) })), highestCostRecipes: recipes.map((recipe: any) => ({ name: recipe.name, cost: Number(recipe.calculatedCost) })).sort((a, b) => b.cost - a.cost).slice(0, 5), lowestMarginRecipes: recipes.map((recipe: any) => ({ name: recipe.name, margin: recipe.sellingPrice ? (Number(recipe.sellingPrice) - Number(recipe.calculatedCost)) / Number(recipe.sellingPrice) * 100 : 0 })).sort((a, b) => a.margin - b.margin).slice(0, 5), consumptionTrend: movements.map((movement: any) => ({ label: new Date(movement.occurredAt).toISOString().slice(0, 10), value: Number(movement.totalCost) })), purchaseSuggestions: criticalIngredients.map((item) => ({ ingredientName: item.name, suggestedQuantity: Math.max(0, item.minimum - item.stock), unit: '', reason: 'Existencia bajo mínimo' })) };
+  }
+  async indicators(tenantId: string, f: RestaurantReportFilters = {}) {
+    const scope = this.scope(tenantId, f); const period = this.period(f); const days = period && f.from && f.to ? Math.max(1, (new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000) : 30;
+    const ingredientWhere: any = { tenantId, ...(f.ingredientId ? { id: f.ingredientId } : {}), ...(f.categoryId ? { categoryId: f.categoryId } : {}) };
+    const [balances, ingredients, movements, waste, consumptions] = await Promise.all([
+      this.prisma.restaurantInventoryBalance.findMany({ where: { ...scope, ...(f.ingredientId ? { ingredientId: f.ingredientId } : {}) } }),
+      this.prisma.restaurantIngredient.findMany({ where: ingredientWhere, select: { id: true, name: true, minimumStock: true } }),
+      this.prisma.restaurantInventoryMovement.findMany({ where: { ...scope, direction: 'OUT', movementType: 'CONSUMPTION', ...(f.ingredientId ? { ingredientId: f.ingredientId } : {}), ...(period ? { occurredAt: period } : {}) } }),
+      this.prisma.restaurantWasteRecord.findMany({ where: { ...scope, status: 'CONFIRMED', ...(period ? { wasteDate: period } : {}) }, include: { items: true } }),
+      this.prisma.restaurantConsumptionRecord.findMany({ where: { ...scope, status: 'CONFIRMED', ...(f.recipeId ? { items: { some: { recipeId: f.recipeId } } } : {}), ...(period ? { consumptionDate: period } : {}) }, include: { items: true } }),
+    ]);
+    const inventoryValue = balances.reduce((sum, row) => sum + Number(row.quantityOnHand) * Number(row.averageCost), 0); const consumptionCost = movements.reduce((sum, row) => sum + Number(row.totalCost), 0); const wasteCost = waste.reduce((sum, record) => sum + record.items.reduce((sub, item) => sub + Number(item.convertedInventoryQuantity) * Number(item.unitCostSnapshot), 0), 0); const revenue = consumptions.reduce((sum, record) => sum + record.items.reduce((sub, item) => sub + Number(item.quantitySold) * Number(item.sellingPriceSnapshot ?? 0), 0), 0); const foodCost = revenue > 0 ? (consumptionCost / revenue) * 100 : null; const margin = revenue - consumptionCost; const rotation = inventoryValue > 0 ? (consumptionCost / inventoryValue) * (365 / days) : 0;
+    const stock = new Map<string, number>(); for (const row of balances) stock.set(row.ingredientId, (stock.get(row.ingredientId) ?? 0) + Number(row.quantityOnHand)); const purchasesSuggested = ingredients.map((ingredient) => ({ ingredientId: ingredient.id, ingredientName: ingredient.name, currentStock: stock.get(ingredient.id) ?? 0, minimumStock: Number(ingredient.minimumStock), suggestedQuantity: Math.max(0, Number(ingredient.minimumStock) - (stock.get(ingredient.id) ?? 0)) })).filter((row) => row.suggestedQuantity > 0);
+    return { generatedAt: new Date().toISOString(), periodDays: days, inventoryValue, consumptionCost, wasteCost, foodCostPercentage: foodCost, margin, marginPercentage: revenue > 0 ? (margin / revenue) * 100 : null, rotation, purchasesSuggested };
+  }
+  async report(tenantId: string, type: string, filters: RestaurantReportFilters = {}) {
+    if (!REPORT_TYPES.has(type)) this.bad(`Unknown restaurant report: ${type}`);
+    const raw = await this.rows(tenantId, type, filters); const page = this.page(filters); let rows = raw.map((row) => this.flatten(row));
+    if (filters.sort) rows = rows.sort((a, b) => String(a[filters.sort!] ?? '').localeCompare(String(b[filters.sort!] ?? ''), undefined, { numeric: true }) * (filters.direction === 'desc' ? -1 : 1));
+    const total = rows.length; const start = (page.page - 1) * page.pageSize; const paged = rows.slice(start, start + page.pageSize); const columns = paged.length ? Object.keys(paged[0]).map((key) => ({ key, label: key.replace(/([A-Z])/g, ' $1').replace(/^./, (value) => value.toUpperCase()) })) : [];
+    const numericTotal = paged.reduce((sum, row) => sum + Object.values(row).reduce<number>((value, cell) => value + (typeof cell === 'number' ? cell : 0), 0), 0);
+    return { report: type, generatedAt: new Date().toISOString(), columns, rows: paged, summary: [{ label: 'Registros', value: total }, { label: 'Total numérico', value: Number(numericTotal.toFixed(2)) }], page: page.page, pageSize: page.pageSize, total, totalPages: Math.max(1, Math.ceil(total / page.pageSize)) };
+  }
+  private async rows(tenantId: string, type: string, f: RestaurantReportFilters): Promise<any[]> {
+    const scope = this.scope(tenantId, f); const period = this.period(f);
+    const ingredients = await this.prisma.restaurantIngredient.findMany({ where: { tenantId, ...(f.ingredientId ? { id: f.ingredientId } : {}), ...(f.categoryId ? { categoryId: f.categoryId } : {}) }, select: { id: true, name: true, minimumStock: true, categoryId: true, currentAverageCost: true } });
+    const ingredientIds = ingredients.map((ingredient) => ingredient.id);
+    const recipes = await this.prisma.restaurantRecipe.findMany({ where: { tenantId, ...(f.recipeId ? { id: f.recipeId } : {}), ...(f.categoryId ? { categoryId: f.categoryId } : {}) }, select: { id: true, code: true, name: true, calculatedCost: true, sellingPrice: true } });
+    const recipeIds = recipes.map((recipe) => recipe.id);
+    const scopedIngredients = f.ingredientId || f.categoryId ? { ingredientId: { in: ingredientIds } } : {};
+    switch (type) {
+      case 'kardex': return this.prisma.restaurantInventoryMovement.findMany({ where: { ...scope, ...scopedIngredients, ...(period ? { occurredAt: period } : {}) }, orderBy: { occurredAt: 'desc' } });
+      case 'valued-stock': { const rows = await this.prisma.restaurantInventoryBalance.findMany({ where: { ...scope, ...scopedIngredients }, orderBy: { updatedAt: 'desc' } }); return rows.map((row) => ({ ...row, value: Number(row.quantityOnHand) * Number(row.averageCost) })); }
+      case 'receipts-by-supplier': return this.prisma.restaurantGoodsReceipt.findMany({ where: { ...scope, ...(f.supplierId ? { supplierId: f.supplierId } : {}), ...(period ? { receivedAt: period } : {}) }, include: { items: true }, orderBy: { receivedAt: 'desc' } });
+      case 'consumption-by-recipe': return this.prisma.restaurantConsumptionRecord.findMany({ where: { ...scope, ...(f.recipeId || f.categoryId ? { items: { some: { recipeId: { in: recipeIds } } } } : {}), ...(period ? { consumptionDate: period } : {}) }, include: { items: true }, orderBy: { consumptionDate: 'desc' } });
+      case 'consumption-by-ingredient': { const movements = await this.prisma.restaurantInventoryMovement.findMany({ where: { ...scope, ...scopedIngredients, movementType: 'CONSUMPTION', ...(period ? { occurredAt: period } : {}) } }); const grouped = new Map<string, any>(); for (const movement of movements) { const row = grouped.get(movement.ingredientId) ?? { ingredientId: movement.ingredientId, quantity: 0, totalCost: 0 }; row.quantity += Number(movement.quantity); row.totalCost += Number(movement.totalCost); grouped.set(movement.ingredientId, row); } return [...grouped.values()].map((row) => ({ ...row, ingredient: ingredients.find((ingredient) => ingredient.id === row.ingredientId) ?? null })); }
+      case 'recipe-cost':
+      case 'profitability': return recipes.map((recipe) => { const cost = Number(recipe.calculatedCost); const price = Number(recipe.sellingPrice ?? 0); return { recipeId: recipe.id, code: recipe.code, name: recipe.name, calculatedCost: cost, sellingPrice: price, margin: price - cost, marginPercent: price ? ((price - cost) / price) * 100 : 0 }; });
+      case 'theoretical-vs-real': { const movements = await this.prisma.restaurantInventoryMovement.findMany({ where: { ...scope, ...scopedIngredients, movementType: 'CONSUMPTION', ...(period ? { occurredAt: period } : {}) } }); const actual = new Map<string, number>(); for (const movement of movements) actual.set(movement.ingredientId, (actual.get(movement.ingredientId) ?? 0) + Number(movement.quantity)); const records: any[] = await this.prisma.restaurantConsumptionRecord.findMany({ where: { ...scope, ...(f.recipeId || f.categoryId ? { items: { some: { recipeId: { in: recipeIds } } } } : {}), ...(period ? { consumptionDate: period } : {}) }, include: { items: true } }); const usedRecipeIds = [...new Set(records.flatMap((record) => record.items.map((item: any) => item.recipeId)))]; const recipeRows: any[] = await this.prisma.restaurantRecipe.findMany({ where: { tenantId, id: { in: usedRecipeIds } }, include: { items: true } }); const recipeMap = new Map(recipeRows.map((recipe) => [recipe.id, recipe])); const theoretical = new Map<string, number>(); for (const record of records) for (const item of record.items) for (const line of recipeMap.get(item.recipeId)?.items ?? []) theoretical.set(line.ingredientId, (theoretical.get(line.ingredientId) ?? 0) + Number(line.convertedInventoryQuantity) * Number(item.quantitySold) * (1 + Number(line.wastePercentage ?? 0) / 100)); const ids = new Set([...actual.keys(), ...theoretical.keys()]); return [...ids].map((ingredientId) => ({ ingredientId, ingredient: ingredients.find((ingredient) => ingredient.id === ingredientId) ?? null, theoreticalQuantity: theoretical.get(ingredientId) ?? 0, realQuantity: actual.get(ingredientId) ?? 0, varianceQuantity: (actual.get(ingredientId) ?? 0) - (theoretical.get(ingredientId) ?? 0) })); }
+      case 'waste-by-reason': return this.prisma.restaurantWasteRecord.findMany({ where: { ...scope, ...scopedIngredients, ...(period ? { wasteDate: period } : {}) }, include: { items: true }, orderBy: { wasteDate: 'desc' } });
+      case 'expiry': return this.prisma.restaurantInventoryLot.findMany({ where: { ...scope, ...scopedIngredients, remainingQuantity: { gt: 0 } }, orderBy: { expirationDate: 'asc' } });
+      case 'count-variances': return this.prisma.restaurantStockCount.findMany({ where: { ...scope, ...(period ? { countedAt: period } : {}) }, include: { items: true }, orderBy: { countedAt: 'desc' } });
+      case 'audit': return this.prisma.auditLog.findMany({ where: { tenantId, ...(period ? { createdAt: period } : {}), action: { contains: 'INVENTORY' } }, orderBy: { createdAt: 'desc' } });
+      case 'low-stock':
+      case 'rotation':
+      case 'purchase-suggestions': { const balances = await this.prisma.restaurantInventoryBalance.findMany({ where: { ...scope, ...scopedIngredients } }); const movements = await this.prisma.restaurantInventoryMovement.findMany({ where: { ...scope, ...scopedIngredients, movementType: 'CONSUMPTION', ...(period ? { occurredAt: period } : {}) } }); const stock = new Map<string, number>(); const consumed = new Map<string, number>(); for (const balance of balances) stock.set(balance.ingredientId, (stock.get(balance.ingredientId) ?? 0) + Number(balance.quantityOnHand)); for (const movement of movements) consumed.set(movement.ingredientId, (consumed.get(movement.ingredientId) ?? 0) + Number(movement.quantity)); return ingredients.map((ingredient) => { const currentStock = stock.get(ingredient.id) ?? 0; const consumption = consumed.get(ingredient.id) ?? 0; return { ingredientId: ingredient.id, name: ingredient.name, currentStock, minimumStock: Number(ingredient.minimumStock), averageDailyConsumption: consumption / Math.max(1, f.from && f.to ? (new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000 : 30), suggestedPurchase: Math.max(0, Number(ingredient.minimumStock) - currentStock), turnover: currentStock ? consumption / currentStock : 0 }; }).filter((row) => type !== 'low-stock' || row.currentStock <= row.minimumStock).filter((row) => type !== 'purchase-suggestions' || row.suggestedPurchase > 0); }
+      default: throw new AppException(`Unknown restaurant report: ${type}`, ErrorCode.BAD_REQUEST, HttpStatus.BAD_REQUEST);
+    }
+  }
+  async exportCsv(tenantId: string, actorId: string, type: string, filters: RestaurantReportFilters) { const report = await this.report(tenantId, type, { ...filters, page: 1, pageSize: 200 }); const keys = report.columns.map((column) => column.key); const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""').replace(/^[=+\-@]/, "'$&")}"`; return { filename: `inventario-${type}.csv`, mimeType: 'text/csv;charset=utf-8', generatedBy: actorId, content: `\uFEFF${[keys, ...report.rows.map((row) => keys.map((key) => cell(row[key])))].map((row) => row.join(',')).join('\r\n')}` }; }
+}

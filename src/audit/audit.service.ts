@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { AccessScope, AuditDomain, Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RequestWithUser } from '../common/types/request-with-user.type';
@@ -48,7 +49,7 @@ export class AuditService {
       actorRole: request.user?.role ?? null,
       actorScope,
       actorTenantId,
-      branchId: request.branch?.id ?? request.user?.activeBranchId ?? null,
+      branchId: request.restaurantInventoryContext?.branchId ?? request.branch?.id ?? request.user?.activeBranchId ?? null,
       correlationId: request.requestId ?? null,
       email,
       domain,
@@ -65,6 +66,24 @@ export class AuditService {
       userAgent: this.resolveUserAgent(request),
       userId: request.user?.sub ?? null,
     });
+    if (targetTenantId && route.includes('restaurant-inventory')) await this.safeCreateInventoryAudit(request, route, action ?? 'INVENTORY_REQUEST', targetTenantId);
+  }
+
+  private async safeCreateInventoryAudit(request: RequestWithUser, route: string, action: string, tenantId: string) {
+    try {
+      const actorId = request.user?.sub ?? null;
+      const actor = actorId ? await this.prisma.user.findFirst({ where: { id: actorId, tenantId }, select: { firstName: true, lastName: true } }) : null;
+      const now = new Date();
+      const event = { tenantId, branchId: request.restaurantInventoryContext?.branchId ?? request.branch?.id ?? request.user?.activeBranchId ?? null, warehouseId: request.restaurantInventoryContext?.warehouseId ?? null, actorId, actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : null, action, entityType: request.auditEntityType ?? null, entityId: request.auditEntityId ?? null, before: request.auditBefore ?? null, after: request.auditAfter ?? (request.method === 'GET' ? null : request.body ?? null), reason: typeof request.body?.reason === 'string' ? request.body.reason : typeof request.body?.justification === 'string' ? request.body.justification : null, ipAddress: this.resolveIp(request), userAgent: this.resolveUserAgent(request), createdAt: now.toISOString(), requestId: request.requestId ?? null, idempotencyKey: request.header('Idempotency-Key')?.trim() || null };
+      const payload = JSON.stringify(event);
+      const hash = createHash('sha256').update(payload).digest('hex');
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}))`;
+        if (event.requestId) { const existing = await tx.restaurantInventoryAuditLog.findFirst({ where: { tenantId, requestId: event.requestId, action }, select: { id: true } }); if (existing) return; }
+        const previous = await tx.restaurantInventoryAuditLog.findFirst({ where: { tenantId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { hash: true } });
+        await tx.restaurantInventoryAuditLog.create({ data: { ...event, before: event.before as any, after: event.after as any, createdAt: now, hash, previousHash: previous?.hash ?? null } as any });
+      });
+    } catch (error) { this.logger.warn(`Inventory audit persistence failed: ${this.stringifyError(error)}`); }
   }
 
   async createAuditLog(input: CreateAuditLogInput) {

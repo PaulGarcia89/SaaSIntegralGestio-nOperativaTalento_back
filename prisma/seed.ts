@@ -10,6 +10,7 @@ import {
   SubscriptionStatus,
   TenantStatus,
   UserStatus,
+  RestaurantInventoryUnitType,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
@@ -47,6 +48,37 @@ const permissionCatalog = [
   'training.analytics.read', 'training.compliance.manage', 'training.reports.export',
   'training.integrations.manage',
   'inventory.read', 'inventory.manage',
+  'inventory.view', 'inventory.create', 'inventory.update', 'inventory.confirm', 'inventory.cancel', 'inventory.override',
+  'asset_inventory.read', 'asset_inventory.manage',
+  'restaurant_inventory.read', 'restaurant_inventory.manage',
+  'inventory.view', 'inventory.ingredient.manage', 'inventory.supplier.manage',
+  'inventory.receipt.create', 'inventory.receipt.confirm', 'inventory.receipt.cancel',
+  'inventory.recipe.manage', 'inventory.consumption.create', 'inventory.consumption.confirm',
+  'inventory.consumption.cancel', 'inventory.waste.create', 'inventory.waste.confirm',
+  'inventory.waste.cancel', 'inventory.negative_stock.override', 'inventory.movement.view', 'inventory.report.view',
+  'inventory.production.create', 'inventory.production.confirm', 'inventory.lot.view',
+  'inventory.stock_count.create', 'inventory.stock_count.approve', 'inventory.adjustment.approve',
+  'inventory.transfer.create', 'inventory.transfer.send', 'inventory.transfer.receive',
+  'inventory.sales_import.create', 'inventory.sales_import.validate', 'inventory.sales_import.map',
+  'inventory.sales_import.process', 'inventory.sales_import.reverse', 'inventory.sales_import.view',
+  'inventory.report.export',
+  'restaurant_inventory.receipts.create', 'restaurant_inventory.receipts.confirm',
+  'restaurant_inventory.recipes.manage', 'restaurant_inventory.operations.create',
+  'restaurant_inventory.operations.confirm', 'restaurant_inventory.counts.approve',
+  'restaurant_inventory.adjustments.create', 'restaurant_inventory.transfers.manage',
+  'restaurant_inventory.settings.manage',
+  'restaurant_inventory.purchase_orders.create', 'restaurant_inventory.purchase_orders.update',
+  'restaurant_inventory.purchase_orders.submit', 'restaurant_inventory.purchase_orders.approve',
+  'restaurant_inventory.purchase_orders.reject', 'restaurant_inventory.purchase_orders.cancel',
+  'restaurant_inventory.purchase_orders.receive', 'restaurant_inventory.price_history.view',
+  'restaurant_inventory.purchase_suggestions.view', 'restaurant_inventory.invoices.upload',
+  'restaurant_inventory.invoices.process', 'restaurant_inventory.invoices.reconcile',
+  'restaurant_inventory.invoices.approve',
+  'restaurant_inventory.variance.view', 'restaurant_inventory.expiry_alerts.view',
+  'restaurant_inventory.stock_counts.create', 'restaurant_inventory.stock_counts.schedule',
+  'restaurant_inventory.shrinkage.view', 'restaurant_inventory.audit.view',
+  'restaurant_inventory.audit.read',
+  'restaurant_inventory.commercial.view', 'restaurant_inventory.commissary.manage', 'restaurant_inventory.budgets.manage',
   'productivity.view', 'productivity.manage',
   'users.read', 'users.create', 'users.update', 'users.delete',
   'employees.read', 'employees.create', 'employees.update', 'employees.delete',
@@ -96,6 +128,12 @@ const supervisorPermissionCatalog = permissionCatalog.filter((permission) =>
   permission === 'applications.read' ||
   permission === 'training.read' ||
   permission === 'inventory.read' ||
+  permission === 'restaurant_inventory.expiry_alerts.view' ||
+  permission === 'restaurant_inventory.variance.view' ||
+  permission === 'restaurant_inventory.shrinkage.view' ||
+  permission === 'restaurant_inventory.audit.read' ||
+  permission === 'restaurant_inventory.commercial.view' ||
+  permission === 'asset_inventory.read' ||
   permission === 'notifications.read_own' ||
   permission === 'notifications.update_own',
 );
@@ -137,6 +175,8 @@ const scopedRoleCatalog = [
     description: 'Branch-scoped custody, delivery, transfer and return operations',
     permissions: permissionCatalog.filter((permission) =>
       permission.startsWith('inventory.') ||
+      permission.startsWith('asset_inventory.') ||
+      permission.startsWith('restaurant_inventory.') ||
       permission === 'employees.read' ||
       permission === 'branches.read' ||
       permission === 'branch.switch' ||
@@ -197,6 +237,18 @@ const automationRuleTemplates = [
 ];
 
 async function main() {
+  const commonUnits = [
+    { name: 'Gramo', abbreviation: 'g', type: RestaurantInventoryUnitType.WEIGHT, conversionFactor: 1 },
+    { name: 'Kilogramo', abbreviation: 'kg', type: RestaurantInventoryUnitType.WEIGHT, conversionFactor: 1000 },
+    { name: 'Mililitro', abbreviation: 'ml', type: RestaurantInventoryUnitType.VOLUME, conversionFactor: 1 },
+    { name: 'Litro', abbreviation: 'l', type: RestaurantInventoryUnitType.VOLUME, conversionFactor: 1000 },
+    { name: 'Unidad', abbreviation: 'ud', type: RestaurantInventoryUnitType.UNIT, conversionFactor: 1 },
+  ];
+  for (const unit of commonUnits) {
+    const exists = await prisma.restaurantInventoryUnit.findFirst({ where: { tenantId: null, abbreviation: unit.abbreviation } });
+    if (!exists) await prisma.restaurantInventoryUnit.create({ data: unit });
+  }
+
   for (const entry of moduleCatalog) {
     await prisma.featureModule.upsert({
       where: { code: entry.code },

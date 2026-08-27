@@ -1,6 +1,7 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 
@@ -25,6 +26,27 @@ export class TrainingObjectStorageService {
     if (!absolute.startsWith(`${root}${path.sep}`)) throw new Error('Unsafe storage key');
     await mkdir(path.dirname(absolute), { recursive: true });
     await writeFile(absolute, body, { mode: 0o640 });
+    return absolute;
+  }
+
+  async putFile(key: string, filePath: string, contentType?: string) {
+    if (this.client) {
+      await this.client.send(new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: createReadStream(filePath),
+        ContentType: contentType,
+        ServerSideEncryption: process.env.SCORM_S3_SSE === 'false' ? undefined : 'AES256',
+      }));
+      return `s3://${this.bucket}/${key}`;
+    }
+
+    const root = path.resolve(process.env.SCORM_STORAGE_ROOT ?? path.join(process.cwd(), 'storage', 'scorm'));
+    const absolute = path.resolve(root, key);
+    if (!absolute.startsWith(`${root}${path.sep}`)) throw new Error('Unsafe storage key');
+    await mkdir(path.dirname(absolute), { recursive: true });
+    await copyFile(filePath, absolute);
+    await chmod(absolute, 0o640);
     return absolute;
   }
 

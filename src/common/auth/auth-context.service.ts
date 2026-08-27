@@ -164,7 +164,7 @@ export class AuthContextService {
             });
     const tenantCapabilities =
       effectiveTenantId === null
-        ? { enabledModules: [] as never[], plan: null }
+        ? { enabledModules: [] as never[], plan: null, inventoryCapabilities: [] }
         : await this.platformAccessService.getTenantCapabilities(effectiveTenantId);
     const subscriptionState =
       activeTenant?.subscription
@@ -259,6 +259,7 @@ export class AuthContextService {
         : Promise.resolve({
             enabledModules: [] as never[],
             planModules: [] as never[],
+            inventoryCapabilities: [],
             plan: null,
             subscription: null,
             featureFlags: [],
@@ -319,6 +320,7 @@ export class AuthContextService {
       plan: tenantCapabilities.plan,
       subscription: tenantCapabilities.subscription,
       featureFlags: [...featureFlags],
+      inventoryCapabilities: tenantCapabilities.inventoryCapabilities,
       canAccessGlobalGovernance,
       preferences,
       menu: tenantCapabilities.navigation,

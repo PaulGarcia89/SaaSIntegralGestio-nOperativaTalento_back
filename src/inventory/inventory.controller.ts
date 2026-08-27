@@ -13,6 +13,9 @@ import { TenantGuard } from '../common/guards/tenant.guard';
 import { RequestWithUser } from '../common/types/request-with-user.type';
 import { AdjustInventoryStockDto, AssignInventoryAssetDto, CountInventoryStockDto, CreateInventoryAssetDto, CreateInventoryItemDto, CreateInventoryLocationDto, CreateInventoryMaintenanceDto, CreateInventorySupplierDto, CreatePurchaseOrderDto, InventoryOperationDto, ListInventoryAssetsDto, ListInventoryWarehouseDto, ReceivePurchaseOrderDto, ResolveInventoryMaintenanceDto, TransferInventoryAssetDto, UpdateInventoryStockPolicyDto, ValidateInventoryReturnDto } from './dto/inventory.dto';
 import { InventoryService } from './inventory.service';
+import { InventoryCapabilityGuard } from '../inventory-capabilities/inventory-capability.guard';
+import { RequireInventoryCapability } from '../inventory-capabilities/inventory-capability.decorator';
+import { InventoryCapabilityCode } from '@prisma/client';
 
 const fileOptions = {
   limits: { fileSize: 15 * 1024 * 1024, files: 1 },
@@ -21,8 +24,9 @@ const fileOptions = {
 };
 
 @Controller('inventory')
-@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard, InventoryCapabilityGuard)
 @RequireModule(ModuleCode.INVENTORY)
+@RequireInventoryCapability(InventoryCapabilityCode.ASSET_INVENTORY)
 export class InventoryController {
   constructor(private readonly service: InventoryService) {}
 

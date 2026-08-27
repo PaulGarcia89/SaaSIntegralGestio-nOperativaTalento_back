@@ -149,7 +149,6 @@ export class TrainingController {
       dto,
     );
   }
-
   @Post('quizzes/:quizId/attempts')
   @RequirePermissions('training.update')
   createAttempt(@Req() request: RequestWithUser, @Param('quizId') quizId: string) {
