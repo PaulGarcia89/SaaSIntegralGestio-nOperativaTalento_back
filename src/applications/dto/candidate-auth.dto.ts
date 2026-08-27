@@ -51,5 +51,6 @@ export class CandidateProfileDto {
   @IsOptional() @IsBoolean() offerNotifications?: boolean;
   @IsOptional() @IsBoolean() marketingConsent?: boolean;
   @IsOptional() @IsObject() applicationProfile?: Record<string, unknown>;
-  @IsOptional() @IsString() @MaxLength(11) socialSecurityNumber?: string;
+  // Temporary format relaxation for environments without a real SSN.
+  @IsOptional() @IsString() @MaxLength(64) socialSecurityNumber?: string;
 }

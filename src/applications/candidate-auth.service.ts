@@ -213,8 +213,11 @@ export class CandidateAuthService {
   private normalizeSsn(value?: string) {
     if (!value?.trim()) return null;
     const normalized = value.replace(/\D/g, '');
-    if (!/^\d{9}$/.test(normalized)) throw new BadRequestException('Invalid social security number');
-    return normalized;
+    if (this.config.get<string>('ALLOW_NON_STANDARD_SSN') !== 'true' && !/^\d{9}$/.test(normalized)) {
+      throw new BadRequestException('Invalid social security number');
+    }
+    // Relaxed mode is explicit and still encrypts the submitted value.
+    return normalized || value.trim();
   }
 
   private nonEmpty(value?: string) { return value !== undefined && value.trim().length > 0; }
