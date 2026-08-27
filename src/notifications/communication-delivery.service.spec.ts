@@ -45,6 +45,7 @@ describe('CommunicationDeliveryService', () => {
       SMTP_HOST: 'mail.example.com',
       SMTP_PORT: '465',
       SMTP_SECURE: 'true',
+      SMTP_FAMILY: '4',
       SMTP_USER: 'talento@example.com',
       SMTP_PASSWORD: 'secret',
       NOTIFICATION_FROM_EMAIL: 'Talento <talento@example.com>',
@@ -57,6 +58,7 @@ describe('CommunicationDeliveryService', () => {
     expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.objectContaining({
       host: 'mail.example.com',
       port: 465,
+      family: 4,
       secure: true,
       auth: { user: 'talento@example.com', pass: 'secret' },
     }));

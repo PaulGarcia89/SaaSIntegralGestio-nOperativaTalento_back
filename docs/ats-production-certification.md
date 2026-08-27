@@ -56,6 +56,7 @@ EMAIL_PROVIDER=SMTP
 SMTP_HOST=mail.example.com
 SMTP_PORT=465
 SMTP_SECURE=true
+SMTP_FAMILY=4
 SMTP_USER=talento@example.com
 SMTP_PASSWORD=<secreto>
 NOTIFICATION_FROM_EMAIL=Talento <talento@example.com>
