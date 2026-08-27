@@ -26,6 +26,15 @@ describe('CareerPortalAccessGuard', () => {
     await expect(guard.canActivate(context({ params: { slug: 'acme' }, headers: {} }))).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('allows an authenticated applicant into a private portal without an invitation', async () => {
+    prisma.careerPortal.findFirst.mockResolvedValue({ id: 'portal-1', access: 'PRIVATE', tenantId: 'tenant-1' });
+    jwt.verifyAsync.mockResolvedValue({ sub: 'identity-1', email: 'candidate@example.com', audience: 'applicant', portalId: 'portal-1', sid: 'session-1' });
+    prisma.applicantIdentity.findFirst.mockResolvedValue({ id: 'identity-1' });
+
+    await expect(guard.canActivate(context({ params: { slug: 'acme' }, headers: { authorization: 'Bearer token' } }))).resolves.toBe(true);
+    expect(prisma.applicantInvitation.findFirst).not.toHaveBeenCalled();
+  });
+
   it('rejects an expired or unknown invitation', async () => {
     prisma.careerPortal.findFirst.mockResolvedValue({ id: 'portal-1', access: 'INVITATION_ONLY', tenantId: 'tenant-1' });
     jwt.verifyAsync.mockResolvedValue({ sub: 'identity-1', email: 'candidate@example.com', audience: 'applicant', portalId: 'portal-1', sid: 'session-1' });

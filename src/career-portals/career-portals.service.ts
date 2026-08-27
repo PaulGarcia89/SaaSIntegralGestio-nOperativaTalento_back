@@ -39,13 +39,13 @@ export class CareerPortalsService {
 
   async resolve(input: { host?: string; path?: string; slug?: string }) {
     const host = this.normalizeHost(input.host);
-    const path = input.path?.replace(/^\/+|\/+$/g, '') || undefined;
+    const path = this.normalizePath(input.path);
+    const hostLabel = host?.split('.')[0];
     const portal = await this.prisma.careerPortal.findFirst({
       where: {
         isActive: true,
-        access: { not: CareerPortalAccess.INVITATION_ONLY },
         ...(input.slug ? { OR: [{ slug: input.slug }, { tenant: { slug: input.slug } }] } : host
-          ? { OR: [{ domain: host }, { subdomain: host }] }
+          ? { OR: [{ domain: host }, { subdomain: host }, ...(hostLabel ? [{ subdomain: hostLabel }] : [])] }
           : path
             ? { pathPrefix: path }
             : { type: CareerPortalType.MARKETPLACE }),
@@ -61,11 +61,12 @@ export class CareerPortalsService {
   }
 
   async listPublicVacancies(portalSlug: string | undefined, query: ListPublicVacanciesDto) {
-    const portal = await this.findPublicPortal(portalSlug);
+    const portal = portalSlug ? await this.findPublicPortal(portalSlug) : null;
     const pagination = normalizeOffsetPagination(query);
     const now = new Date();
     const where: Prisma.JobPublicationWhereInput = {
-      portalId: portal.id,
+      channel: portal ? this.channelForPortal(portal.type) : 'PUBLIC_MARKETPLACE',
+      ...(portal ? { portalId: portal.id, tenantId: portal.tenantId ?? undefined } : {}),
       status: JobPublicationStatus.PUBLISHED,
       AND: [{ OR: [{ publishedAt: null }, { publishedAt: { lte: now } }] }, { OR: [{ closesAt: null }, { closesAt: { gt: now } }] }],
       vacancy: {
@@ -86,7 +87,7 @@ export class CareerPortalsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.jobPublication.findMany({
         where,
-        include: { vacancy: { include: { branch: true, locations: { include: { branch: true }, orderBy: { isPrimary: 'desc' } } } } },
+        include: { tenant: { select: { id: true, slug: true, name: true } }, vacancy: { include: { branch: { select: { id: true, name: true, location: true } }, locations: { include: { branch: { select: { id: true, name: true, location: true } } }, orderBy: { isPrimary: 'desc' } } } } },
         orderBy: { publishedAt: 'desc' },
         skip: pagination.skip,
         take: pagination.pageSize,
@@ -96,23 +97,26 @@ export class CareerPortalsService {
     return {
       data: items.map((item) => this.publicVacancy(item)),
       meta: { total, page: pagination.page, pageSize: pagination.pageSize, totalPages: Math.ceil(total / pagination.pageSize) },
-      portal: this.publicPortal(portal),
+      ...(portal ? { portal: this.publicPortal(portal) } : {}),
     };
   }
 
   async getPublicVacancy(publicSlug: string, portalSlug?: string) {
-    const portal = await this.findPublicPortal(portalSlug);
+    const portal = portalSlug ? await this.findPublicPortal(portalSlug) : null;
+    const now = new Date();
     const publication = await this.prisma.jobPublication.findFirst({
       where: {
-        portalId: portal.id,
+        channel: portal ? this.channelForPortal(portal.type) : 'PUBLIC_MARKETPLACE',
+        ...(portal ? { portalId: portal.id, tenantId: portal.tenantId ?? undefined } : {}),
         publicSlug,
         status: JobPublicationStatus.PUBLISHED,
+        AND: [{ OR: [{ publishedAt: null }, { publishedAt: { lte: now } }] }, { OR: [{ closesAt: null }, { closesAt: { gt: now } }] }],
         vacancy: { status: 'OPEN' },
       },
-      include: { vacancy: { include: { branch: true, locations: { include: { branch: true }, orderBy: { isPrimary: 'desc' } }, imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 } } } },
+      include: { tenant: { select: { id: true, slug: true, name: true } }, vacancy: { include: { branch: { select: { id: true, name: true, location: true } }, locations: { include: { branch: { select: { id: true, name: true, location: true } } }, orderBy: { isPrimary: 'desc' } }, imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 } } } },
     });
     if (!publication) throw new NotFoundException('Published vacancy not found');
-    return { ...this.publicVacancy(publication), portal: this.publicPortal(portal) };
+    return { ...this.publicVacancy(publication), ...(portal ? { portal: this.publicPortal(portal) } : {}) };
   }
 
   async validateInvitation(slug: string, rawToken: string) {
@@ -152,7 +156,7 @@ export class CareerPortalsService {
       access: config.access ?? CareerPortalAccess.PUBLIC,
       domain: config.domain?.trim().toLowerCase() || null,
       subdomain: config.subdomain?.trim().toLowerCase() || null,
-      pathPrefix: config.pathPrefix?.trim() || null,
+      pathPrefix: this.normalizePath(config.pathPrefix) || null,
       isActive: config.enabled,
     };
     const portal = existing
@@ -175,8 +179,8 @@ export class CareerPortalsService {
     const portal = await this.prisma.careerPortal.findFirst({
       where: {
         isActive: true,
-        access: { in: [CareerPortalAccess.PUBLIC, CareerPortalAccess.PRIVATE, CareerPortalAccess.INVITATION_ONLY] },
-        ...(slug ? { OR: [{ slug }, { tenant: { slug } }] } : { type: CareerPortalType.MARKETPLACE }),
+        type: { in: [CareerPortalType.COMPANY_PORTAL, CareerPortalType.CAREER_SITE] },
+        OR: [{ slug }, { tenant: { slug } }],
       },
       include: { branding: true },
     });
@@ -187,6 +191,14 @@ export class CareerPortalsService {
   private normalizeHost(host?: string) {
     if (!host) return undefined;
     return host.split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
+  }
+
+  private normalizePath(path?: string) {
+    return path?.replace(/^\/+|\/+$/g, '') || undefined;
+  }
+
+  private channelForPortal(type: CareerPortalType) {
+    return type === CareerPortalType.CAREER_SITE ? 'BRANDED_CAREER_SITE' : 'PRIVATE_COMPANY_PORTAL';
   }
 
   private publicPortal(portal: any) {
@@ -221,6 +233,7 @@ export class CareerPortalsService {
       branch: vacancy.branch,
       locations: vacancy.locations,
       publishedAt: publication.publishedAt,
+      tenant: publication.tenant,
     };
   }
 }

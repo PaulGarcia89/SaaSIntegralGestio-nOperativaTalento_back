@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CareerPortalsModule } from '../career-portals/career-portals.module';
 import { PublicVacanciesController } from './public-vacancies.controller';
 import { VacanciesController } from './vacancies.controller';
 import { VacanciesService } from './vacancies.service';
@@ -8,6 +9,7 @@ import { TrainingAntivirusService } from '../training/training-antivirus.service
 import { PersonnelRequisitionsService } from './personnel-requisitions.service';
 
 @Module({
+  imports: [CareerPortalsModule],
   controllers: [VacanciesController, PublicVacanciesController],
   providers: [
     VacanciesService,

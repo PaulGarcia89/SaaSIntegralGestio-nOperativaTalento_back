@@ -894,6 +894,58 @@ async function main() {
         },
       }));
 
+    const companyPortal = await prisma.careerPortal.upsert({
+      where: { slug: `${demoTenant.slug}-portal` },
+      update: {
+        tenantId: tenantRecord.id,
+        name: `${demoTenant.name} Careers`,
+        type: 'COMPANY_PORTAL',
+        access: 'PUBLIC',
+        isActive: true,
+      },
+      create: {
+        tenantId: tenantRecord.id,
+        slug: `${demoTenant.slug}-portal`,
+        name: `${demoTenant.name} Careers`,
+        type: 'COMPANY_PORTAL',
+        access: 'PUBLIC',
+        isActive: true,
+        branding: {
+          create: {
+            title: `${demoTenant.name} Careers`,
+            seoTitle: `${demoTenant.name} job openings`,
+            seoDescription: `Open positions at ${demoTenant.name}`,
+          },
+        },
+      },
+    });
+
+    await prisma.jobPublication.upsert({
+      where: {
+        vacancyId_channel_portalId: {
+          vacancyId: sampleVacancy.id,
+          channel: 'PRIVATE_COMPANY_PORTAL',
+          portalId: companyPortal.id,
+        },
+      },
+      update: {
+        tenantId: tenantRecord.id,
+        status: 'PUBLISHED',
+        publicSlug: `operations-coordinator-${sampleVacancy.id.replaceAll('-', '').slice(0, 8)}`,
+        publishedAt: new Date(),
+        closesAt: null,
+      },
+      create: {
+        tenantId: tenantRecord.id,
+        vacancyId: sampleVacancy.id,
+        portalId: companyPortal.id,
+        channel: 'PRIVATE_COMPANY_PORTAL',
+        status: 'PUBLISHED',
+        publicSlug: `operations-coordinator-${sampleVacancy.id.replaceAll('-', '').slice(0, 8)}`,
+        publishedAt: new Date(),
+      },
+    });
+
     await prisma.vacancyApplication.upsert({
       where: {
         vacancyId_candidateId: {
