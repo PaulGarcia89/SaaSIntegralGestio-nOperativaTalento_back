@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Headers, Param, Query } from '@nestjs/common';
 import { CareerPortalsService } from '../career-portals/career-portals.service';
 import { ListPublicVacanciesDto } from './dto/list-public-vacancies.dto';
 
@@ -7,12 +7,12 @@ export class PublicVacanciesController {
   constructor(private readonly careerPortalsService: CareerPortalsService) {}
 
   @Get()
-  findAll(@Query() query: ListPublicVacanciesDto) {
-    return this.careerPortalsService.listPublicVacancies(undefined, query);
+  findAll(@Query() query: ListPublicVacanciesDto, @Headers('x-locale') locale?: string) {
+    return this.careerPortalsService.listPublicVacancies(undefined, query, locale);
   }
 
   @Get(':id')
-  findOne(@Param('id') publicSlug: string) {
-    return this.careerPortalsService.getPublicVacancy(publicSlug);
+  findOne(@Param('id') publicSlug: string, @Headers('x-locale') locale?: string) {
+    return this.careerPortalsService.getPublicVacancy(publicSlug, undefined, locale);
   }
 }

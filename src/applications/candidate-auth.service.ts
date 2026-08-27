@@ -51,7 +51,7 @@ export class CandidateAuthService {
     const email = emailInput.trim().toLowerCase();
     const account = await this.prisma.candidateAccount.findUnique({
       where: { email },
-      include: { candidates: { select: { tenantId: true }, take: 1 } },
+      include: { candidates: { select: { tenantId: true }, take: 1 }, applicantIdentity: { select: { preferredLocale: true } } },
     });
     if (!account?.isActive) return { accepted: true };
     const rawToken = randomBytes(32).toString('base64url');
@@ -73,11 +73,12 @@ export class CandidateAuthService {
     const resetUrl = `${portalUrl}/candidate/reset-password?token=${encodeURIComponent(rawToken)}`;
     const tenantId = account.candidates[0]?.tenantId;
     if (tenantId) {
+      const locale = account.applicantIdentity?.preferredLocale === 'en' || account.locale === 'en' ? 'en' : 'es';
       await this.notifications.createExternalEmail({
         tenantId,
         recipientEmail: email,
-        title: account.locale === 'en' ? 'Reset your candidate portal password' : 'Restablece tu contraseña del portal',
-        message: account.locale === 'en' ? 'This secure link expires in 30 minutes.' : 'Este enlace seguro caduca en 30 minutos.',
+        title: locale === 'en' ? 'Reset your candidate portal password' : 'Restablece tu contraseña del portal',
+        message: locale === 'en' ? 'This secure link expires in 30 minutes.' : 'Este enlace seguro caduca en 30 minutos.',
         actionUrl: resetUrl,
         correlationId: `candidate-reset-${account.id}`,
         deduplicationKey: `candidate-reset-${account.id}-${Date.now()}`,
@@ -146,6 +147,7 @@ export class CandidateAuthService {
         dto.socialSecurityNumber ?? (typeof embeddedSsn === 'string' ? embeddedSsn : undefined),
       );
       const identity = existingIdentity ?? await tx.applicantIdentity.create({ data: { email: account.email, legacyAccountId: accountId, profile: { create: {} } }, include: { profile: true } });
+      if (dto.locale !== undefined) await tx.applicantIdentity.update({ where: { id: identity.id }, data: { preferredLocale: dto.locale === 'en' ? 'en' : 'es' } });
       const savedProfile = await tx.applicantProfile.upsert({
         where: { identityId: identity.id },
         update: {

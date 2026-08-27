@@ -73,6 +73,7 @@ export class VacanciesService {
           requirements: dto.requirements,
           responsibilities: dto.responsibilities,
           benefits: dto.benefits,
+          translations: dto.translations as Prisma.InputJsonValue | undefined,
           city: dto.city,
           country: dto.country,
           department: dto.department,

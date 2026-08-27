@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { CareerPortalsService } from './career-portals.service';
 import { ListPublicVacanciesDto } from '../vacancies/dto/list-public-vacancies.dto';
@@ -26,25 +26,25 @@ export class CareerPortalsController {
 
   // Keep the frontend's marketplace alias public while the canonical endpoint remains /public/vacancies.
   @Get('marketplace/vacancies')
-  marketplaceList(@Query() query: ListPublicVacanciesDto) {
-    return this.service.listPublicVacancies(undefined, query);
+  marketplaceList(@Query() query: ListPublicVacanciesDto, @Headers('x-locale') locale?: string) {
+    return this.service.listPublicVacancies(undefined, query, locale);
   }
 
   @Get('marketplace/vacancies/:publicSlug')
-  marketplaceDetail(@Param('publicSlug') publicSlug: string) {
-    return this.service.getPublicVacancy(publicSlug);
+  marketplaceDetail(@Param('publicSlug') publicSlug: string, @Headers('x-locale') locale?: string) {
+    return this.service.getPublicVacancy(publicSlug, undefined, locale);
   }
 
   @Get(':slug/vacancies')
   @UseGuards(CareerPortalAccessGuard)
-  list(@Param('slug') slug: string, @Query() query: ListPublicVacanciesDto) {
-    return this.service.listPublicVacancies(slug, query);
+  list(@Param('slug') slug: string, @Query() query: ListPublicVacanciesDto, @Headers('x-locale') locale?: string) {
+    return this.service.listPublicVacancies(slug, query, locale);
   }
 
   @Get(':slug/vacancies/:publicSlug')
   @UseGuards(CareerPortalAccessGuard)
-  detail(@Param('slug') slug: string, @Param('publicSlug') publicSlug: string) {
-    return this.service.getPublicVacancy(publicSlug, slug);
+  detail(@Param('slug') slug: string, @Param('publicSlug') publicSlug: string, @Headers('x-locale') locale?: string) {
+    return this.service.getPublicVacancy(publicSlug, slug, locale);
   }
 
   @Post(':slug/invitations/validate')

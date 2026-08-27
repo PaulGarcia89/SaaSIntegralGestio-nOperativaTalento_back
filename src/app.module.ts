@@ -52,6 +52,8 @@ import { CompanyRegistrationsModule } from './company-registrations/company-regi
 import { CareerPortalsModule } from './career-portals/career-portals.module';
 import { InventoryCapabilitiesModule } from './inventory-capabilities/inventory-capabilities.module';
 import { RestaurantInventoryModule } from './restaurant-inventory/restaurant-inventory.module';
+import { LocalizationModule } from './localization/localization.module';
+import { LocaleMiddleware } from './localization/locale.middleware';
 
 @Module({
   imports: [
@@ -92,6 +94,7 @@ import { RestaurantInventoryModule } from './restaurant-inventory/restaurant-inv
     InventoryModule,
     InventoryCapabilitiesModule,
     RestaurantInventoryModule,
+    LocalizationModule,
     DashboardModule,
     ReportsModule,
     TrainingModule,
@@ -119,6 +122,6 @@ import { RestaurantInventoryModule } from './restaurant-inventory/restaurant-inv
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestContextMiddleware, RequestLoggingMiddleware, AuditLogMiddleware).forRoutes('*');
+    consumer.apply(RequestContextMiddleware, RequestLoggingMiddleware, AuditLogMiddleware, LocaleMiddleware).forRoutes('*');
   }
 }

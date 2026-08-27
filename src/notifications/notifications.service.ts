@@ -22,6 +22,8 @@ import { ListNotificationDeliveriesDto } from './dto/list-notification-deliverie
 import { ListNotificationsDto } from './dto/list-notifications.dto';
 import { UpdateNotificationPreferenceDto } from './dto/update-notification-preference.dto';
 import { CommunicationDeliveryService } from './communication-delivery.service';
+import { notificationMessage } from '../localization/catalogs/catalog';
+import { SupportedLocale } from '../localization/localization.service';
 
 const CATEGORIES = Object.values(NotificationCategory);
 const CRITICAL_CATEGORIES = new Set<NotificationCategory>([
@@ -36,6 +38,7 @@ type DomainNotificationDefinition = {
   message: string;
   sourceModule: string;
   actionUrl: string;
+  notificationCode?: Parameters<typeof notificationMessage>[0];
 };
 
 @Injectable()
@@ -131,6 +134,9 @@ export class NotificationsService {
   async createFromDomainEvent(actor: JwtPayload, eventName: DomainEventName, dto: DomainEventDto) {
     const definition = this.domainDefinition(eventName);
     const userId = await this.resolveEventRecipient(this.activeTenantId(actor), dto);
+    const recipient = userId ? await this.prisma.user.findFirst({ where: { id: userId, tenantId: this.activeTenantId(actor) }, select: { preferredLocale: true } }) : null;
+    const locale: SupportedLocale = recipient?.preferredLocale === 'en' ? 'en' : 'es';
+    const localized = definition.notificationCode ? notificationMessage(definition.notificationCode, locale) : null;
     const correlationId =
       typeof dto.payload?.correlationId === 'string' ? dto.payload.correlationId : undefined;
 
@@ -138,6 +144,7 @@ export class NotificationsService {
       tenantId: this.activeTenantId(actor),
       userId,
       ...definition,
+      ...(localized ? { title: localized.title, message: localized.message } : {}),
       correlationId,
       deduplicationKey: `${eventName}:${dto.workflowId ?? dto.employeeId ?? dto.candidateId ?? correlationId ?? 'tenant'}`,
       payload: {
@@ -513,18 +520,18 @@ export class NotificationsService {
 
   private domainDefinition(eventName: DomainEventName): DomainNotificationDefinition {
     const definitions: Record<DomainEventName, DomainNotificationDefinition> = {
-      'candidate.hired': { category: NotificationCategory.ATS, type: NotificationType.SUCCESS, title: 'Contratación confirmada', message: 'La contratación fue confirmada y el flujo de incorporación comenzó.', sourceModule: 'ats', actionUrl: '/ats/candidates' },
-      'ats.application_stage_changed': { category: NotificationCategory.ATS, type: NotificationType.INFO, title: 'Etapa de candidatura actualizada', message: 'Una candidatura cambió de etapa en el pipeline.', sourceModule: 'ats', actionUrl: '/ats/pipeline' },
-      'ats.application_rejected': { category: NotificationCategory.ATS, type: NotificationType.WARNING, title: 'Candidatura descartada', message: 'Se registró un descarte en el proceso de selección.', sourceModule: 'ats', actionUrl: '/ats/candidates' },
-      'ats.interview_scheduled': { category: NotificationCategory.ATS, type: NotificationType.INFO, title: 'Entrevista programada', message: 'Se agendó una entrevista para una candidatura.', sourceModule: 'ats', actionUrl: '/ats/interviews' },
-      'ats.interview_completed': { category: NotificationCategory.ATS, type: NotificationType.INFO, title: 'Entrevista completada', message: 'Una entrevista está lista para evaluación.', sourceModule: 'ats', actionUrl: '/ats/interviews' },
-      'employee.branch_changed': { category: NotificationCategory.GENERAL, type: NotificationType.INFO, title: 'Cambio de sucursal', message: 'Se actualizó la sucursal asignada y se están recalculando las tareas relacionadas.', sourceModule: 'employees', actionUrl: '/employees' },
-      'employee.offboarding_started': { category: NotificationCategory.AUTOMATION, type: NotificationType.WARNING, title: 'Proceso de salida iniciado', message: 'El cierre de accesos y la recuperación de activos quedaron en seguimiento.', sourceModule: 'automation', actionUrl: '/dashboard' },
-      'onboarding.completed': { category: NotificationCategory.ONBOARDING, type: NotificationType.SUCCESS, title: 'Incorporación completada', message: 'Todas las tareas obligatorias de incorporación fueron completadas.', sourceModule: 'onboarding', actionUrl: '/onboarding/documents' },
-      'inventory.asset_assigned': { category: NotificationCategory.INVENTORY, type: NotificationType.INFO, title: 'Activo asignado', message: 'Se registró una nueva asignación de inventario.', sourceModule: 'inventory', actionUrl: '/inventory' },
-      'training.completed': { category: NotificationCategory.TRAINING, type: NotificationType.SUCCESS, title: 'Capacitación completada', message: 'La actividad formativa fue completada correctamente.', sourceModule: 'training', actionUrl: '/training' },
-      'operation.handoff_completed': { category: NotificationCategory.AUTOMATION, type: NotificationType.SUCCESS, title: 'Entrega operativa completada', message: 'La transferencia operativa fue confirmada.', sourceModule: 'automation', actionUrl: '/dashboard' },
-      'compliance.closed': { category: NotificationCategory.SECURITY, type: NotificationType.SUCCESS, title: 'Control de cumplimiento cerrado', message: 'El control obligatorio fue cerrado con trazabilidad.', sourceModule: 'compliance', actionUrl: '/reports' },
+      'candidate.hired': { category: NotificationCategory.ATS, type: NotificationType.SUCCESS, title: 'Contratación confirmada', message: 'La contratación fue confirmada y el flujo de incorporación comenzó.', notificationCode: 'candidate_hired', sourceModule: 'ats', actionUrl: '/ats/candidates' },
+      'ats.application_stage_changed': { category: NotificationCategory.ATS, type: NotificationType.INFO, title: 'Etapa de candidatura actualizada', message: 'Una candidatura cambió de etapa en el pipeline.', notificationCode: 'application_stage_changed', sourceModule: 'ats', actionUrl: '/ats/pipeline' },
+      'ats.application_rejected': { category: NotificationCategory.ATS, type: NotificationType.WARNING, title: 'Candidatura descartada', message: 'Se registró un descarte en el proceso de selección.', notificationCode: 'application_rejected', sourceModule: 'ats', actionUrl: '/ats/candidates' },
+      'ats.interview_scheduled': { category: NotificationCategory.ATS, type: NotificationType.INFO, title: 'Entrevista programada', message: 'Se agendó una entrevista para una candidatura.', notificationCode: 'interview_scheduled', sourceModule: 'ats', actionUrl: '/ats/interviews' },
+      'ats.interview_completed': { category: NotificationCategory.ATS, type: NotificationType.INFO, title: 'Entrevista completada', message: 'Una entrevista está lista para evaluación.', notificationCode: 'interview_completed', sourceModule: 'ats', actionUrl: '/ats/interviews' },
+      'employee.branch_changed': { category: NotificationCategory.GENERAL, type: NotificationType.INFO, title: 'Cambio de sucursal', message: 'Se actualizó la sucursal asignada y se están recalculando las tareas relacionadas.', notificationCode: 'branch_changed', sourceModule: 'employees', actionUrl: '/employees' },
+      'employee.offboarding_started': { category: NotificationCategory.AUTOMATION, type: NotificationType.WARNING, title: 'Proceso de salida iniciado', message: 'El cierre de accesos y la recuperación de activos quedaron en seguimiento.', notificationCode: 'offboarding_started', sourceModule: 'automation', actionUrl: '/dashboard' },
+      'onboarding.completed': { category: NotificationCategory.ONBOARDING, type: NotificationType.SUCCESS, title: 'Incorporación completada', message: 'Todas las tareas obligatorias de incorporación fueron completadas.', notificationCode: 'onboarding_completed', sourceModule: 'onboarding', actionUrl: '/onboarding/documents' },
+      'inventory.asset_assigned': { category: NotificationCategory.INVENTORY, type: NotificationType.INFO, title: 'Activo asignado', message: 'Se registró una nueva asignación de inventario.', notificationCode: 'asset_assigned', sourceModule: 'inventory', actionUrl: '/inventory' },
+      'training.completed': { category: NotificationCategory.TRAINING, type: NotificationType.SUCCESS, title: 'Capacitación completada', message: 'La actividad formativa fue completada correctamente.', notificationCode: 'training_completed', sourceModule: 'training', actionUrl: '/training' },
+      'operation.handoff_completed': { category: NotificationCategory.AUTOMATION, type: NotificationType.SUCCESS, title: 'Entrega operativa completada', message: 'La transferencia operativa fue confirmada.', notificationCode: 'handoff_completed', sourceModule: 'automation', actionUrl: '/dashboard' },
+      'compliance.closed': { category: NotificationCategory.SECURITY, type: NotificationType.SUCCESS, title: 'Control de cumplimiento cerrado', message: 'El control obligatorio fue cerrado con trazabilidad.', notificationCode: 'compliance_closed', sourceModule: 'compliance', actionUrl: '/reports' },
     };
     return definitions[eventName];
   }

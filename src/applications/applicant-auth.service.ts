@@ -43,7 +43,7 @@ export class ApplicantAuthService {
     const created = await this.prisma.$transaction(async (tx) => {
       const account = await tx.candidateAccount.create({ data: { email, passwordHash } });
       const newIdentity = await tx.applicantIdentity.create({
-        data: { email, passwordHash, legacyAccountId: account.id, profile: { create: {} } },
+        data: { email, passwordHash, legacyAccountId: account.id, preferredLocale: 'es', profile: { create: {} } },
       });
       return newIdentity;
     });
@@ -123,8 +123,8 @@ export class ApplicantAuthService {
     return this.prisma.$transaction(async (tx) => {
       const identity = await tx.applicantIdentity.upsert({
         where: { email },
-        update: { legacyAccountId: accountId, passwordHash },
-        create: { email, legacyAccountId: accountId, passwordHash, profile: { create: { fullName: legacy.fullName, phone: legacy.phone, city: legacy.city, linkedinUrl: legacy.linkedinUrl, portfolioUrl: legacy.portfolioUrl, locale: legacy.locale, timezone: legacy.timezone } } },
+        update: { legacyAccountId: accountId, passwordHash, preferredLocale: legacy.locale === 'en' ? 'en' : 'es' },
+        create: { email, legacyAccountId: accountId, passwordHash, preferredLocale: legacy.locale === 'en' ? 'en' : 'es', profile: { create: { fullName: legacy.fullName, phone: legacy.phone, city: legacy.city, linkedinUrl: legacy.linkedinUrl, portfolioUrl: legacy.portfolioUrl, locale: legacy.locale, timezone: legacy.timezone } } },
       });
       for (const candidate of legacy.candidates) {
         await tx.companyApplicant.upsert({ where: { tenantId_identityId: { tenantId: candidate.tenantId, identityId: identity.id } }, update: {}, create: { tenantId: candidate.tenantId, identityId: identity.id, profileId: (await tx.applicantProfile.findUnique({ where: { identityId: identity.id } }))?.id } });

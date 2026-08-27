@@ -12,6 +12,7 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -154,6 +155,10 @@ export class CreateVacancyDto {
   @IsString()
   @MaxLength(4000)
   benefits?: string;
+
+  @IsOptional()
+  @IsObject()
+  translations?: Record<string, Record<string, string>>;
 
   @IsOptional()
   @IsString()

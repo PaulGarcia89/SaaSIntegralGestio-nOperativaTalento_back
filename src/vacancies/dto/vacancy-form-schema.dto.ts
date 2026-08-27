@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsEnum,
   IsOptional,
+  IsObject,
   IsString,
   MaxLength,
   ValidateNested,
@@ -43,6 +44,10 @@ export class VacancyFormFieldDto {
   helperText?: string;
 
   @IsOptional()
+  @IsObject()
+  translations?: Record<'es' | 'en', Partial<Pick<VacancyFormFieldDto, 'label' | 'placeholder' | 'helperText' | 'options'>>>;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })
@@ -66,6 +71,10 @@ export class VacancyFormSectionDto {
   @IsString()
   @MaxLength(240)
   description?: string;
+
+  @IsOptional()
+  @IsObject()
+  translations?: Record<'es' | 'en', Partial<Pick<VacancyFormSectionDto, 'title' | 'description'>>>;
 
   @IsArray()
   @ArrayMaxSize(20)

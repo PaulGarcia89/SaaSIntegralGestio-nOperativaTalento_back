@@ -60,7 +60,7 @@ export class CareerPortalsService {
     return this.publicPortal(portal);
   }
 
-  async listPublicVacancies(portalSlug: string | undefined, query: ListPublicVacanciesDto) {
+  async listPublicVacancies(portalSlug: string | undefined, query: ListPublicVacanciesDto, locale?: string) {
     const portal = portalSlug ? await this.findPublicPortal(portalSlug) : null;
     const pagination = normalizeOffsetPagination(query);
     const now = new Date();
@@ -95,13 +95,13 @@ export class CareerPortalsService {
       this.prisma.jobPublication.count({ where }),
     ]);
     return {
-      data: items.map((item) => this.publicVacancy(item)),
+      data: items.map((item) => this.publicVacancy(item, locale)),
       meta: { total, page: pagination.page, pageSize: pagination.pageSize, totalPages: Math.ceil(total / pagination.pageSize) },
       ...(portal ? { portal: this.publicPortal(portal) } : {}),
     };
   }
 
-  async getPublicVacancy(publicSlug: string, portalSlug?: string) {
+  async getPublicVacancy(publicSlug: string, portalSlug?: string, locale?: string) {
     const portal = portalSlug ? await this.findPublicPortal(portalSlug) : null;
     const now = new Date();
     const publication = await this.prisma.jobPublication.findFirst({
@@ -116,7 +116,7 @@ export class CareerPortalsService {
       include: { tenant: { select: { id: true, slug: true, name: true } }, vacancy: { include: { branch: { select: { id: true, name: true, location: true } }, locations: { include: { branch: { select: { id: true, name: true, location: true } } }, orderBy: { isPrimary: 'desc' } }, imageFiles: { where: { status: 'ACTIVE' }, orderBy: { version: 'desc' }, take: 1 } } } },
     });
     if (!publication) throw new NotFoundException('Published vacancy not found');
-    return { ...this.publicVacancy(publication), ...(portal ? { portal: this.publicPortal(portal) } : {}) };
+    return { ...this.publicVacancy(publication, locale), ...(portal ? { portal: this.publicPortal(portal) } : {}) };
   }
 
   async validateInvitation(slug: string, rawToken: string) {
@@ -207,18 +207,26 @@ export class CareerPortalsService {
 
   private hash(value: string) { return createHash('sha256').update(value).digest('hex'); }
 
-  private publicVacancy(publication: any) {
+  private publicVacancy(publication: any, requestedLocale?: string) {
     const vacancy = publication.vacancy;
+    const locale = requestedLocale?.toLowerCase().split('-')[0] === 'en' ? 'en' : 'es';
+    const translated = vacancy.translations && typeof vacancy.translations === 'object' && !Array.isArray(vacancy.translations)
+      ? (vacancy.translations as Record<string, unknown>)[locale]
+      : null;
+    const copy = translated && typeof translated === 'object' && !Array.isArray(translated)
+      ? translated as Record<string, unknown>
+      : {};
+    const text = (field: string) => typeof copy[field] === 'string' && copy[field]?.trim() ? copy[field] : vacancy[field];
     return {
       id: vacancy.id,
       publicationId: publication.id,
       slug: publication.publicSlug,
-      title: vacancy.title,
-      summary: vacancy.summary,
-      description: vacancy.description,
-      requirements: vacancy.requirements,
-      responsibilities: vacancy.responsibilities,
-      benefits: vacancy.benefits,
+      title: text('title'),
+      summary: text('summary'),
+      description: text('description'),
+      requirements: text('requirements'),
+      responsibilities: text('responsibilities'),
+      benefits: text('benefits'),
       city: vacancy.city,
       country: vacancy.country,
       department: vacancy.department,

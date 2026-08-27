@@ -259,6 +259,12 @@ enum ApplicantSessionStatus {
   EXPIRED
 }
 
+enum LocalizationEmailPolicy {
+  RECIPIENT_PREFERENCE
+  COMPANY_DEFAULT
+  EVENT_LOCALE
+}
+
 enum TalentActivityType {
   NOTE
   EMAIL
@@ -1488,6 +1494,7 @@ model Tenant {
   marketplaceEnabled            Boolean                           @default(true)
   createdAt                     DateTime                          @default(now())
   updatedAt                     DateTime                          @updatedAt
+  localizationSettings          CompanyLocalizationSettings?
   users                         User[]
   roles                         Role[]
   subscription                  Subscription?
@@ -1684,6 +1691,7 @@ model User {
   lastSeenAt                         DateTime?
   createdAt                          DateTime                          @default(now())
   updatedAt                          DateTime                          @updatedAt
+  preferredLocale                     String?
   tenant                             Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   activeBranch                       Branch?                           @relation("UserActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
   userRoles                          UserRole[]
@@ -3667,6 +3675,7 @@ model Vacancy {
   requirements              String?
   responsibilities          String?
   benefits                  String?
+  translations              Json?
   city                      String?
   country                   String?
   department                String?
@@ -3721,6 +3730,7 @@ model ApplicantIdentity {
   status             String                  @default("ACTIVE")
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
+  preferredLocale    String?
   profile            ApplicantProfile?
   companyApplicants  CompanyApplicant[]
   sessions           PortalApplicantSession[]
@@ -3781,6 +3791,7 @@ model CareerPortal {
   isActive            Boolean            @default(true)
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
+  localizationSettings CareerPortalLocalizationSettings?
   tenant             Tenant?            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branding           CareerPortalBranding?
   publications       JobPublication[]
@@ -3790,6 +3801,55 @@ model CareerPortal {
   @@index([tenantId, isActive])
   @@index([domain, isActive])
   @@index([subdomain, isActive])
+}
+
+model PlatformLocalizationSettings {
+  id                         String   @id @default(uuid())
+  defaultLocale              String   @default("es")
+  fallbackLocale             String   @default("es")
+  enabledLocales             Json     @default("[\"es\",\"en\"]")
+  allowCompanyLocaleConfiguration Boolean @default(true)
+  detectBrowserLocale        Boolean  @default(true)
+  defaultTimeZone            String   @default("UTC")
+  defaultDateFormat          String?
+  defaultTimeFormat          String?
+  updatedBy                  String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model CompanyLocalizationSettings {
+  id                  String                 @id @default(uuid())
+  tenantId            String                 @unique
+  defaultLocale       String                 @default("es")
+  fallbackLocale      String                 @default("es")
+  enabledLocales      Json                   @default("[\"es\"]")
+  showLanguageSelector Boolean                @default(true)
+  detectBrowserLocale Boolean                @default(true)
+  emailLocalePolicy   LocalizationEmailPolicy @default(RECIPIENT_PREFERENCE)
+  defaultTimeZone     String                 @default("UTC")
+  dateFormat          String?
+  timeFormat          String?
+  createdBy           String?
+  updatedBy           String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  tenant              Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model CareerPortalLocalizationSettings {
+  id                  String       @id @default(uuid())
+  careerPortalId      String       @unique
+  defaultLocale       String       @default("es")
+  fallbackLocale      String       @default("es")
+  enabledLocales      Json         @default("[\"es\"]")
+  showLanguageSelector Boolean      @default(true)
+  detectBrowserLocale Boolean      @default(true)
+  useCompanySettings  Boolean      @default(true)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  updatedBy           String?
+  careerPortal        CareerPortal @relation(fields: [careerPortalId], references: [id], onDelete: Cascade)
 }
 
 model CareerPortalBranding {
