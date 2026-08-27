@@ -234,6 +234,8 @@ export class ApplicationsService {
     const reusableValues = reusableData && typeof reusableData === 'object' && !Array.isArray(reusableData)
       ? reusableData as Record<string, unknown>
       : {};
+    const submittedDynamicResponses = { ...(dto.dynamicResponses ?? {}) };
+    delete submittedDynamicResponses.socialSecurityNumber;
     const vacancy = await this.prisma.vacancy.findFirst({
       where: {
         id: vacancyId,
@@ -268,7 +270,7 @@ export class ApplicationsService {
 
     const normalizedDynamicResponses = this.normalizeDynamicResponses(
       vacancy.applicationFormSchema,
-      { ...reusableValues, ...dto.dynamicResponses },
+      { ...reusableValues, ...submittedDynamicResponses },
     ) as Prisma.InputJsonValue | undefined;
 
     let storedResume: {
@@ -2087,12 +2089,21 @@ export class ApplicationsService {
   ) {
     const source = responses ?? {};
     const fixedKeys = new Set([
+      "lastName", "address", "apartmentNumber", "state", "zipCode", "dateOfBirth",
+      "emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone",
       "educationLevel", "educationInstitution", "educationStatus", "educationStartDate",
       "educationEndDate", "educationDescription", "schoolName", "schoolLocation",
       "is18OrOlder", "authorizedToWorkInUS", "workedForCompany", "familyWorksForCompany",
       "felonyConviction", "workedForCompanyExplanation", "familyWorksForCompanyExplanation",
       "felonyConvictionExplanation", "employmentPreference", "shiftPreference", "employmentType",
       "desiredHourlyWage", "availability", "workAuthorization", "relocation", "preferredWorkMode",
+      "previousEmployerCompany", "previousEmployerPosition", "previousEmployerAddress",
+      "previousEmployerLocation", "previousEmployerStartDate", "previousEmployerEndDate",
+      "previousEmployerEndingSalary", "previousEmployerSupervisor", "previousEmployerPhone",
+      "previousEmployerLeavingReason", "previousEmployerMayContactSupervisor",
+      "reference1Name", "reference1Relationship", "reference1Phone", "reference2Name",
+      "reference2Relationship", "reference2Phone", "reference3Name", "reference3Relationship",
+      "reference3Phone",
     ]);
     for (const [key, value] of Object.entries(source)) {
       if (fixedKeys.has(key)) this.validateFixedDynamicResponse(key, value);
