@@ -79,6 +79,12 @@ export class CandidateApplicationsController {
     return this.portal.parseResume(file);
   }
 
+  @Post('resume')
+  @UseInterceptors(FileInterceptor('resume', { limits: { fileSize: 15 * 1024 * 1024, files: 1 } }))
+  uploadResume(@Req() request: CandidateRequest, @UploadedFile() file: Express.Multer.File) {
+    return this.portal.uploadResume(request.candidate.sub, file);
+  }
+
   @Get('resume/:id/access')
   resumeAccess(@Req() request: CandidateRequest, @Param('id') id: string) {
     return this.portal.resumeAccess(request.candidate.sub, id);

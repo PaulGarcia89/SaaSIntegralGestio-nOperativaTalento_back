@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ApplicationStatus, ApplicationTimelineEventType, AtsCommunicationAudience, AtsCommunicationType, AtsMessageStatus, CandidatePrivacyRequestStatus, InterviewStatus, NotificationChannel, Prisma } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import AdmZip from 'adm-zip';
@@ -243,6 +243,68 @@ export class CandidatePortalService {
     };
   }
 
+  async uploadResume(accountId: string, file: Express.Multer.File) {
+    if (!this.files || !this.antivirus) throw new BadRequestException('La carga de currículums no está disponible');
+    const candidate = await this.prisma.candidate.findFirst({
+      where: this.candidateIdentityWhere(accountId),
+      orderBy: { accountId: 'desc' },
+      select: { id: true, tenantId: true },
+    });
+    if (!candidate) throw new NotFoundException('No se encontró el perfil del candidato');
+
+    const application = await this.prisma.vacancyApplication.findFirst({
+      where: { candidateId: candidate.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    const mimeType = this.files.validateResume(file);
+    const quarantined = await this.files.store('resume', candidate.tenantId, candidate.id, file, mimeType);
+    let stored: { storageKey: string; sha256: string };
+    let scan: Awaited<ReturnType<TrainingAntivirusService['scan']>>;
+    try {
+      scan = await this.scanResume(file.buffer);
+      stored = { ...quarantined, ...await this.files.promote(quarantined.storageKey) };
+    } catch (error) {
+      await this.files.delete(quarantined.storageKey);
+      throw error;
+    }
+
+    try {
+      const created = await this.prisma.$transaction(async (tx) => {
+        const latest = await tx.candidateResumeFile.aggregate({ where: { candidateId: candidate.id }, _max: { version: true } });
+        await tx.candidateResumeFile.updateMany({
+          where: { candidateId: candidate.id, status: 'ACTIVE' },
+          data: { status: 'SUPERSEDED', supersededAt: new Date() },
+        });
+        return tx.candidateResumeFile.create({
+          data: {
+            tenantId: candidate.tenantId,
+            candidateId: candidate.id,
+            applicationId: application?.id,
+            version: (latest._max.version ?? 0) + 1,
+            storageKey: stored.storageKey,
+            originalName: file.originalname,
+            mimeType,
+            sizeBytes: file.size,
+            sha256: stored.sha256,
+            scanStatus: scan.status,
+            scanEngine: scan.engine ?? 'static-structure-v1',
+            uploadedByType: 'CANDIDATE',
+            uploadedById: accountId,
+            consentGrantedAt: new Date(),
+            consentVersion: 'candidate-portal-upload-v1',
+            retainUntil: this.files.retentionDate('resume'),
+          },
+          select: { id: true, applicationId: true, version: true, status: true, originalName: true, mimeType: true, sizeBytes: true, createdAt: true },
+        });
+      });
+      return { ...created, ...this.files.createSignedUrl('resume', created.id) };
+    } catch (error) {
+      await this.files.delete(stored.storageKey);
+      throw error;
+    }
+  }
+
   async resumeAccess(accountId: string, fileId: string) {
     const file = await this.prisma.candidateResumeFile.findFirst({
       where: { id: fileId, candidate: this.candidateIdentityWhere(accountId), status: { in: ['ACTIVE', 'SUPERSEDED'] }, retainUntil: { gt: new Date() } },
@@ -260,6 +322,17 @@ export class CandidatePortalService {
   private pdfText(buffer: Buffer) {
     return buffer.toString('latin1')
       .match(/\((?:\\.|[^\\)])*\)/g)?.map((value) => value.slice(1, -1).replace(/\\([()\\])/g, '$1')).join(' ') ?? '';
+  }
+
+  private async scanResume(buffer: Buffer) {
+    try {
+      return await this.antivirus.scan(buffer);
+    } catch (error) {
+      if (this.antivirus.mode === 'disabled' && error instanceof HttpException && error.getStatus() === HttpStatus.SERVICE_UNAVAILABLE) {
+        return { status: 'SKIPPED' as const, engine: null };
+      }
+      throw error;
+    }
   }
 
   private json(value: unknown): Prisma.InputJsonValue {
