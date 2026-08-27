@@ -1560,7 +1560,7 @@ export class ApplicationsService {
     if (current) {
       if (!(current.allowedNextStageCodes ?? []).includes(targetStage.code)) {
         throw new BadRequestException(
-          `Transition from ${current.name} to ${targetStage.name} is not allowed`,
+          `La transición de ${current.name} a ${targetStage.name} no está permitida. Selecciona la siguiente etapa autorizada.`,
         );
       }
       if (
@@ -1617,9 +1617,23 @@ export class ApplicationsService {
     });
     if (missing.length) {
       throw new BadRequestException(
-        `Missing required fields for ${targetStage.name}: ${missing.join(", ")}`,
+        `Faltan campos obligatorios para ${targetStage.name}: ${missing.map((field) => this.requiredFieldLabel(field)).join(", ")}`,
       );
     }
+  }
+
+  private requiredFieldLabel(field: string) {
+    const labels: Record<string, string> = {
+      "candidate.fullName": "nombre completo del candidato",
+      "candidate.email": "correo del candidato",
+      "candidate.phone": "teléfono del candidato",
+      "candidate.city": "ciudad del candidato",
+      "candidate.resumeUrl": "currículum del candidato",
+      "application.coverLetter": "carta de presentación",
+      "interview.completed": "entrevista completada",
+      scorecard: "evaluación de entrevista",
+    };
+    return labels[field] ?? (field.startsWith("dynamic.") ? `respuesta ${field.slice("dynamic.".length)}` : field);
   }
 
   private async resolveTargetStage(

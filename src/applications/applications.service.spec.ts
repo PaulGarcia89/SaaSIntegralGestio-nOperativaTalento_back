@@ -245,7 +245,7 @@ describe('ApplicationsService custom vacancy stages', () => {
       service.updateStatus('application-1', actor, 'tenant-1', {
         currentStageId: stage.id,
       }),
-    ).rejects.toThrow('Transition from Revisión inicial to Decisión final is not allowed');
+    ).rejects.toThrow('La transición de Revisión inicial a Decisión final no está permitida');
 
     expect(tx.vacancyApplication.update).not.toHaveBeenCalled();
   });
