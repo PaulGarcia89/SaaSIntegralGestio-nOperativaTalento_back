@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsObject, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
 
 export class CandidateRegisterDto {
   @IsEmail()
@@ -50,4 +50,6 @@ export class CandidateProfileDto {
   @IsOptional() @IsBoolean() interviewReminders?: boolean;
   @IsOptional() @IsBoolean() offerNotifications?: boolean;
   @IsOptional() @IsBoolean() marketingConsent?: boolean;
+  @IsOptional() @IsObject() applicationProfile?: Record<string, unknown>;
+  @IsOptional() @IsString() @MaxLength(11) socialSecurityNumber?: string;
 }

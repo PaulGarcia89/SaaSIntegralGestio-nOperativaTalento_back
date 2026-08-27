@@ -224,6 +224,16 @@ export class ApplicationsService {
         "Application email must match the candidate identity",
       );
     }
+    const applicantIdentity = this.prisma.applicantIdentity?.findFirst
+      ? await this.prisma.applicantIdentity.findFirst({
+          where: { legacyAccountId: candidateAccountId },
+          select: { id: true, profile: { select: { reusableData: true } } },
+        })
+      : null;
+    const reusableData = applicantIdentity?.profile?.reusableData;
+    const reusableValues = reusableData && typeof reusableData === 'object' && !Array.isArray(reusableData)
+      ? reusableData as Record<string, unknown>
+      : {};
     const vacancy = await this.prisma.vacancy.findFirst({
       where: {
         id: vacancyId,
@@ -258,7 +268,7 @@ export class ApplicationsService {
 
     const normalizedDynamicResponses = this.normalizeDynamicResponses(
       vacancy.applicationFormSchema,
-      dto.dynamicResponses,
+      { ...reusableValues, ...dto.dynamicResponses },
     ) as Prisma.InputJsonValue | undefined;
 
     let storedResume: {
@@ -304,6 +314,35 @@ export class ApplicationsService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        if (tx.applicantIdentity?.upsert && tx.applicantProfile?.upsert) {
+          const identity = await tx.applicantIdentity.upsert({
+            where: { email: authenticatedEmail.trim().toLowerCase() },
+            update: { legacyAccountId: candidateAccountId },
+            create: { email: authenticatedEmail.trim().toLowerCase(), legacyAccountId: candidateAccountId, profile: { create: {} } },
+            select: { id: true },
+          });
+          const reusableKeys = new Set([
+            'lastName', 'address', 'apartmentNumber', 'state', 'zipCode', 'dateOfBirth',
+            'emergencyContactName', 'emergencyContactRelationship', 'emergencyContactPhone',
+            'is18OrOlder', 'authorizedToWorkInUS', 'workedForCompany', 'workedForCompanyExplanation',
+            'familyWorksForCompany', 'familyWorksForCompanyExplanation', 'felonyConviction',
+            'felonyConvictionExplanation', 'educationLevel', 'schoolName', 'schoolLocation',
+            'previousEmployerCompany', 'previousEmployerPosition', 'previousEmployerAddress',
+            'previousEmployerLocation', 'previousEmployerStartDate', 'previousEmployerEndDate',
+            'previousEmployerEndingSalary', 'previousEmployerSupervisor', 'previousEmployerPhone',
+            'previousEmployerLeavingReason', 'previousEmployerMayContactSupervisor',
+            'employmentPreference', 'shiftPreference', 'employmentType', 'desiredHourlyWage',
+            'reference1Name', 'reference1Relationship', 'reference1Phone', 'reference2Name',
+            'reference2Relationship', 'reference2Phone', 'reference3Name', 'reference3Relationship',
+            'reference3Phone',
+          ]);
+          const nextReusable = Object.fromEntries(Object.entries({ ...reusableValues, ...(normalizedDynamicResponses as Record<string, unknown>) }).filter(([key]) => reusableKeys.has(key)));
+          await tx.applicantProfile.upsert({
+            where: { identityId: identity.id },
+            update: { reusableData: Object.keys(nextReusable).length ? nextReusable as Prisma.InputJsonValue : undefined, version: { increment: 1 } },
+            create: { identityId: identity.id, reusableData: Object.keys(nextReusable).length ? nextReusable as Prisma.InputJsonValue : undefined },
+          });
+        }
         const matchedCandidate = await tx.candidate.upsert({
           where: {
             tenantId_email: {

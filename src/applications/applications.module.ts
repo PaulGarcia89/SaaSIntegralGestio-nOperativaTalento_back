@@ -22,6 +22,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { ApplicantAuthController } from './applicant-auth.controller';
 import { ApplicantAuthGuard } from './applicant-auth.guard';
 import { ApplicantAuthService } from './applicant-auth.service';
+import { EmployeeSensitiveDataCryptoService } from '../employees/employee-sensitive-data-crypto.service';
 
 @Module({
   imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule, RecruitmentModule, DomainEventsModule],
@@ -46,6 +47,7 @@ import { ApplicantAuthService } from './applicant-auth.service';
     TalentCrmService,
     ApplicantAuthService,
     ApplicantAuthGuard,
+    EmployeeSensitiveDataCryptoService,
   ],
 })
 export class ApplicationsModule {}
