@@ -6,7 +6,6 @@
     "seed": "ts-node -r dotenv/config prisma/seed.ts"
   },
   "scripts": {
-    "preinstall": "node -e \"if(process.platform==='linux')require('child_process').execSync('apt-get update -y && apt-get install -y openssl',{stdio:'inherit'})\"",
     "postinstall": "node -e \"console.log('Prisma se genera durante el build')\"",
     "start": "npm run start:fluentops",
     "start:fluentops": "prisma migrate deploy && prisma generate && node compiled-server/src/main.js",
