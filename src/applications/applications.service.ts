@@ -54,7 +54,8 @@ const applicationInclude = {
   },
   vacancy: {
     include: {
-      branch: true,
+      tenant: { select: { id: true, name: true, slug: true } },
+      branch: { select: { id: true, name: true, location: true } },
       responsibles: {
         include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
       },
