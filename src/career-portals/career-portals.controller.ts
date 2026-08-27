@@ -24,6 +24,17 @@ export class CareerPortalsController {
     return this.service.resolve({ host: request.headers.host, path: pathname ?? request.path, slug });
   }
 
+  // Keep the frontend's marketplace alias public while the canonical endpoint remains /public/vacancies.
+  @Get('marketplace/vacancies')
+  marketplaceList(@Query() query: ListPublicVacanciesDto) {
+    return this.service.listPublicVacancies(undefined, query);
+  }
+
+  @Get('marketplace/vacancies/:publicSlug')
+  marketplaceDetail(@Param('publicSlug') publicSlug: string) {
+    return this.service.getPublicVacancy(publicSlug);
+  }
+
   @Get(':slug/vacancies')
   @UseGuards(CareerPortalAccessGuard)
   list(@Param('slug') slug: string, @Query() query: ListPublicVacanciesDto) {
