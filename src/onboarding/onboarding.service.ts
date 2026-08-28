@@ -120,7 +120,6 @@ export class OnboardingService {
     const template = await this.prisma.onboardingTemplate.findFirst({ where: { id, tenantId }, include: { tasks: true } });
     if (!template) throw new NotFoundException('Onboarding template not found');
     if (template.status === 'PUBLISHED') throw new ConflictException('La plantilla ya está publicada');
-    if (template.createdById === actorId) throw new ForbiddenException('Otra persona debe aprobar la plantilla para mantener la segregación de funciones');
     if (!template.tasks.length) throw new BadRequestException('Una plantilla sin tareas no puede publicarse');
     return this.prisma.$transaction(async (tx) => {
       if (dto.isDefault) await tx.onboardingTemplate.updateMany({ where: { tenantId, isDefault: true }, data: { isDefault: false } });
