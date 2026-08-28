@@ -19,6 +19,7 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { publicFrontendUrl } from '../common/urls/public-frontend-url';
 import { AccessScope } from '../common/enums/access-scope.enum';
+import { RoleScope } from '../common/enums/role-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsCommunicationsService } from '../ats-communications/ats-communications.service';
@@ -67,6 +68,7 @@ export class JobOffersService {
   }
 
   async create(tenantId: string, actor: JwtPayload, applicationId: string, dto: CreateJobOfferDto) {
+    this.assertOfferAdministration(actor);
     const application = await this.assertApplicationAccess(tenantId, actor, applicationId);
     if (application.status !== 'APPROVED') {
       throw new BadRequestException('La postulación debe estar aprobada antes de crear una oferta');
@@ -84,17 +86,11 @@ export class JobOffersService {
           tenantId,
           branchId: application.vacancy.branchId,
           applicationId,
-          status: JobOfferStatus.PENDING_APPROVAL,
+          status: JobOfferStatus.APPROVED,
           createdById: actor.sub,
-          financialApproverId: dto.financialApproverId,
-          managerialApproverId: dto.managerialApproverId,
+          financialApproverId: null,
+          managerialApproverId: null,
           versions: { create: this.versionData(tenantId, 1, JobOfferVersionSource.EMPLOYER, actor.sub, dto) },
-          approvals: {
-            create: [
-              { tenantId, version: 1, type: JobOfferApprovalType.FINANCIAL, approverId: dto.financialApproverId },
-              { tenantId, version: 1, type: JobOfferApprovalType.MANAGERIAL, approverId: dto.managerialApproverId },
-            ],
-          },
         },
       });
       await this.timeline(tx, application, ApplicationTimelineEventType.OFFER_CREATED, actor, {
@@ -108,6 +104,7 @@ export class JobOffersService {
   }
 
   async revise(tenantId: string, actor: JwtPayload, offerId: string, dto: CreateJobOfferDto) {
+    this.assertOfferAdministration(actor);
     const offer = await this.getStaffOffer(tenantId, actor, offerId);
     if (['ACCEPTED', 'CANCELLED'].includes(offer.status)) {
       throw new ConflictException('La oferta ya no admite nuevas versiones');
@@ -118,20 +115,16 @@ export class JobOffersService {
       await tx.jobOffer.update({
         where: { id: offer.id },
         data: {
-          status: JobOfferStatus.PENDING_APPROVAL,
+          status: JobOfferStatus.APPROVED,
           currentVersion: nextVersion,
-          financialApproverId: dto.financialApproverId ?? offer.financialApproverId,
-          managerialApproverId: dto.managerialApproverId ?? offer.managerialApproverId,
+          financialApproverId: null,
+          managerialApproverId: null,
           conversionError: null,
         },
       });
       await tx.jobOfferVersion.create({
         data: { offerId: offer.id, ...this.versionData(tenantId, nextVersion, JobOfferVersionSource.EMPLOYER, actor.sub, dto) },
       });
-      await tx.jobOfferApproval.createMany({ data: [
-        { tenantId, offerId: offer.id, version: nextVersion, type: JobOfferApprovalType.FINANCIAL, approverId: dto.financialApproverId ?? offer.financialApproverId },
-        { tenantId, offerId: offer.id, version: nextVersion, type: JobOfferApprovalType.MANAGERIAL, approverId: dto.managerialApproverId ?? offer.managerialApproverId },
-      ] });
       await this.timeline(tx, offer.application, ApplicationTimelineEventType.OFFER_CREATED, actor, { offerId, version: nextVersion, revision: true });
       return tx.jobOffer.findUniqueOrThrow({ where: { id: offer.id }, include: offerInclude });
     });
@@ -160,6 +153,13 @@ export class JobOffersService {
       if (allApproved) await this.timeline(tx, offer.application, ApplicationTimelineEventType.OFFER_APPROVED, actor, { offerId, version: offer.currentVersion });
       return tx.jobOffer.findUniqueOrThrow({ where: { id: offerId }, include: offerInclude });
     });
+  }
+
+  private assertOfferAdministration(actor: JwtPayload) {
+    const administrativeRoles = ['ADMIN', 'TENANT_ADMIN', 'PLATFORM_ADMIN', 'SUPERADMIN'];
+    if (!actor.isSuperAdmin && actor.roleScope !== RoleScope.TENANT_ADMIN && !(actor.roles ?? []).some((role) => administrativeRoles.includes(role))) {
+      throw new ForbiddenException('Solo los usuarios administradores de la empresa pueden crear ofertas');
+    }
   }
 
   async send(tenantId: string, actor: JwtPayload, offerId: string) {

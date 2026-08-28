@@ -3,7 +3,7 @@ import { JobOffersService } from './job-offers.service';
 
 const actor = {
   sub: 'user-1', firstName: 'Laura', lastName: 'RRHH', email: 'laura@example.test',
-  scope: AccessScope.TENANT, allowedBranchIds: ['branch-1'], isSuperAdmin: false,
+  scope: AccessScope.TENANT, allowedBranchIds: ['branch-1'], isSuperAdmin: false, roleScope: 'TENANT_ADMIN', roles: ['TENANT_ADMIN'],
 } as any;
 
 const application = {
@@ -13,7 +13,7 @@ const application = {
 };
 
 describe('JobOffersService', () => {
-  it('creates version one with separate financial and managerial approvals', async () => {
+  it('creates an approved offer without financial or managerial approvals', async () => {
     const employmentStartDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const validUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
     const created = { id: 'offer-1', currentVersion: 1, status: 'PENDING_APPROVAL' };
@@ -34,10 +34,15 @@ describe('JobOffersService', () => {
     } as any);
 
     const data = tx.jobOffer.create.mock.calls[0][0].data;
-    expect(data.status).toBe('PENDING_APPROVAL');
+    expect(data.status).toBe('APPROVED');
     expect(data.versions.create.currency).toBe('USD');
-    expect(data.approvals.create.map((item: any) => item.type)).toEqual(['FINANCIAL', 'MANAGERIAL']);
+    expect(data.approvals).toBeUndefined();
     expect(tx.applicationTimelineEvent.create).toHaveBeenCalled();
+  });
+
+  it('allows only tenant administrators to create offers', async () => {
+    const service = new JobOffersService({} as any, {} as any, {} as any);
+    await expect(service.create('tenant-1', { ...actor, roles: ['HR_MANAGER'], roleScope: 'BRANCH_ADMIN' } as any, application.id, {} as any)).rejects.toThrow('Solo los usuarios administradores');
   });
 
   it('marks the offer approved only after both approvals are approved', async () => {
