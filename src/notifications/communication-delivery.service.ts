@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { NotificationDelivery } from '@prisma/client';
 import nodemailer from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
+import { lookup } from 'node:dns/promises';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 type EmailDelivery = NotificationDelivery & {
@@ -63,13 +64,15 @@ export class CommunicationDeliveryService {
     if (!host || !user || !password) throw new Error('SMTP_HOST, SMTP_USER and SMTP_PASSWORD are required');
     if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('SMTP_PORT is invalid');
     if (family !== 4 && family !== 6) throw new Error('SMTP_FAMILY must be 4 or 6');
+    const resolvedHost = family === 4 ? (await lookup(host, { family: 4 })).address : host;
 
     const transportOptions: SMTPTransport.Options & { family: 4 | 6 } = {
-      host,
+      host: resolvedHost,
       port,
       family,
       secure: process.env.SMTP_SECURE?.trim().toLowerCase() !== 'false',
       auth: { user, pass: password },
+      tls: { servername: host },
       connectionTimeout: 12_000,
       greetingTimeout: 12_000,
       socketTimeout: 20_000,

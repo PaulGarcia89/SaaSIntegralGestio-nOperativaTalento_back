@@ -1,5 +1,8 @@
 import nodemailer from 'nodemailer';
+import { lookup } from 'node:dns/promises';
 import { CommunicationDeliveryService } from './communication-delivery.service';
+
+jest.mock('node:dns/promises', () => ({ lookup: jest.fn() }));
 
 jest.mock('nodemailer', () => ({
   __esModule: true,
@@ -33,6 +36,7 @@ describe('CommunicationDeliveryService', () => {
     findUnique.mockResolvedValue(null);
     sendMail.mockResolvedValue({ messageId: '<smtp-message@example.com>' });
     (nodemailer.createTransport as jest.Mock).mockReturnValue({ sendMail });
+    (lookup as jest.Mock).mockResolvedValue({ address: '192.0.2.10', family: 4 });
   });
 
   afterAll(() => {
@@ -56,11 +60,12 @@ describe('CommunicationDeliveryService', () => {
       provider: 'SMTP',
     });
     expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.objectContaining({
-      host: 'mail.example.com',
+      host: '192.0.2.10',
       port: 465,
       family: 4,
       secure: true,
       auth: { user: 'talento@example.com', pass: 'secret' },
+      tls: { servername: 'mail.example.com' },
     }));
     expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({
       from: 'Talento <talento@example.com>',
