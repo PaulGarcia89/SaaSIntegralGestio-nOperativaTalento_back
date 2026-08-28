@@ -585,6 +585,7 @@ export class ApplicationsService {
     tenantId: string,
     query: ListApplicationsDto,
   ) {
+    await this.reconcileApprovedHiringManagerTransitions(actor, tenantId);
     const pagination = normalizeOffsetPagination(query);
     const where = this.buildListWhere(actor, tenantId, query);
 
@@ -622,6 +623,49 @@ export class ApplicationsService {
         totalPages: Math.ceil(total / pagination.pageSize),
       },
     };
+  }
+
+  private async reconcileApprovedHiringManagerTransitions(
+    actor: JwtPayload,
+    tenantId: string,
+  ) {
+    const pendingRequests = await this.prisma.applicationStageTransitionRequest.findMany({
+      where: {
+        tenantId,
+        status: "PENDING",
+        application: this.buildBranchScopedWhere(actor),
+      },
+      select: { id: true, applicationId: true },
+    });
+    if (!pendingRequests.length) return;
+
+    const approvedManagers = await this.prisma.hiringManagerApproval.findMany({
+      where: {
+        tenantId,
+        applicationId: { in: pendingRequests.map((request) => request.applicationId) },
+        status: "APPROVED",
+      },
+      select: { applicationId: true, managerUserId: true, decidedByUserId: true },
+    });
+    const approvedByApplication = new Map(approvedManagers.map((approval) => [approval.applicationId, approval]));
+
+    for (const request of pendingRequests) {
+      const approval = approvedByApplication.get(request.applicationId);
+      if (!approval) continue;
+      const approvalActor = {
+        ...actor,
+        sub: approval.decidedByUserId ?? approval.managerUserId,
+      };
+      await this.decideTransition(
+        request.applicationId,
+        request.id,
+        approvalActor,
+        tenantId,
+        true,
+        "Aprobación automática del hiring manager",
+        true,
+      );
+    }
   }
 
   async exportForTenant(
