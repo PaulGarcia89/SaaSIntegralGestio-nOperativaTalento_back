@@ -47,16 +47,17 @@ Public vacancy responses select the locale from `X-Locale` and never expose the 
 
 ## Backend Docker Compose
 
-`docker-compose.yml` runs only the backend and uses Railway PostgreSQL through `DATABASE_URL`:
+`docker-compose.yml` runs only the backend from the GHCR image and uses Railway PostgreSQL through `DATABASE_URL`. It is intended to be pasted/imported as a Portainer Stack; the Portainer host does not build the image:
 
 ```bash
 cp .env.docker.example .env.docker
-# Set DATABASE_URL in .env.docker to the Railway value.
-docker compose up --build -d backend
+# Set DATABASE_URL in Portainer Stack environment variables.
+docker compose --env-file .env.docker pull backend
+docker compose --env-file .env.docker up -d backend
 docker compose ps
 ```
 
-It does not create a local PostgreSQL container. This prevents local data from being mistaken for the Railway database. The image runs `prisma migrate deploy` before starting the API.
+It does not create a local PostgreSQL container or build a local image. This prevents local data from being mistaken for the Railway database. GitHub Actions publishes `ghcr.io/paulgarcia89/saas-integral-backend:latest`, and the container runs `prisma migrate deploy` before starting the API.
 
 ## Response and error conventions
 

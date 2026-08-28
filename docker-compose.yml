@@ -1,9 +1,6 @@
 services:
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: saas-integral-backend:local
+    image: ${BACKEND_IMAGE:-ghcr.io/paulgarcia89/saas-integral-backend}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file:
       - path: .env.docker
