@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: saas-integral-backend:local
+    restart: unless-stopped
+    env_file:
+      - path: .env.docker
+        required: false
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?Define DATABASE_URL with the Railway PostgreSQL connection}
+      REDIS_URL: ${REDIS_URL:-}
+      SCORM_STORAGE_ROOT: /app/storage/scorm
+      DOCUMENT_STORAGE_ROOT: /app/storage/documents
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - scorm_storage:/app/storage/scorm
+      - document_storage:/app/storage/documents
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  scorm_storage:
+  document_storage:

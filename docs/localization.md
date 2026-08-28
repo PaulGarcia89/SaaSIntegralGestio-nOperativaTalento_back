@@ -45,6 +45,19 @@ Vacancy create/update requests may include an additive `translations` object. On
 
 Public vacancy responses select the locale from `X-Locale` and never expose the internal `translations` object.
 
+## Backend Docker Compose
+
+`docker-compose.yml` runs only the backend and uses Railway PostgreSQL through `DATABASE_URL`:
+
+```bash
+cp .env.docker.example .env.docker
+# Set DATABASE_URL in .env.docker to the Railway value.
+docker compose up --build -d backend
+docker compose ps
+```
+
+It does not create a local PostgreSQL container. This prevents local data from being mistaken for the Railway database. The image runs `prisma migrate deploy` before starting the API.
+
 ## Response and error conventions
 
 Message catalogs use stable codes such as `common.unauthorized` and `applications.submitted`. Clients should render the code through their catalog rather than matching translated text. Existing domain responses remain unchanged until their module is migrated to these codes; this prevents a silent contract change during rollout.
