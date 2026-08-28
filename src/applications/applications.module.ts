@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ApplicationsController } from './applications.controller';
 import { ApplicationsService } from './applications.service';
@@ -25,7 +25,7 @@ import { ApplicantAuthService } from './applicant-auth.service';
 import { EmployeeSensitiveDataCryptoService } from '../employees/employee-sensitive-data-crypto.service';
 
 @Module({
-  imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule, RecruitmentModule, DomainEventsModule],
+  imports: [JwtModule.register({}), AtsCommunicationsModule, NotificationsModule, forwardRef(() => RecruitmentModule), DomainEventsModule],
   controllers: [
     ApplicationsController,
     PublicApplicationsController,
@@ -49,5 +49,6 @@ import { EmployeeSensitiveDataCryptoService } from '../employees/employee-sensit
     ApplicantAuthGuard,
     EmployeeSensitiveDataCryptoService,
   ],
+  exports: [ApplicationsService],
 })
 export class ApplicationsModule {}

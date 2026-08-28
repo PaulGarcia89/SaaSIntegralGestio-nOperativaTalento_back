@@ -1396,6 +1396,7 @@ export class ApplicationsService {
     tenantId: string,
     approved: boolean,
     note?: string,
+    allowRequesterApproval = false,
   ) {
     const application = await this.findApplicationState(id, actor, tenantId);
     const request =
@@ -1410,7 +1411,7 @@ export class ApplicationsService {
       });
     if (!request)
       throw new NotFoundException("Pending transition request not found");
-    if (approved && request.requestedByUserId === actor.sub) {
+    if (approved && request.requestedByUserId === actor.sub && !allowRequesterApproval) {
       throw new BadRequestException(
         "The requester cannot approve their own transition",
       );
@@ -1545,6 +1546,21 @@ export class ApplicationsService {
       }
     });
     return this.findOneForTenant(id, actor, tenantId);
+  }
+
+  async approvePendingTransitionFromHiringManager(
+    id: string,
+    actor: JwtPayload,
+    tenantId: string,
+  ) {
+    const request = await this.prisma.applicationStageTransitionRequest.findFirst({
+      where: { applicationId: id, tenantId, status: "PENDING" },
+      orderBy: { requestedAt: "desc" },
+      select: { id: true },
+    });
+    if (!request) return null;
+
+    return this.decideTransition(id, request.id, actor, tenantId, true, "Aprobación automática del hiring manager", true);
   }
 
   private assertTransitionAllowed(

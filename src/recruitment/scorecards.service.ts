@@ -1,10 +1,13 @@
 import {
+  Inject,
+  Optional,
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { forwardRef } from '@nestjs/common';
 import {
   DecisionCommitteeRole,
   DecisionCommitteeStatus,
@@ -21,6 +24,7 @@ import { createHmac } from 'node:crypto';
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { ApplicationsService } from '../applications/applications.service';
 import {
   CreateDecisionCommitteeDto,
   CreateScorecardTemplateDto,
@@ -55,7 +59,11 @@ const scorecardInclude = {
 
 @Injectable()
 export class ScorecardsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(forwardRef(() => ApplicationsService))
+    private readonly applications?: ApplicationsService,
+  ) {}
 
   async listTemplates(
     tenantId: string,
@@ -695,7 +703,11 @@ export class ScorecardsService {
     const approval = await this.prisma.hiringManagerApproval.findFirst({ where: { tenantId, applicationId } });
     if (!approval) throw new NotFoundException('Hiring manager approval not found');
     if (approval.managerUserId !== actor.sub && !actor.roles.some((role) => ['TENANT_ADMIN', 'ADMIN', 'PLATFORM_ADMIN'].includes(role))) throw new ForbiddenException('Only the assigned hiring manager can decide');
-    return this.prisma.hiringManagerApproval.update({ where: { id: approval.id }, data: { status: dto.status, recommendation: dto.recommendation, rationale: dto.rationale.trim(), decidedByUserId: actor.sub, decidedAt: new Date() }, include: { manager: { select: { id: true, firstName: true, lastName: true } } } });
+    const result = await this.prisma.hiringManagerApproval.update({ where: { id: approval.id }, data: { status: dto.status, recommendation: dto.recommendation, rationale: dto.rationale.trim(), decidedByUserId: actor.sub, decidedAt: new Date() }, include: { manager: { select: { id: true, firstName: true, lastName: true } } } });
+    if (dto.status === HiringManagerApprovalStatus.APPROVED && this.applications) {
+      await this.applications.approvePendingTransitionFromHiringManager(applicationId, actor, tenantId);
+    }
+    return result;
   }
 
   async getHiringManagerApproval(tenantId: string, actor: JwtPayload, applicationId: string) {

@@ -1,4 +1,5 @@
-import { Module } from "@nestjs/common";
+import { forwardRef, Module } from "@nestjs/common";
+import { ApplicationsModule } from "../applications/applications.module";
 import { ModuleAccessGuard } from "../common/guards/module-access.guard";
 import { SubscriptionGuard } from "../common/guards/subscription.guard";
 import { AtsCommunicationsModule } from "../ats-communications/ats-communications.module";
@@ -15,7 +16,7 @@ import { CompetencyAiAssessmentService } from "./competency-ai-assessment.servic
 import { DomainEventsModule } from "../domain-events/domain-events.module";
 
 @Module({
-  imports: [AtsCommunicationsModule, NotificationsModule, DomainEventsModule],
+  imports: [AtsCommunicationsModule, NotificationsModule, DomainEventsModule, forwardRef(() => ApplicationsModule)],
   controllers: [RecruitmentController, InterviewSelfSchedulingController],
   providers: [
     RecruitmentService,
@@ -28,6 +29,6 @@ import { DomainEventsModule } from "../domain-events/domain-events.module";
     SubscriptionGuard,
     ModuleAccessGuard,
   ],
-  exports: [InterviewCalendarService],
+  exports: [InterviewCalendarService, ScorecardsService],
 })
 export class RecruitmentModule {}

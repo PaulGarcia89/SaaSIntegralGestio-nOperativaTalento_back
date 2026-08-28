@@ -50,6 +50,32 @@ const template = {
 };
 
 describe('ScorecardsService', () => {
+  it('synchronizes an approved hiring manager decision with the pending stage transition', async () => {
+    const synchronize = jest.fn().mockResolvedValue(null);
+    const update = jest.fn().mockResolvedValue({
+      id: 'approval-1',
+      manager: { firstName: 'Juan', lastName: 'Hernandez' },
+    });
+    const prisma = {
+      hiringManagerApproval: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'approval-1', managerUserId: 'user-1' }),
+        update,
+      },
+    };
+    const service = new ScorecardsService(prisma as never, {
+      approvePendingTransitionFromHiringManager: synchronize,
+    } as never);
+
+    await service.decideHiringManager('tenant-1', actor, 'application-1', {
+      status: 'APPROVED',
+      recommendation: InterviewRecommendation.YES,
+      rationale: 'La entrevista cumple los criterios definidos.',
+    });
+
+    expect(synchronize).toHaveBeenCalledWith('application-1', actor, 'tenant-1');
+    expect(update).toHaveBeenCalled();
+  });
+
   it('rejects templates whose weighted criteria do not total 100', async () => {
     const prisma = {
       vacancy: { findFirst: jest.fn().mockResolvedValue({ id: 'vacancy-1', branchId: 'branch-1' }) },
