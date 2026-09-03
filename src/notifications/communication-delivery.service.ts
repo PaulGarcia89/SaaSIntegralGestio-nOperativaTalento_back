@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { NotificationDelivery } from '@prisma/client';
 import nodemailer from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import { lookup } from 'node:dns/promises';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { EmailSettingsService } from '../email/email-settings.service';
 
 type EmailDelivery = NotificationDelivery & {
   notification: {
@@ -22,15 +23,16 @@ type ParentMessage = {
 
 @Injectable()
 export class CommunicationDeliveryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, @Optional() private readonly emailSettings?: EmailSettingsService) {}
 
   async sendEmail(delivery: EmailDelivery) {
     const recipient = delivery.recipientEmail ?? delivery.user?.email;
     if (!recipient) throw new Error('Email recipient is missing');
     const domain = await this.prisma.communicationDomain.findUnique({ where: { tenantId: delivery.tenantId } });
+    const tenantSmtp = this.emailSettings ? await this.emailSettings.transportForTenant(delivery.tenantId) : null;
     const from = domain?.status === 'VERIFIED'
       ? `${domain.fromName} <${domain.fromEmail}>`
-      : process.env.NOTIFICATION_FROM_EMAIL?.trim();
+      : tenantSmtp ? `${tenantSmtp.fromName} <${tenantSmtp.fromEmail}>` : process.env.NOTIFICATION_FROM_EMAIL?.trim();
     if (!from) throw new Error('A verified sender domain or NOTIFICATION_FROM_EMAIL is required');
     const parentMessage = delivery.notification.atsMessage?.inReplyToMessageId
       ? await this.prisma.atsMessage.findUnique({ where: { id: delivery.notification.atsMessage.inReplyToMessageId }, select: { internetMessageId: true, referencesHeader: true } })
@@ -38,28 +40,29 @@ export class CommunicationDeliveryService {
     const replyTo = domain?.status === 'VERIFIED' && delivery.notification.atsMessage
       ? this.applicationReplyAddress(domain.replyToEmail ?? domain.fromEmail, delivery.notification.atsMessage.applicationId)
       : domain?.replyToEmail ?? undefined;
-    const provider = process.env.EMAIL_PROVIDER?.trim().toUpperCase()
+    const provider = tenantSmtp ? 'SMTP' : process.env.EMAIL_PROVIDER?.trim().toUpperCase()
       || (process.env.SMTP_HOST?.trim() ? 'SMTP' : 'RESEND');
 
     if (provider === 'SMTP') {
-      return this.sendWithSmtp({ delivery, recipient, from, replyTo, parentMessage });
+      return this.sendWithSmtp({ delivery, recipient, from, replyTo, parentMessage, tenantSmtp });
     }
     if (provider !== 'RESEND') throw new Error(`Unsupported email provider: ${provider}`);
 
     return this.sendWithResend({ delivery, recipient, from, replyTo, parentMessage });
   }
 
-  private async sendWithSmtp({ delivery, recipient, from, replyTo, parentMessage }: {
+  private async sendWithSmtp({ delivery, recipient, from, replyTo, parentMessage, tenantSmtp }: {
     delivery: EmailDelivery;
     recipient: string;
     from: string;
     replyTo?: string;
     parentMessage: ParentMessage;
+    tenantSmtp?: Awaited<ReturnType<EmailSettingsService['transportForTenant']>>;
   }) {
-    const host = process.env.SMTP_HOST?.trim();
-    const user = process.env.SMTP_USER?.trim();
-    const password = process.env.SMTP_PASSWORD;
-    const port = Number(process.env.SMTP_PORT?.trim() || '465');
+    const host = tenantSmtp?.host ?? process.env.SMTP_HOST?.trim();
+    const user = tenantSmtp?.user ?? process.env.SMTP_USER?.trim();
+    const password = tenantSmtp?.password ?? process.env.SMTP_PASSWORD;
+    const port = tenantSmtp?.port ?? Number(process.env.SMTP_PORT?.trim() || '465');
     const family = Number(process.env.SMTP_FAMILY?.trim() || '4');
     if (!host || !user || !password) throw new Error('SMTP_HOST, SMTP_USER and SMTP_PASSWORD are required');
     if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('SMTP_PORT is invalid');
@@ -70,7 +73,7 @@ export class CommunicationDeliveryService {
       host: resolvedHost,
       port,
       family,
-      secure: process.env.SMTP_SECURE?.trim().toLowerCase() !== 'false',
+      secure: tenantSmtp?.secure ?? process.env.SMTP_SECURE?.trim().toLowerCase() !== 'false',
       auth: { user, pass: password },
       tls: { servername: host },
       connectionTimeout: 12_000,

@@ -14,6 +14,7 @@ export class InventoryListQueryDto {
   @IsOptional() @IsIn(['asc', 'desc']) sortOrder?: 'asc' | 'desc';
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) pageSize?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(3650) days?: number;
 }
 
 export class CreateCategoryDto { @IsString() name!: string; @IsOptional() @IsString() description?: string; }
@@ -137,6 +138,8 @@ export class RestaurantExpiryAlertQueryDto {
   @IsOptional() @IsIn(['INFO', 'WARNING', 'CRITICAL', 'EXPIRED']) severity?: string;
   @IsOptional() @IsIn(['ACTIVE', 'ACKNOWLEDGED']) status?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(3650) days?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) pageSize?: number;
 }
 
 export class RestaurantShrinkageAlertQueryDto {

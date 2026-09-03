@@ -35,6 +35,8 @@ import { DomainEventsService } from '../domain-events/domain-events.service';
 import { createHash } from 'crypto';
 import { Response } from 'express';
 
+const transitionApprovalAdminRoles = new Set(['SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN', 'ADMIN']);
+
 const applicationInclude = {
   candidate: {
     include: {
@@ -1139,7 +1141,9 @@ export class ApplicationsService {
     if (changesStage && targetStage) {
       this.assertTransitionAllowed(application, targetStage, dto.reason);
       this.assertRequiredFields(application, targetStage);
-      if (targetStage.requiresApproval) {
+      // Tenant/platform administrators can make controlled stage changes directly.
+      // Approval gates remain active for recruiters and other operational roles.
+      if (targetStage.requiresApproval && !this.canBypassTransitionApproval(actor)) {
         await this.prisma.$transaction(async (tx) => {
           await tx.applicationStageTransitionRequest.updateMany({
             where: { applicationId: id, status: "PENDING" },
@@ -1455,7 +1459,7 @@ export class ApplicationsService {
       });
     if (!request)
       throw new NotFoundException("Pending transition request not found");
-    if (approved && request.requestedByUserId === actor.sub && !allowRequesterApproval) {
+    if (approved && request.requestedByUserId === actor.sub && !allowRequesterApproval && !this.canBypassTransitionApproval(actor)) {
       throw new BadRequestException(
         "The requester cannot approve their own transition",
       );
@@ -1638,6 +1642,10 @@ export class ApplicationsService {
     ) {
       throw new BadRequestException("A rejection reason is required");
     }
+  }
+
+  private canBypassTransitionApproval(actor: JwtPayload) {
+    return actor.isSuperAdmin || transitionApprovalAdminRoles.has(actor.role ?? '') || actor.roles.some((role) => transitionApprovalAdminRoles.has(role));
   }
 
   private assertRequiredFields(

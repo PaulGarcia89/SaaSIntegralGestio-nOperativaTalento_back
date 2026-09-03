@@ -30,6 +30,7 @@ import { TrainingOperationsController } from './training-operations.controller';
 import { TrainingOperationsService } from './training-operations.service';
 import { TrainingVideoController, TrainingVideoAdminController } from './training-video.controller';
 import { TrainingVideoService } from './training-video.service';
+import { TrainingProgressResolver } from './training-progress.resolver';
 
 @Module({
   imports: [PrismaModule],
@@ -66,6 +67,7 @@ import { TrainingVideoService } from './training-video.service';
     TrainingLaunchService,
     TrainingOperationsService,
     TrainingVideoService,
+    TrainingProgressResolver,
   ],
   exports: [TrainingService, TrainingAntivirusService, TrainingLearningPathService],
 })

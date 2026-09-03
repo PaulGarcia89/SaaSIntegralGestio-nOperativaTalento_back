@@ -30,31 +30,29 @@ export class TrainingAssignmentAdminService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const now = new Date();
+    const assignedAt = query.assignedFrom || query.assignedTo ? {
+      ...(query.assignedFrom ? { gte: new Date(query.assignedFrom) } : {}),
+      ...(query.assignedTo ? { lte: new Date(query.assignedTo) } : {}),
+    } : undefined;
+    const dueAt = query.dueFrom || query.dueTo || query.overdue ? {
+      ...(query.dueFrom ? { gte: new Date(query.dueFrom) } : {}),
+      ...(query.dueTo ? { lte: new Date(query.dueTo) } : {}),
+      ...(query.overdue ? { lt: now } : {}),
+    } : undefined;
+    const completedAt = query.completedFrom || query.completedTo ? {
+      ...(query.completedFrom ? { gte: new Date(query.completedFrom) } : {}),
+      ...(query.completedTo ? { lte: new Date(query.completedTo) } : {}),
+    } : undefined;
     const where: Prisma.TrainingAssignmentWhereInput = {
       tenantId,
       userId: query.userId,
       courseId: query.courseId,
       status: query.overdue ? { not: TrainingProgressStatus.COMPLETED } : query.status,
-      dueAt: query.overdue ? { lt: now } : undefined,
-      user: {
-        ...(query.branchId
-          ? {
-              OR: [
-                { activeBranchId: query.branchId },
-                { branchAccesses: { some: { branchId: query.branchId } } },
-              ],
-            }
-          : {}),
-        ...(query.search
-          ? {
-              OR: [
-                { firstName: { contains: query.search, mode: 'insensitive' } },
-                { lastName: { contains: query.search, mode: 'insensitive' } },
-                { email: { contains: query.search, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
-      },
+      isRequired: query.isRequired,
+      createdAt: assignedAt,
+      dueAt,
+      completedAt,
+      ...(query.branchId ? { user: { OR: [{ activeBranchId: query.branchId }, { branchAccesses: { some: { branchId: query.branchId } } }] } } : {}),
       ...(query.search
         ? {
             OR: [
@@ -95,21 +93,11 @@ export class TrainingAssignmentAdminService {
         take: pageSize,
       }),
       this.prisma.trainingAssignment.count({ where }),
+      this.prisma.trainingAssignment.count({ where: { ...where, status: TrainingProgressStatus.NOT_STARTED } }),
+      this.prisma.trainingAssignment.count({ where: { ...where, status: TrainingProgressStatus.IN_PROGRESS } }),
+      this.prisma.trainingAssignment.count({ where: { ...where, status: TrainingProgressStatus.COMPLETED } }),
       this.prisma.trainingAssignment.count({
-        where: { tenantId, status: TrainingProgressStatus.NOT_STARTED },
-      }),
-      this.prisma.trainingAssignment.count({
-        where: { tenantId, status: TrainingProgressStatus.IN_PROGRESS },
-      }),
-      this.prisma.trainingAssignment.count({
-        where: { tenantId, status: TrainingProgressStatus.COMPLETED },
-      }),
-      this.prisma.trainingAssignment.count({
-        where: {
-          tenantId,
-          dueAt: { lt: now },
-          status: { not: TrainingProgressStatus.COMPLETED },
-        },
+        where: { ...where, dueAt: { ...(dueAt ?? {}), lt: now }, status: { not: TrainingProgressStatus.COMPLETED } },
       }),
     ]);
 

@@ -538,6 +538,56 @@ enum JobOfferApprovalStatus {
   REJECTED
 }
 
+enum HiringContractStatus {
+  DRAFT
+  DATA_REVIEW
+  OFFER_PREPARATION
+  OFFER_SENT
+  AWAITING_OFFER_RESPONSE
+  OFFER_ACCEPTED
+  DOCUMENTS_PENDING
+  SIGNATURES_PENDING
+  COMPLIANCE_REVIEW
+  READY_TO_HIRE
+  HIRED
+  CANCELLED
+}
+
+enum HiringContractPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum HiringContractDocumentStatus {
+  REQUIRED
+  REQUESTED
+  RECEIVED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  SIGNED
+  WAIVED
+}
+
+enum HiringContractDocumentSource {
+  CANDIDATE
+  DOCUSEAL
+  INTERNAL
+  IMPORT
+}
+
+enum HiringContractDocumentType {
+  IDENTIFICATION
+  TAX
+  ELIGIBILITY
+  AGREEMENT
+  POLICY
+  LICENSE
+  OTHER
+}
+
 enum CompensationPeriodicity {
   HOURLY
   WEEKLY
@@ -1504,6 +1554,7 @@ model Tenant {
   talentTags                    TalentTag[]
   talentActivities              TalentActivity[]
   candidateMergeAudits          CandidateMergeAudit[]
+  hiringContracts               HiringContract[]
   talentSegments                TalentSegment[]
   talentCampaigns               TalentCampaign[]
   talentSequences               TalentSequence[]
@@ -1516,6 +1567,7 @@ model Tenant {
   branches                      Branch[]
   employees                     Employee[]
   employeeBranches              EmployeeBranch[]
+  hiringContractsAsCompany      HiringContract[]                 @relation("HiringContractCompany")
   vacancies                     Vacancy[]
   careerPortals                 CareerPortal[]
   companyApplicants              CompanyApplicant[]
@@ -1598,6 +1650,7 @@ model Tenant {
   notificationPreferences       NotificationPreference[]
   notificationDeliveries        NotificationDelivery[]
   communicationDomain           CommunicationDomain?
+  emailSettings                 TenantEmailSettings?
   atsConversations              AtsConversation[]
   atsMessageAttachments         AtsMessageAttachment[]
   atsUnmatchedInboundEmails     AtsUnmatchedInboundEmail[]
@@ -1698,6 +1751,9 @@ model User {
   userPermissions                    UserPermission[]
   auditLogs                          AuditLog[]
   branchAccesses                     UserBranchAccess[]
+  hiringContractsManaged             HiringContract[]                  @relation("HiringContractManager")
+  reviewedHiringContractDocuments    HiringContractDocument[]
+  hiringContractsHrResponsible       HiringContract[]                  @relation("HiringContractHrResponsible")
   platformTenantAccesses             PlatformTenantAccess[]
   inventoryCapabilityChanges         TenantInventoryCapability[]       @relation("InventoryCapabilityActor")
   createdVacancies                   Vacancy[]                         @relation("VacancyCreatedBy")
@@ -2483,6 +2539,7 @@ model OnboardingFlow {
   documents         EmployeeDocument[]
   signaturePackages SignaturePackage[]
   legalHolds        OnboardingLegalHold[]
+  hiringContracts   HiringContract[]       @relation("HiringContractOnboarding")
 
   @@index([tenantId, branchId, status])
   @@index([employeeId])
@@ -2677,6 +2734,7 @@ model EmployeeDocument {
   eVerifyProfiles              EmployeeWorkEligibilityProfile[] @relation("EmployeeEVerifyDocument")
   floridaNewHireProfiles       EmployeeFloridaNewHireReport[]   @relation("EmployeeFloridaNewHireDocument")
   complianceRequirements       EmployeeComplianceRequirement[]  @relation("EmployeeComplianceDocument")
+  hiringContractDocuments      HiringContractDocument[]
 
   @@unique([tenantId, storageKey])
   @@index([tenantId, employeeId, status])
@@ -3141,6 +3199,7 @@ model Branch {
   masterWorkflows               MasterWorkflow[]
   workflowSteps                 WorkflowStep[]
   hiringFlows                   HiringFlow[]
+  hiringContracts               HiringContract[]
   onboardingFlows               OnboardingFlow[]
   onboardingTasks               OnboardingTask[]
   employeeDocuments             EmployeeDocument[]
@@ -3209,6 +3268,8 @@ model Employee {
   tenant                       Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   supervisor                   User?                           @relation("EmployeeSupervisor", fields: [supervisorUserId], references: [id], onDelete: SetNull)
   sourceCandidate              Candidate?                      @relation(fields: [sourceCandidateId], references: [id], onDelete: SetNull)
+  hiringContracts              HiringContract[]
+  hiringContractDocuments      HiringContractDocument[]
   branchAssignments            EmployeeBranch[]
   employmentProfile            EmployeeEmploymentProfile?
   payrollProfile               EmployeePayrollProfile?
@@ -3553,6 +3614,7 @@ model InventoryAsset {
   itemId               String
   branchId             String
   employeeId           String?
+  onboardingFlowId     String?
   workflowAssignmentId String?                      @unique
   assetTag             String
   serialNumber         String?
@@ -3712,6 +3774,7 @@ model Vacancy {
   publicApplicationDrafts   PublicApplicationDraft[]
   candidateConversionEvents CandidateConversionEvent[]
   publications             JobPublication[]
+  hiringContracts           HiringContract[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
@@ -4205,6 +4268,7 @@ model Candidate {
   automationExecutions      AutomationExecution[]
   automationAuditLogs       AutomationAuditLog[]
   employees                 Employee[]
+  hiringContracts           HiringContract[]
   resumeFiles               CandidateResumeFile[]
   channelPreferences        CandidateChannelPreference[]
   mergedInto                Candidate?                   @relation("CandidateMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
@@ -4900,6 +4964,7 @@ model VacancyApplication {
   interviewSequences          InterviewSequence[]
   interviewSchedulingRequests InterviewSchedulingRequest[]
   jobOffers                   JobOffer[]
+  hiringContracts             HiringContract[]
   aiCompetencyAssessments     AiCompetencyAssessment[]
 
   @@unique([vacancyId, candidateId])
@@ -4934,6 +4999,7 @@ model JobOffer {
   application          VacancyApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   versions             JobOfferVersion[]
   approvals            JobOfferApproval[]
+  hiringContracts      HiringContract[]
 
   @@index([tenantId, branchId, status])
   @@index([applicationId, createdAt])
@@ -4984,6 +5050,139 @@ model JobOfferApproval {
   @@unique([offerId, version, type])
   @@index([tenantId, status, createdAt])
   @@index([approverId, status])
+}
+
+model HiringContract {
+  id                    String                @id @default(uuid())
+  tenantId              String
+  companyId             String?
+  branchId              String
+  candidateId           String
+  applicationId         String
+  vacancyId             String
+  jobOfferId            String?
+  jobOfferVersionId     String?
+  employeeId            String?
+  onboardingFlowId      String?
+  hiringManagerUserId   String?
+  hrResponsibleUserId   String?
+  roleTitle             String?
+  status                HiringContractStatus  @default(DRAFT)
+  currentStage          String                @default("draft")
+  progressPercent       Int                   @default(0)
+  currentActor          String?
+  nextAction            String?
+  nextActor             String?
+  priority              HiringContractPriority @default(MEDIUM)
+  deadlineAt            DateTime?
+  isActive              Boolean               @default(true)
+  offerSnapshot         Json?
+  reviewSummary         Json?
+  complianceSummary     Json?
+  hiredAt               DateTime?
+  cancelledAt           DateTime?
+  cancelledReason       String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company               Tenant?               @relation("HiringContractCompany", fields: [companyId], references: [id], onDelete: SetNull)
+  branch                Branch                @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  candidate             Candidate             @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  application           VacancyApplication    @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  vacancy               Vacancy               @relation(fields: [vacancyId], references: [id], onDelete: Restrict)
+  jobOffer              JobOffer?             @relation(fields: [jobOfferId], references: [id], onDelete: SetNull)
+  employee              Employee?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  onboardingFlow        OnboardingFlow?       @relation("HiringContractOnboarding", fields: [onboardingFlowId], references: [id], onDelete: SetNull)
+  hiringManagerUser     User?                 @relation("HiringContractManager", fields: [hiringManagerUserId], references: [id], onDelete: SetNull)
+  hrResponsibleUser     User?                 @relation("HiringContractHrResponsible", fields: [hrResponsibleUserId], references: [id], onDelete: SetNull)
+  documents             HiringContractDocument[]
+  signatures            HiringContractSignatureRequest[]
+  stateHistory          HiringContractStateEvent[]
+
+  @@unique([tenantId, jobOfferId])
+  @@unique([onboardingFlowId])
+  @@index([tenantId, branchId, status])
+  @@index([tenantId, candidateId])
+  @@index([tenantId, vacancyId])
+  @@index([tenantId, employeeId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, priority, deadlineAt])
+}
+
+model HiringContractDocument {
+  id                String                         @id @default(uuid())
+  tenantId          String
+  contractId        String
+  employeeId        String?
+  employeeDocumentId String?
+  type              HiringContractDocumentType
+  status            HiringContractDocumentStatus   @default(REQUIRED)
+  version           Int                            @default(1)
+  source            HiringContractDocumentSource   @default(INTERNAL)
+  title             String
+  originalName      String?
+  storageKey        String?
+  mimeType          String?
+  sizeBytes         Int?
+  checksum          String?
+  required          Boolean                        @default(true)
+  requiredReason    String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  submittedAt       DateTime?
+  acceptedAt        DateTime?
+  rejectedAt        DateTime?
+  rejectionReason   String?
+  metadata          Json?
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+  contract          HiringContract                 @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  employee          Employee?                      @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  employeeDocument  EmployeeDocument?              @relation(fields: [employeeDocumentId], references: [id], onDelete: SetNull)
+  reviewer          User?                          @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, type, version])
+  @@index([tenantId, contractId, status])
+  @@index([tenantId, employeeId])
+  @@index([employeeDocumentId])
+}
+
+model HiringContractSignatureRequest {
+  id                String               @id @default(uuid())
+  tenantId          String
+  contractId        String
+  signaturePackageId String?              @unique
+  provider          String               @default("DOCUSEAL")
+  status            String               @default("PENDING")
+  externalReference String?
+  evidence          Json?
+  requestedAt       DateTime             @default(now())
+  respondedAt       DateTime?
+  completedAt       DateTime?
+  metadata          Json?
+  contract          HiringContract       @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, contractId, status])
+}
+
+model HiringContractStateEvent {
+  id            String             @id @default(uuid())
+  tenantId      String
+  contractId    String
+  previousState String?
+  nextState     String
+  action        String
+  reason        String?
+  actorUserId   String?
+  actorRole     String?
+  requestId     String?
+  changes       Json?
+  occurredAt    DateTime           @default(now())
+  contract      HiringContract     @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, contractId, occurredAt])
+  @@index([tenantId, action, occurredAt])
+  @@unique([tenantId, requestId, action])
 }
 
 model ApplicationStageTransitionRequest {
@@ -5788,6 +5987,27 @@ model CommunicationDomain {
   @@index([status, lastCheckedAt])
 }
 
+model TenantEmailSettings {
+  id                    String   @id @default(uuid())
+  tenantId              String   @unique
+  smtpHost              String
+  smtpPort              Int      @default(465)
+  smtpSecure            Boolean  @default(true)
+  smtpUsername          String
+  smtpPasswordEncrypted String
+  fromName              String
+  fromEmail             String
+  enabled               Boolean  @default(true)
+  lastTestedAt          DateTime?
+  lastTestStatus        String?
+  lastTestError         String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+}
+
 model CandidateChannelPreference {
   id                String              @id @default(uuid())
   tenantId          String
@@ -6298,6 +6518,7 @@ model TrainingLessonProgress {
   tenantId     String
   userId       String
   lessonId     String
+  lastRequestId String?
   isCompleted  Boolean        @default(false)
   startedAt    DateTime?
   completedAt  DateTime?
@@ -6310,6 +6531,7 @@ model TrainingLessonProgress {
 
   @@unique([tenantId, userId, lessonId])
   @@index([tenantId, userId, isCompleted])
+  @@unique([tenantId, lastRequestId])
   @@index([lessonId])
 }
 
@@ -6554,6 +6776,7 @@ model TrainingProgress {
   progressPercent Int                    @default(0)
   startedAt       DateTime?
   lastActivityAt  DateTime?
+  lastRequestId   String?
   completedAt     DateTime?
   status          TrainingProgressStatus @default(NOT_STARTED)
   createdAt       DateTime               @default(now())
@@ -6567,6 +6790,7 @@ model TrainingProgress {
   @@unique([tenantId, userId, courseId])
   @@index([tenantId, userId, status])
   @@index([tenantId, lastActivityAt])
+  @@index([tenantId, userId, lastRequestId])
 }
 
 model TrainingStepProgress {
@@ -6873,6 +7097,7 @@ model TrainingQuizAttempt {
   passed      Boolean?
   gradedAt    DateTime?
   gradedById  String?
+  submissionRequestId String?
   feedback    String?
   questionIds String[]
   status      TrainingQuizAttemptStatus @default(IN_PROGRESS)
@@ -6885,6 +7110,7 @@ model TrainingQuizAttempt {
 
   @@index([tenantId, userId, status])
   @@index([quizId])
+  @@unique([tenantId, submissionRequestId])
 }
 
 model TrainingQuizAnswer {

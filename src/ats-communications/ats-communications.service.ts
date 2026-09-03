@@ -453,7 +453,7 @@ export class AtsCommunicationsService {
       (item) => item.channel === NotificationChannel.EMAIL,
     );
     if (!delivery) throw new BadRequestException("Email delivery not found");
-    return this.notifications.retryDelivery(actor, delivery.id);
+    return this.notifications.retryDelivery(actor, delivery.id, true);
   }
 
   async sendOffer(

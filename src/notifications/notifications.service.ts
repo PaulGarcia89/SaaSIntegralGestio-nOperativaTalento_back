@@ -6,6 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import {
+  AtsMessageStatus,
   NotificationCategory,
   NotificationChannel,
   NotificationDeliveryStatus,
@@ -312,16 +313,17 @@ export class NotificationsService {
     return { items, page: pagination.page, pageSize: pagination.pageSize, total };
   }
 
-  async retryDelivery(actor: JwtPayload, id: string) {
+  async retryDelivery(actor: JwtPayload, id: string, allowTenantScoped = false) {
     const delivery = await this.prisma.notificationDelivery.findFirst({
       where: { id, tenantId: this.activeTenantId(actor) },
       include: { notification: true, user: true },
     });
     if (!delivery) throw new NotFoundException('Notification delivery not found');
-    if (!actor.isSuperAdmin && delivery.userId !== actor.sub) {
+    if (!allowTenantScoped && !actor.isSuperAdmin && delivery.userId !== actor.sub) {
       throw new ForbiddenException('You do not have access to this delivery');
     }
     if (
+      delivery.status !== NotificationDeliveryStatus.PENDING &&
       delivery.status !== NotificationDeliveryStatus.FAILED &&
       delivery.status !== NotificationDeliveryStatus.DEAD_LETTER
     ) {
@@ -452,7 +454,7 @@ export class NotificationsService {
   private async attemptEmailDelivery(id: string) {
     const delivery = await this.prisma.notificationDelivery.findUnique({
       where: { id },
-      include: { notification: { include: { atsMessage: { select: { applicationId: true, inReplyToMessageId: true } } } }, user: true },
+      include: { notification: { include: { atsMessage: { select: { id: true, applicationId: true, inReplyToMessageId: true } } } }, user: true },
     });
     if (!delivery || delivery.channel !== NotificationChannel.EMAIL) {
       throw new NotFoundException('Email delivery not found');
@@ -465,11 +467,27 @@ export class NotificationsService {
     try {
       if (!this.deliveryProvider) throw new Error('Email delivery provider is unavailable');
       const result = await this.deliveryProvider.sendEmail(delivery);
+      const deliveredAt = new Date();
+      await this.prisma.$transaction([
+        this.prisma.notificationDelivery.update({
+          where: { id },
+          data: {
+            status: NotificationDeliveryStatus.DELIVERED,
+            deliveredAt,
+            providerMessageId: result.id,
+            lastError: null,
+          },
+        }),
+        ...(delivery.notification.atsMessage ? [this.prisma.atsMessage.update({
+          where: { id: delivery.notification.atsMessage.id },
+          data: { status: AtsMessageStatus.DELIVERED, deliveredAt, providerMessageId: result.id },
+        })] : []),
+      ]);
       return this.prisma.notificationDelivery.update({
         where: { id },
         data: {
           status: NotificationDeliveryStatus.DELIVERED,
-          deliveredAt: new Date(),
+          deliveredAt,
           providerMessageId: result.id,
           lastError: null,
         },
@@ -477,6 +495,22 @@ export class NotificationsService {
     } catch (error) {
       const deadLetter = attempts >= delivery.maxAttempts;
       const delayMinutes = Math.min(60, 2 ** attempts);
+      await this.prisma.$transaction([
+        this.prisma.notificationDelivery.update({
+          where: { id },
+          data: {
+            status: deadLetter
+              ? NotificationDeliveryStatus.DEAD_LETTER
+              : NotificationDeliveryStatus.FAILED,
+            nextAttemptAt: new Date(Date.now() + delayMinutes * 60_000),
+            lastError: error instanceof Error ? error.message : 'Email delivery failed',
+          },
+        }),
+        ...(delivery.notification.atsMessage ? [this.prisma.atsMessage.update({
+          where: { id: delivery.notification.atsMessage.id },
+          data: { status: deadLetter ? AtsMessageStatus.DEAD_LETTER : AtsMessageStatus.FAILED },
+        })] : []),
+      ]);
       return this.prisma.notificationDelivery.update({
         where: { id },
         data: {

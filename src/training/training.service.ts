@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   ModuleCode,
   Prisma,
@@ -26,10 +26,19 @@ import { UpdateTrainingLessonProgressDto } from './dto/training-assignment-admin
 import { SubmitTrainingPilotFeedbackDto } from './dto/training-course-authoring.dto';
 import { randomBytes } from 'node:crypto';
 import { TrainingWebhookDeliveryService } from './training-webhook-delivery.service';
+import { TrainingProgressResolver } from './training-progress.resolver';
 
 @Injectable()
 export class TrainingService {
-  constructor(private readonly prisma: PrismaService, private readonly webhooks: TrainingWebhookDeliveryService) {}
+  private readonly progressResolver: TrainingProgressResolver;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly webhooks: TrainingWebhookDeliveryService,
+    @Optional() progressResolver?: TrainingProgressResolver,
+  ) {
+    this.progressResolver = progressResolver ?? new TrainingProgressResolver();
+  }
 
   async assertModuleEnabled(tenantId: string, user: JwtPayload) {
     const access = await this.getModuleAccess(tenantId, user);
@@ -91,6 +100,7 @@ export class TrainingService {
       this.findUpcomingEvents(tenantId, userId),
       this.syncAnalyticsSnapshot(tenantId, userId),
     ]);
+    const pendingAssessments = await this.findPendingAssessments(tenantId, userId, assignments);
 
     const overdueAssignments = assignments.filter((item) => item.status === TrainingProgressStatus.OVERDUE);
     const inProgressAssignments = assignments.filter(
@@ -99,11 +109,31 @@ export class TrainingService {
     const completedAssignments = assignments.filter(
       (item) => item.status === TrainingProgressStatus.COMPLETED,
     );
+    const attentionRequired = assignments
+      .filter((item) => item.status === TrainingProgressStatus.OVERDUE)
+      .sort((a, b) => new Date(a.dueAt ?? 0).getTime() - new Date(b.dueAt ?? 0).getTime());
+    const upcomingDue = assignments
+      .filter((item) => item.status !== TrainingProgressStatus.COMPLETED && item.status !== TrainingProgressStatus.OVERDUE && item.dueAt)
+      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+    const recentlyCompleted = [...completedAssignments]
+      .sort((a, b) => new Date(b.completedAt ?? 0).getTime() - new Date(a.completedAt ?? 0).getTime())
+      .slice(0, 6);
+    const optionalAssignments = assignments.filter((item) => !item.isRequired);
 
     return {
       overdueAssignments,
       inProgressAssignments,
       completedAssignments,
+      attentionRequired,
+      upcomingDue,
+      pendingAssessments,
+      continueLearning: inProgressAssignments.slice(0, 6),
+      newAssignments: assignments
+        .filter((item) => item.status === TrainingProgressStatus.NOT_STARTED)
+        .sort((a, b) => Number(b.isRequired) - Number(a.isRequired))
+        .slice(0, 6),
+      recentlyCompleted,
+      optionalAssignments,
       upcomingEvents,
       analyticsSnapshot,
       objectiveProgress: [
@@ -121,14 +151,64 @@ export class TrainingService {
   }
 
   async listAssignments(tenantId: string, userId: string, query: ListTrainingAssignmentsDto) {
-    const items = await this.findAssignments(tenantId, userId, query);
     const pagination = normalizeOffsetPagination(query);
-    const start = pagination.skip;
-    const end = start + pagination.pageSize;
+    const now = new Date();
+    const filters: Prisma.TrainingAssignmentWhereInput[] = [];
+    if (query.status === TrainingProgressStatus.OVERDUE) {
+      filters.push({ status: { not: TrainingProgressStatus.COMPLETED }, dueAt: { lt: now } });
+    } else if (query.status === TrainingProgressStatus.IN_PROGRESS || query.status === TrainingProgressStatus.NOT_STARTED) {
+      filters.push({
+        status: query.status,
+        OR: [{ dueAt: null }, { dueAt: { gte: now } }],
+      });
+    } else if (query.status) {
+      filters.push({ status: query.status });
+    }
+    if (query.search) {
+      filters.push({
+        OR: [
+          { course: { title: { contains: query.search, mode: 'insensitive' } } },
+          { curriculum: { title: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      });
+    }
+    const where: Prisma.TrainingAssignmentWhereInput = {
+      tenantId,
+      userId,
+      ...(query.type ? { assignmentType: query.type } : {}),
+      ...(filters.length ? { AND: filters } : {}),
+    };
+    const orderBy: Prisma.TrainingAssignmentOrderByWithRelationInput[] = query.sort === 'progress'
+      ? [{ progressPercent: query.order === 'asc' ? 'asc' : 'desc' }, { updatedAt: 'desc' }]
+      : query.sort === 'title'
+        ? [{ createdAt: 'desc' }]
+        : [{ dueAt: query.order === 'asc' ? 'asc' : 'desc' }, { createdAt: 'desc' }];
+    const [records, total] = await this.prisma.$transaction([
+      this.prisma.trainingAssignment.findMany({
+        where,
+        include: {
+          course: { include: { category: true, favorites: { where: { tenantId, userId } } } },
+          curriculum: { include: { category: true, favorites: { where: { tenantId, userId } } } },
+        },
+        orderBy,
+        skip: pagination.skip,
+        take: pagination.pageSize,
+      }),
+      this.prisma.trainingAssignment.count({ where }),
+    ]);
+    const items = (records as any[])
+      .map((item) => this.mapAssignmentRecord(item, item.course, item.curriculum))
+      .map((item) => ({
+        ...item,
+        overdue: Boolean(item.dueAt && new Date(item.dueAt) < now && item.status !== TrainingProgressStatus.COMPLETED),
+      }));
 
     return {
-      items: items.slice(start, end),
-      total: items.length,
+      items,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pagination.pageSize)),
     };
   }
 
@@ -395,6 +475,12 @@ export class TrainingService {
       orderBy: [{ isFeatured: 'desc' }, { createdAt: 'desc' }],
     });
 
+    const assignment = course.assignments[0] ? this.mapAssignmentRecord(course.assignments[0], course) : null;
+    const nextLessonId = assignment?.progress?.nextAction?.lessonId ?? null;
+    const nextLesson = nextLessonId
+      ? course.modules.flatMap((module) => module.lessons).find((lesson) => lesson.id === nextLessonId) ?? null
+      : null;
+
     return {
       ...this.mapCourseCard(course),
       description: course.description,
@@ -462,7 +548,11 @@ export class TrainingService {
         timeLimitMinutes: quiz.timeLimitMinutes,
         shuffleQuestions: quiz.shuffleQuestions,
         questionsCount: quiz.questions.length,
-        latestAttempt: quiz.attempts[0] ?? null,
+        attemptsUsed: quiz.attempts.length,
+        attemptsRemaining: quiz.maxAttempts === null ? null : Math.max(quiz.maxAttempts - quiz.attempts.length, 0),
+        canRetry: !quiz.attempts.some((attempt) => attempt.status === TrainingQuizAttemptStatus.IN_PROGRESS)
+          && (quiz.maxAttempts === null || quiz.attempts.length < quiz.maxAttempts),
+        latestAttempt: quiz.attempts[0] ? this.mapLearnerAttemptSummary(quiz.attempts[0], quiz) : null,
       })),
       relatedResources: relatedResources.map((item) => ({
         id: item.id,
@@ -477,7 +567,11 @@ export class TrainingService {
         favorite: item.favorites.length > 0,
         category: item.category,
       })),
-      assignment: course.assignments[0] ? this.mapAssignmentRecord(course.assignments[0], course) : null,
+      assignment,
+      nextAction: assignment?.progress?.nextAction ?? null,
+      nextLesson: nextLesson
+        ? { id: nextLesson.id, title: nextLesson.title, moduleId: nextLesson.moduleId, sortOrder: nextLesson.sortOrder }
+        : null,
     };
   }
 
@@ -631,6 +725,7 @@ export class TrainingService {
     userId: string,
     courseId: string,
     dto: UpdateTrainingCourseProgressDto,
+    requestId?: string,
   ) {
     await this.assertCourseVisible(tenantId, courseId);
     await this.assertLearningPathCourseUnlocked(tenantId, userId, courseId);
@@ -643,6 +738,13 @@ export class TrainingService {
         : progressPercent > 0 || dto.startedAt
           ? TrainingProgressStatus.IN_PROGRESS
           : TrainingProgressStatus.NOT_STARTED);
+
+    if (requestId) {
+      const previous = await this.prisma.trainingProgress.findUnique({
+        where: { tenantId_userId_courseId: { tenantId, userId, courseId } },
+      });
+      if (previous?.lastRequestId === requestId) return previous;
+    }
 
     const progress = await this.prisma.trainingProgress.upsert({
       where: {
@@ -657,6 +759,7 @@ export class TrainingService {
         startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
         completedAt: dto.completedAt ? new Date(dto.completedAt) : status === TrainingProgressStatus.COMPLETED ? new Date() : null,
         lastActivityAt: new Date(),
+        lastRequestId: requestId,
         status,
       },
       create: {
@@ -667,6 +770,7 @@ export class TrainingService {
         startedAt: dto.startedAt ? new Date(dto.startedAt) : progressPercent > 0 ? new Date() : null,
         completedAt: dto.completedAt ? new Date(dto.completedAt) : status === TrainingProgressStatus.COMPLETED ? new Date() : null,
         lastActivityAt: new Date(),
+        lastRequestId: requestId,
         status,
       },
     });
@@ -801,6 +905,7 @@ export class TrainingService {
     userId: string,
     lessonId: string,
     dto: UpdateTrainingLessonProgressDto,
+    requestId?: string,
   ) {
     const lesson = await this.prisma.trainingLesson.findUnique({
       where: { id: lessonId },
@@ -815,6 +920,12 @@ export class TrainingService {
     }
 
     const now = new Date();
+    if (requestId) {
+      const previous = await this.prisma.trainingLessonProgress.findFirst({
+        where: { tenantId, userId, lastRequestId: requestId },
+      });
+      if (previous) return previous;
+    }
     const record = await this.prisma.trainingLessonProgress.upsert({
       where: { tenantId_userId_lessonId: { tenantId, userId, lessonId } },
       update: {
@@ -822,6 +933,7 @@ export class TrainingService {
         startedAt: now,
         lastOpenedAt: now,
         completedAt: dto.completed ? now : null,
+        ...(requestId ? { lastRequestId: requestId } : {}),
       },
       create: {
         tenantId,
@@ -831,6 +943,7 @@ export class TrainingService {
         startedAt: now,
         lastOpenedAt: now,
         completedAt: dto.completed ? now : null,
+        ...(requestId ? { lastRequestId: requestId } : {}),
       },
     });
 
@@ -937,6 +1050,44 @@ export class TrainingService {
     };
   }
 
+  async getQuizAttempt(tenantId: string, userId: string, quizId: string, attemptId: string) {
+    const attempt = await this.prisma.trainingQuizAttempt.findFirst({
+      where: { id: attemptId, tenantId, userId, quizId },
+      include: {
+        answers: { select: { questionId: true, optionId: true, selectedOptionIds: true, textAnswer: true } },
+      },
+    });
+    if (!attempt) throw new NotFoundException('Training quiz attempt not found');
+
+    const questions = await this.prisma.trainingQuizQuestion.findMany({
+      where: { quizId, id: { in: attempt.questionIds } },
+      include: { options: { orderBy: { sortOrder: 'asc' } } },
+      orderBy: { sortOrder: 'asc' },
+    });
+    const now = new Date();
+    const timeRemainingSeconds = attempt.expiresAt
+      ? Math.max(0, Math.floor((attempt.expiresAt.getTime() - now.getTime()) / 1000))
+      : null;
+
+    return {
+      id: attempt.id,
+      status: attempt.status,
+      startedAt: attempt.startedAt,
+      submittedAt: attempt.submittedAt,
+      expiresAt: attempt.expiresAt,
+      timeRemainingSeconds,
+      questionCount: questions.length,
+      answers: attempt.answers,
+      questions: questions.map((question) => ({
+        id: question.id,
+        prompt: question.prompt,
+        questionType: question.questionType,
+        points: question.points,
+        options: question.options.map((option) => ({ id: option.id, label: option.label })),
+      })),
+    };
+  }
+
   async answerQuizAttempt(
     tenantId: string,
     userId: string,
@@ -1018,6 +1169,7 @@ export class TrainingService {
     quizId: string,
     attemptId: string,
     _dto: SubmitTrainingQuizAttemptDto,
+    requestId?: string,
   ) {
     const attempt = await this.prisma.trainingQuizAttempt.findFirst({
       where: { id: attemptId, tenantId, userId, quizId },
@@ -1043,8 +1195,13 @@ export class TrainingService {
       throw new NotFoundException('Training quiz attempt not found');
     }
 
+    if (requestId && attempt.submissionRequestId === requestId) return attempt;
+
     if (attempt.status !== TrainingQuizAttemptStatus.IN_PROGRESS) {
       throw new ForbiddenException('This assessment attempt was already submitted');
+    }
+    if (attempt.expiresAt && attempt.expiresAt < new Date()) {
+      throw new ForbiddenException('This assessment attempt has expired');
     }
     const selectedQuestions = attempt.questionIds.length
       ? attempt.quiz.questions.filter((question) => attempt.questionIds.includes(question.id))
@@ -1069,17 +1226,26 @@ export class TrainingService {
     const score = totalPoints === 0 ? 0 : Math.round((earnedPoints / totalPoints) * 100);
     const passed = score >= attempt.quiz.passingScore;
 
-    const updated = await this.prisma.trainingQuizAttempt.update({
-      where: { id: attemptId },
+    const submittedAt = new Date();
+    const nextStatus = requiresManualReview
+      ? TrainingQuizAttemptStatus.PENDING_REVIEW
+      : TrainingQuizAttemptStatus.GRADED;
+    const claim = await this.prisma.trainingQuizAttempt.updateMany({
+      where: { id: attemptId, tenantId, userId, quizId, status: TrainingQuizAttemptStatus.IN_PROGRESS },
       data: {
-        submittedAt: new Date(),
+        submittedAt,
+        submissionRequestId: requestId,
         score: requiresManualReview ? null : score,
         passed: requiresManualReview ? null : passed,
-        status: requiresManualReview
-          ? TrainingQuizAttemptStatus.PENDING_REVIEW
-          : TrainingQuizAttemptStatus.GRADED,
+        status: nextStatus,
       },
     });
+    if (!claim.count) {
+      const current = await this.prisma.trainingQuizAttempt.findFirst({ where: { id: attemptId, tenantId, userId, quizId } });
+      if (requestId && current?.submissionRequestId === requestId) return current;
+      throw new ForbiddenException('This assessment attempt was already submitted');
+    }
+    const updated = await this.prisma.trainingQuizAttempt.findFirstOrThrow({ where: { id: attemptId, tenantId, userId, quizId } });
 
     if (!requiresManualReview && passed && attempt.quiz.course.steps[0]) {
       const quizStep = attempt.quiz.course.steps[0];
@@ -1246,6 +1412,59 @@ export class TrainingService {
         ...item,
         overdue: Boolean(item.dueAt && new Date(item.dueAt) < now && item.status !== TrainingProgressStatus.COMPLETED),
       }));
+  }
+
+  private async findPendingAssessments(tenantId: string, userId: string, assignments: any[]) {
+    const courseIds = [...new Set(assignments
+      .filter((assignment) => assignment.status !== TrainingProgressStatus.COMPLETED && assignment.courseId)
+      .map((assignment) => assignment.courseId))];
+    const quizDelegate = (this.prisma as any)?.trainingQuiz;
+    if (!courseIds.length || !quizDelegate?.findMany) return [];
+
+    const quizzes = await quizDelegate.findMany({
+      where: { courseId: { in: courseIds }, course: { OR: [{ tenantId: null }, { tenantId }] } },
+      select: {
+        id: true,
+        courseId: true,
+        title: true,
+        description: true,
+        maxAttempts: true,
+        attempts: {
+          where: { tenantId, userId },
+          orderBy: { createdAt: 'desc' },
+          select: { status: true, passed: true, score: true, createdAt: true },
+        },
+        course: { select: { id: true, title: true } },
+      },
+    });
+
+    return quizzes
+      .map((quiz: any) => {
+        const assignment = assignments.find((item) => item.courseId === quiz.courseId);
+        const latestAttempt = quiz.attempts[0] ?? null;
+        const passed = quiz.attempts.some((attempt: any) => attempt.passed === true);
+        const inProgress = latestAttempt?.status === TrainingQuizAttemptStatus.IN_PROGRESS;
+        const attemptsRemaining = quiz.maxAttempts === null
+          ? null
+          : Math.max(quiz.maxAttempts - quiz.attempts.length, 0);
+        return {
+          id: quiz.id,
+          quizId: quiz.id,
+          assignmentId: assignment?.id ?? null,
+          courseId: quiz.courseId,
+          courseTitle: quiz.course?.title ?? null,
+          title: quiz.title,
+          description: quiz.description,
+          status: inProgress ? 'IN_PROGRESS' : 'PENDING',
+          attemptsUsed: quiz.attempts.length,
+          attemptsRemaining,
+          canStart: !passed && !inProgress && (attemptsRemaining === null || attemptsRemaining > 0),
+          latestAttempt: latestAttempt
+            ? { status: latestAttempt.status, score: latestAttempt.score, createdAt: latestAttempt.createdAt }
+            : null,
+        };
+      })
+      .filter((assessment: any) => assessment.canStart || assessment.status === 'IN_PROGRESS');
   }
 
   private async findUpcomingEvents(tenantId: string, userId: string) {
@@ -1668,8 +1887,7 @@ export class TrainingService {
 
   private mapAssignmentRecord(assignment: any, course?: any, curriculum?: any) {
     const baseCategory = course?.category ?? curriculum?.category ?? null;
-    const overdue =
-      Boolean(assignment.dueAt && assignment.dueAt < new Date() && assignment.status !== TrainingProgressStatus.COMPLETED);
+    const progress = this.progressResolver.resolve(assignment, course, curriculum);
 
     return {
       id: assignment.id,
@@ -1681,8 +1899,9 @@ export class TrainingService {
       coverImageUrl: course?.coverImageUrl ?? curriculum?.coverImageUrl ?? null,
       type: assignment.assignmentType,
       progressPercent: assignment.progressPercent,
-      status: overdue ? TrainingProgressStatus.OVERDUE : assignment.status,
+      status: progress.status,
       dueAt: assignment.dueAt,
+      isRequired: Boolean(assignment.isRequired),
       completedAt: assignment.completedAt,
       estimatedMinutes: course?.estimatedMinutes ?? curriculum?.estimatedMinutes ?? 0,
       category: baseCategory,
@@ -1690,6 +1909,9 @@ export class TrainingService {
       assigned: true,
       tags: course?.tags ?? [],
       certificateEligible: true,
+      displayStatus: progress.displayStatus,
+      progress,
+      nextAction: progress.nextAction,
     };
   }
 
@@ -1711,6 +1933,23 @@ export class TrainingService {
       assigned: course.assignments?.length > 0,
       tags: course.tags ?? [],
       certificateEligible: true,
+    };
+  }
+
+  private mapLearnerAttemptSummary(attempt: any, quiz: any) {
+    const feedbackAvailable = quiz.feedbackMode === 'AFTER_SUBMISSION'
+      || (quiz.feedbackMode === 'AFTER_PASSING' && attempt.passed === true);
+
+    return {
+      id: attempt.id,
+      status: attempt.status,
+      startedAt: attempt.startedAt,
+      submittedAt: attempt.submittedAt,
+      expiresAt: attempt.expiresAt,
+      score: attempt.score,
+      passed: attempt.passed,
+      gradedAt: attempt.gradedAt,
+      feedback: feedbackAvailable ? attempt.feedback ?? null : null,
     };
   }
 

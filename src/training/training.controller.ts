@@ -122,7 +122,13 @@ export class TrainingController {
     @Param('courseId') courseId: string,
     @Body() dto: UpdateTrainingCourseProgressDto,
   ) {
-    return this.trainingService.updateCourseProgress(request.tenant!.id, request.user.sub, courseId, dto);
+    return this.trainingService.updateCourseProgress(
+      request.tenant!.id,
+      request.user.sub,
+      courseId,
+      dto,
+      this.getIdempotencyKey(request),
+    );
   }
 
   @Patch('progress/step/:stepId')
@@ -147,12 +153,19 @@ export class TrainingController {
       request.user.sub,
       lessonId,
       dto,
+      this.getIdempotencyKey(request),
     );
   }
   @Post('quizzes/:quizId/attempts')
   @RequirePermissions('training.update')
   createAttempt(@Req() request: RequestWithUser, @Param('quizId') quizId: string) {
     return this.trainingService.createQuizAttempt(request.tenant!.id, request.user.sub, quizId);
+  }
+
+  @Get('quizzes/:quizId/attempts/:attemptId')
+  @RequirePermissions('training.read')
+  getAttempt(@Req() request: RequestWithUser, @Param('quizId') quizId: string, @Param('attemptId') attemptId: string) {
+    return this.trainingService.getQuizAttempt(request.tenant!.id, request.user.sub, quizId, attemptId);
   }
 
   @Post('quizzes/:quizId/attempts/:attemptId/answers')
@@ -186,7 +199,13 @@ export class TrainingController {
       quizId,
       attemptId,
       dto,
+      this.getIdempotencyKey(request),
     );
+  }
+
+  private getIdempotencyKey(request: RequestWithUser) {
+    const header = request.headers['idempotency-key'];
+    return (Array.isArray(header) ? header[0] : header) ?? request.requestId;
   }
 
   @Get('certificates')

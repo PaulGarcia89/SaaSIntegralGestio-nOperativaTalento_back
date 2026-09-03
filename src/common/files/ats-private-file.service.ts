@@ -160,7 +160,8 @@ export class AtsPrivateFileService {
     const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
     const baseUrl = (
       process.env.API_PUBLIC_URL?.trim()
-      ?? (railwayDomain ? `https://${railwayDomain}` : 'http://localhost:3001')
+      ?? process.env.PUBLIC_FRONTEND_URL?.trim()
+      ?? (railwayDomain ? `https://${railwayDomain}` : 'http://localhost')
     ).replace(/\/$/, '');
     const publicBaseUrl = process.env.DISABLE_GLOBAL_PREFIX !== 'true' && !baseUrl.endsWith('/api')
       ? `${baseUrl}/api`

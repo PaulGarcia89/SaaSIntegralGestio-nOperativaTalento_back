@@ -35,6 +35,11 @@ export class PermissionGuard implements CanActivate {
       if (ownedPermissions.has(permission)) return true;
       if (permission === 'inventory.read') return ownedPermissions.has('inventory.view');
       if (permission === 'inventory.view') return ownedPermissions.has('inventory.read');
+      if (permission === 'inventory.create') return ownedPermissions.has('restaurant_inventory.manage');
+      if (permission === 'inventory.update') return ownedPermissions.has('restaurant_inventory.manage');
+      if (permission === 'inventory.confirm') return ownedPermissions.has('restaurant_inventory.manage');
+      if (permission === 'inventory.cancel') return ownedPermissions.has('restaurant_inventory.manage');
+      if (permission === 'inventory.report.view') return ownedPermissions.has('restaurant_inventory.manage');
       const legacyAliases: Record<string, string[]> = {
         'restaurant_inventory.receipts.create': ['restaurant_inventory.manage', 'inventory.create', 'inventory.manage'],
         'restaurant_inventory.receipts.confirm': ['restaurant_inventory.manage', 'inventory.confirm', 'inventory.manage'],

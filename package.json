@@ -2,9 +2,6 @@
   "name": "saas-integral-backend",
   "version": "0.1.0",
   "private": true,
-  "prisma": {
-    "seed": "ts-node -r dotenv/config prisma/seed.ts"
-  },
   "scripts": {
     "postinstall": "node -e \"console.log('Prisma se genera durante el build')\"",
     "start": "npm run start:fluentops",

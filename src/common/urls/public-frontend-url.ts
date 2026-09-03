@@ -17,7 +17,8 @@ export function publicFrontendUrl() {
   if (!['http:', 'https:'].includes(url.protocol)) {
     throw new Error('PUBLIC_FRONTEND_URL must use HTTP or HTTPS');
   }
-  if (production && (url.protocol !== 'https:' || LOCAL_HOSTS.has(url.hostname.toLowerCase()))) {
+  const localSelfHosted = process.env.ALLOW_LOCAL_PUBLIC_URL === 'true';
+  if (production && !localSelfHosted && (url.protocol !== 'https:' || LOCAL_HOSTS.has(url.hostname.toLowerCase()))) {
     throw new Error('PUBLIC_FRONTEND_URL must be a public HTTPS URL in production');
   }
   return url.toString().replace(/\/$/, '');

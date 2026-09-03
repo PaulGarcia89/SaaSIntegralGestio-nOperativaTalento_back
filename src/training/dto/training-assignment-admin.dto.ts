@@ -72,6 +72,17 @@ export class ListTrainingAdminAssignmentsDto extends OffsetPaginationQueryDto {
   @Transform(({ value }) => value === 'true')
   @IsBoolean()
   overdue?: boolean;
+
+  @IsOptional() @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true')
+  isRequired?: boolean;
+
+  @IsOptional() @IsDateString() assignedFrom?: string;
+  @IsOptional() @IsDateString() assignedTo?: string;
+  @IsOptional() @IsDateString() dueFrom?: string;
+  @IsOptional() @IsDateString() dueTo?: string;
+  @IsOptional() @IsDateString() completedFrom?: string;
+  @IsOptional() @IsDateString() completedTo?: string;
 }
 
 export class UpdateTrainingLessonProgressDto {

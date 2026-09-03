@@ -45,6 +45,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { PlanLimitsModule } from './plan-limits/plan-limits.module';
 import { JobOffersModule } from './job-offers/job-offers.module';
+import { HiringModule } from './hiring/hiring.module';
 import { AtsFileStorageModule } from './common/files/ats-file-storage.module';
 import { EnterpriseIntegrationsModule } from './enterprise-integrations/enterprise-integrations.module';
 import { ProductivityModule } from './productivity/productivity.module';
@@ -54,6 +55,7 @@ import { InventoryCapabilitiesModule } from './inventory-capabilities/inventory-
 import { RestaurantInventoryModule } from './restaurant-inventory/restaurant-inventory.module';
 import { LocalizationModule } from './localization/localization.module';
 import { LocaleMiddleware } from './localization/locale.middleware';
+import { EmailModule } from './email/email.module';
 
 @Module({
   imports: [
@@ -71,6 +73,7 @@ import { LocaleMiddleware } from './localization/locale.middleware';
     AuditModule,
     AuthModule,
     CompaniesModule,
+    EmailModule,
     TenantsModule,
     UsersModule,
     PlansModule,
@@ -88,6 +91,7 @@ import { LocaleMiddleware } from './localization/locale.middleware';
     VacanciesModule,
     ApplicationsModule,
     JobOffersModule,
+    HiringModule,
     RecruitmentModule,
     OnboardingModule,
     SignaturesModule,

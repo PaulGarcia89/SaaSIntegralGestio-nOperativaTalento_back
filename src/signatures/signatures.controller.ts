@@ -61,6 +61,22 @@ export class SignaturesController {
     if (!body.employeeId || !body.templateKey) throw new BadRequestException('employeeId y templateKey son obligatorios');
     return this.docuSeal.createEmployeeSubmission(request.tenant!.id, request.user.sub, body.employeeId, body.templateKey);
   }
+
+  @Post('docuseal/hiring-bundle') @RequirePermissions('employees.update')
+  docuSealHiringBundle(@Req() request: RequestWithUser, @Body() body: { employeeId?: string }) {
+    if (!body.employeeId) throw new BadRequestException('employeeId es obligatorio');
+    return this.docuSeal.createHiringBundle(request.tenant!.id, request.user.sub, body.employeeId);
+  }
+
+  @Post('docuseal/hiring-bundle/application/:applicationId') @RequirePermissions('employees.update')
+  docuSealHiringBundleForApplication(@Req() request: RequestWithUser, @Param('applicationId') applicationId: string) {
+    return this.docuSeal.createHiringBundleForApplication(request.tenant!.id, request.user.sub, applicationId);
+  }
+
+  @Get('docuseal/hiring-bundle/application/:applicationId/status') @RequirePermissions('applications.read')
+  docuSealHiringBundleStatus(@Req() request: RequestWithUser, @Param('applicationId') applicationId: string) {
+    return this.docuSeal.hiringBundleStatusForApplication(request.tenant!.id, applicationId);
+  }
 }
 
 @Controller('public/signatures')
@@ -83,8 +99,8 @@ export class DocuSealWebhookController {
   constructor(private readonly docuSeal: DocuSealService) {}
 
   @Post()
-  webhook(@Body() payload: { event_type?: string; data?: Record<string, unknown> }, @Headers('x-docuseal-webhook-secret') headerSecret?: string, @Query('secret') querySecret?: string) {
-    this.docuSeal.assertWebhookSecret(headerSecret ?? querySecret);
+  webhook(@Req() request: Request, @Body() payload: { event_type?: string; data?: Record<string, unknown> }, @Headers('x-docuseal-signature') signature?: string, @Headers('x-docuseal-webhook-secret') headerSecret?: string, @Query('secret') querySecret?: string) {
+    this.docuSeal.assertWebhookRequest((request as Request & { rawBody?: Buffer }).rawBody, signature, headerSecret ?? querySecret);
     return this.docuSeal.handleWebhook(payload as never);
   }
 }

@@ -58,6 +58,7 @@ async function testNotificationUsesActiveTenant() {
       },
       count: () => Promise.resolve(0),
     },
+    $transaction: (operations: Promise<unknown>[]) => Promise.all(operations),
   } as any;
 
   await new NotificationsService(prisma).findAll(branchActor, {} as any);

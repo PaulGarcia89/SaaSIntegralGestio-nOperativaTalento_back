@@ -222,7 +222,9 @@ export class CandidateAuthService {
     return normalized || value.trim();
   }
 
-  private nonEmpty(value?: string) { return value !== undefined && value.trim().length > 0; }
+  private nonEmpty(value?: string | null) {
+    return typeof value === 'string' && value.trim().length > 0;
+  }
   private crypto() { return this.sensitiveData ?? new EmployeeSensitiveDataCryptoService(); }
 
   async startSocial(providerInput: string, returnUrl?: string) {

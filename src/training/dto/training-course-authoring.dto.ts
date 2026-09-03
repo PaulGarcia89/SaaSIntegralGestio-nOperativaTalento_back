@@ -91,6 +91,12 @@ export class CreateTrainingLessonDto {
   isRequired?: boolean;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  requiredCompletionPercentage?: number;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateTrainingContentBlockDto)

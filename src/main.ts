@@ -13,7 +13,8 @@ function getAllowedConfiguredOrigins() {
 function isAllowedLocalOrigin(origin: string) {
   try {
     const url = new URL(origin);
-    const allowedPorts = new Set(['3000', '3001', '3002']);
+    // The self-hosted gateway serves the app on plain HTTP port 80.
+    const allowedPorts = new Set(['', '80', '3000', '3001', '3002']);
 
     if (!allowedPorts.has(url.port)) {
       return false;
@@ -36,6 +37,10 @@ function isAllowedOrigin(origin: string) {
 
   if (configuredOrigins.includes(origin)) {
     return true;
+  }
+
+  if (process.env.ALLOW_LOCAL_PUBLIC_URL === 'true') {
+    return isAllowedLocalOrigin(origin);
   }
 
   if (process.env.NODE_ENV === 'production') {
@@ -61,7 +66,7 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-branch-id', 'x-request-id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-branch-id', 'x-request-id', 'Idempotency-Key'],
     exposedHeaders: ['x-request-id'],
   });
 

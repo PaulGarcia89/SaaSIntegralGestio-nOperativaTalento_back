@@ -1,6 +1,7 @@
 const API_URL = process.env.API_URL ?? 'http://127.0.0.1:3000/api';
 const email = process.env.SUPERADMIN_EMAIL ?? 'superadmin@saasintegral.com';
 const password = process.env.SUPERADMIN_PASSWORD ?? 'ChangeMe123!';
+const tenantId = process.env.TENANT_ID;
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, options);
@@ -25,6 +26,7 @@ async function main() {
   const headers = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
+    ...(tenantId ? { 'x-tenant-id': tenantId } : {}),
   };
 
   const moduleAccess = await request('/training/module-access', { headers });
