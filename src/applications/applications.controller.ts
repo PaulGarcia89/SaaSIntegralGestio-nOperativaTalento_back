@@ -190,9 +190,9 @@ export class ApplicationsController {
 
   @Get(':id/decision-evidence')
   @RequirePermissions('applications.export')
-  decisionEvidence(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Param('id') id: string) {
+  decisionEvidence(@Req() request: RequestWithUser, @CurrentUser() user: JwtPayload, @Param('id') id: string, @RequestLocale() locale: SupportedLocale) {
     request.auditAction = 'ATS_DECISION_EVIDENCE_EXPORTED';
-    return this.applicationsService.decisionEvidence(id, user, request.tenant!.id);
+    return this.applicationsService.decisionEvidence(id, user, request.tenant!.id, locale);
   }
 
   @Get('branch/:id')

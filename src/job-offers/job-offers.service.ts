@@ -32,6 +32,8 @@ import {
   RespondJobOfferDto,
 } from './dto/job-offer.dto';
 import { createJobOfferPdf, jobOfferPdfHash } from './job-offer-pdf';
+import { message } from '../localization/catalogs/catalog';
+import { SupportedLocale } from '../localization/localization.service';
 
 const offerInclude = {
   application: {
@@ -71,14 +73,14 @@ export class JobOffersService {
     this.assertOfferAdministration(actor);
     const application = await this.assertApplicationAccess(tenantId, actor, applicationId);
     if (application.status !== 'APPROVED') {
-      throw new BadRequestException('La postulación debe estar aprobada antes de crear una oferta');
+      throw new BadRequestException('offers.application_must_be_approved');
     }
     this.validateDates(dto.employmentStartDate, dto.validUntil);
     const existing = await this.prisma.jobOffer.findFirst({
       where: { applicationId, status: { notIn: ['REJECTED', 'EXPIRED', 'CANCELLED'] } },
       select: { id: true },
     });
-    if (existing) throw new ConflictException('La postulación ya tiene una oferta activa');
+    if (existing) throw new ConflictException('offers.already_active');
 
     return this.prisma.$transaction(async (tx) => {
       const offer = await tx.jobOffer.create({
@@ -107,7 +109,7 @@ export class JobOffersService {
     this.assertOfferAdministration(actor);
     const offer = await this.getStaffOffer(tenantId, actor, offerId);
     if (['ACCEPTED', 'CANCELLED'].includes(offer.status)) {
-      throw new ConflictException('La oferta ya no admite nuevas versiones');
+      throw new ConflictException('offers.no_more_versions');
     }
     this.validateDates(dto.employmentStartDate, dto.validUntil);
     const nextVersion = offer.currentVersion + 1;
@@ -132,11 +134,11 @@ export class JobOffersService {
 
   async decideApproval(tenantId: string, actor: JwtPayload, offerId: string, dto: DecideJobOfferApprovalDto) {
     const offer = await this.getStaffOffer(tenantId, actor, offerId);
-    if (offer.status !== JobOfferStatus.PENDING_APPROVAL) throw new ConflictException('La oferta no está pendiente de aprobación');
+    if (offer.status !== JobOfferStatus.PENDING_APPROVAL) throw new ConflictException('offers.not_pending_approval');
     const approval = offer.approvals.find((item) => item.version === offer.currentVersion && item.type === dto.type);
-    if (!approval) throw new NotFoundException('Aprobación no encontrada');
+    if (!approval) throw new NotFoundException('offers.approval_not_found');
     if (approval.approverId && approval.approverId !== actor.sub && !actor.isSuperAdmin) {
-      throw new ForbiddenException('La aprobación está asignada a otro usuario');
+      throw new ForbiddenException('offers.approval_other_user');
     }
     const status = dto.approved ? JobOfferApprovalStatus.APPROVED : JobOfferApprovalStatus.REJECTED;
     return this.prisma.$transaction(async (tx) => {
@@ -158,16 +160,24 @@ export class JobOffersService {
   private assertOfferAdministration(actor: JwtPayload) {
     const administrativeRoles = ['ADMIN', 'TENANT_ADMIN', 'PLATFORM_ADMIN', 'SUPERADMIN'];
     if (!actor.isSuperAdmin && actor.roleScope !== RoleScope.TENANT_ADMIN && !(actor.roles ?? []).some((role) => administrativeRoles.includes(role))) {
-      throw new ForbiddenException('Solo los usuarios administradores de la empresa pueden crear ofertas');
+      throw new ForbiddenException('offers.only_company_admins');
     }
   }
 
   async send(tenantId: string, actor: JwtPayload, offerId: string) {
     const offer = await this.getStaffOffer(tenantId, actor, offerId);
-    if (offer.status !== JobOfferStatus.APPROVED) throw new ConflictException('La oferta requiere ambas aprobaciones antes de enviarse');
+    if (offer.status !== JobOfferStatus.APPROVED) throw new ConflictException('offers.needs_both_approvals');
     const version = this.currentVersion(offer);
-    if (version.validUntil.getTime() <= Date.now()) throw new BadRequestException('La vigencia de la oferta ya terminó');
+    if (version.validUntil.getTime() <= Date.now()) throw new BadRequestException('offers.validity_already_ended');
     const pdf = this.pdfFor(offer, version);
+    // El correo de la oferta lo lee el CANDIDATO: va en el idioma de su cuenta
+    // del portal, no en el del reclutador que pulsa «enviar».
+    const candidateAccount = await this.prisma.candidateAccount.findUnique({
+      where: { email: offer.application.candidate.email.toLowerCase() },
+      select: { locale: true },
+    });
+    const candidateLocale: SupportedLocale =
+      candidateAccount?.locale === 'en' ? 'en' : 'es';
     const token = randomBytes(32).toString('base64url');
     const origin = publicFrontendUrl();
     const signingUrl = `${origin}/sign/${token}`;
@@ -209,8 +219,8 @@ export class JobOffersService {
         deduplicationSuffix: `structured:${offerId}:v${version.version}`,
         actorType: 'USER',
         actorId: actor.sub,
-        variables: { offerMessage: `${version.message ?? ''}\nRevisa y firma tu oferta: ${signingUrl}` },
-        overrideBody: `${version.message ?? 'Hemos preparado una oferta laboral para ti.'}\n\nRevisa y firma tu oferta: ${signingUrl}`,
+        variables: { offerMessage: `${version.message ?? ''}\n${message('offers.email_review_and_sign', candidateLocale, 'es', { url: signingUrl })}` },
+        overrideBody: `${version.message ?? message('offers.email_default_message', candidateLocale)}\n\n${message('offers.email_review_and_sign', candidateLocale, 'es', { url: signingUrl })}`,
       });
       await this.timeline(tx, offer.application, ApplicationTimelineEventType.OFFER_SENT, actor, { offerId, version: version.version, signaturePackageId: signaturePackage.id });
       return tx.jobOffer.findUniqueOrThrow({ where: { id: offerId }, include: offerInclude });
@@ -219,7 +229,7 @@ export class JobOffersService {
 
   async cancel(tenantId: string, actor: JwtPayload, offerId: string, reason?: string) {
     const offer = await this.getStaffOffer(tenantId, actor, offerId);
-    if (offer.status === JobOfferStatus.ACCEPTED) throw new ConflictException('Una oferta aceptada no puede cancelarse');
+    if (offer.status === JobOfferStatus.ACCEPTED) throw new ConflictException('offers.accepted_cannot_cancel');
     await this.prisma.$transaction(async (tx) => {
       await tx.jobOffer.update({ where: { id: offerId }, data: { status: JobOfferStatus.CANCELLED, cancelledAt: new Date(), conversionError: reason?.trim() } });
       await tx.signaturePackage.updateMany({ where: { offerVersionId: { in: offer.versions.map((item) => item.id) } }, data: { status: SignaturePackageStatus.CANCELLED } });
@@ -252,7 +262,7 @@ export class JobOffersService {
     await this.assertCandidateCanRespond(offer);
     const version = this.currentVersion(offer);
     const participant = version.signaturePackage?.participants[0];
-    if (!participant) throw new NotFoundException('La oferta no tiene una solicitud de firma asociada');
+    if (!participant) throw new NotFoundException('offers.no_signature_request');
     const token = randomBytes(32).toString('base64url');
     await this.prisma.signatureParticipant.update({
       where: { id: participant.id },
@@ -267,9 +277,9 @@ export class JobOffersService {
     await this.assertCandidateCanRespond(offer);
     if (dto.decision === CandidateOfferDecision.ACCEPT) {
       if (!dto.consentAccepted || dto.typedName?.trim().toLocaleLowerCase() !== offer.application.candidate.fullName.trim().toLocaleLowerCase()) {
-        throw new BadRequestException('La aceptación requiere consentimiento y el nombre completo del candidato');
+        throw new BadRequestException('offers.acceptance_needs_consent');
       }
-      throw new BadRequestException('La aceptación debe completarse mediante la firma electrónica asociada');
+      throw new BadRequestException('offers.acceptance_needs_signature');
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.jobOffer.update({ where: { id: offerId }, data: { status: JobOfferStatus.REJECTED, rejectedAt: new Date(), conversionError: dto.reason?.trim() } });
@@ -339,29 +349,29 @@ export class JobOffersService {
       });
       await this.prisma.jobOffer.update({ where: { id: offer.id }, data: { conversionWorkflowId: workflow.id, conversionError: null } });
     } catch (error) {
-      await this.prisma.jobOffer.update({ where: { id: offer.id }, data: { conversionError: error instanceof Error ? error.message.slice(0, 2000) : 'No fue posible iniciar la conversión automática' } });
+      await this.prisma.jobOffer.update({ where: { id: offer.id }, data: { conversionError: error instanceof Error ? error.message.slice(0, 2000) : 'offers.conversion_failed' } });
     }
   }
 
   async retryConversion(tenantId: string, actor: JwtPayload, offerId: string) {
     const offer = await this.getStaffOffer(tenantId, actor, offerId);
-    if (offer.status !== JobOfferStatus.ACCEPTED) throw new ConflictException('La oferta todavía no fue aceptada');
+    if (offer.status !== JobOfferStatus.ACCEPTED) throw new ConflictException('offers.not_accepted_yet');
     const version = this.currentVersion(offer);
-    if (version.signaturePackage?.status !== SignaturePackageStatus.COMPLETED) throw new ConflictException('La firma electrónica todavía no está completa');
+    if (version.signaturePackage?.status !== SignaturePackageStatus.COMPLETED) throw new ConflictException('offers.signature_incomplete');
     await this.completeSignedOffer(version.id);
     return this.getStaffOffer(tenantId, actor, offerId);
   }
 
   private async getStaffOffer(tenantId: string, actor: JwtPayload, offerId: string) {
     const offer = await this.prisma.jobOffer.findFirst({ where: { id: offerId, tenantId }, include: offerInclude });
-    if (!offer) throw new NotFoundException('Oferta no encontrada');
+    if (!offer) throw new NotFoundException('offers.not_found');
     this.assertBranch(actor, offer.branchId);
     return offer;
   }
 
   private async getCandidateOffer(accountId: string, offerId: string) {
     const offer = await this.prisma.jobOffer.findFirst({ where: { id: offerId, application: { candidate: { accountId } } }, include: offerInclude });
-    if (!offer) throw new NotFoundException('Oferta no encontrada');
+    if (!offer) throw new NotFoundException('offers.not_found');
     return offer;
   }
 
@@ -370,22 +380,22 @@ export class JobOffersService {
       where: { id: applicationId, tenantId },
       include: { candidate: true, vacancy: { include: { tenant: { select: { name: true } }, branch: true } } },
     });
-    if (!application) throw new NotFoundException('Postulación no encontrada');
+    if (!application) throw new NotFoundException('offers.application_not_found');
     this.assertBranch(actor, application.vacancy.branchId);
     return application;
   }
 
   private assertBranch(actor: JwtPayload, branchId: string) {
     if (!actor.isSuperAdmin && actor.scope === AccessScope.BRANCH && !actor.allowedBranchIds.includes(branchId)) {
-      throw new ForbiddenException('La sucursal está fuera del alcance del usuario');
+      throw new ForbiddenException('offers.branch_out_of_scope');
     }
   }
 
   private validateDates(start: string, validUntil: string) {
     const startDate = new Date(start);
     const expiration = new Date(validUntil);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(expiration.getTime())) throw new BadRequestException('Las fechas de la oferta no son válidas');
-    if (expiration.getTime() <= Date.now()) throw new BadRequestException('La vigencia debe terminar en el futuro');
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(expiration.getTime())) throw new BadRequestException('offers.invalid_dates');
+    if (expiration.getTime() <= Date.now()) throw new BadRequestException('offers.validity_must_be_future');
   }
 
   private versionData(tenantId: string, version: number, source: JobOfferVersionSource, createdById: string, dto: CreateJobOfferDto) {
@@ -407,7 +417,7 @@ export class JobOffersService {
 
   private currentVersion(offer: { currentVersion: number; versions: Array<{ version: number; [key: string]: unknown }> }): any {
     const version = offer.versions.find((item) => item.version === offer.currentVersion);
-    if (!version) throw new NotFoundException('Versión vigente de la oferta no encontrada');
+    if (!version) throw new NotFoundException('offers.current_version_not_found');
     return version;
   }
 
@@ -428,7 +438,7 @@ export class JobOffersService {
 
   private pdfResult(offer: any, versionNumber?: number) {
     const version = versionNumber ? offer.versions.find((item: any) => item.version === versionNumber) : this.currentVersion(offer);
-    if (!version) throw new NotFoundException('Versión de oferta no encontrada');
+    if (!version) throw new NotFoundException('offers.version_not_found');
     return { buffer: this.pdfFor(offer, version), filename: `oferta-${offer.application.candidate.fullName.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-v${version.version}.pdf` };
   }
 
@@ -447,11 +457,11 @@ export class JobOffersService {
   }
 
   private async assertCandidateCanRespond(offer: any) {
-    if (offer.status !== JobOfferStatus.SENT) throw new ConflictException('La oferta no está disponible para responder');
+    if (offer.status !== JobOfferStatus.SENT) throw new ConflictException('offers.not_available_to_respond');
     const version = this.currentVersion(offer) as any;
     if (version.validUntil.getTime() <= Date.now()) {
       await this.prisma.jobOffer.update({ where: { id: offer.id }, data: { status: JobOfferStatus.EXPIRED, expiredAt: new Date() } });
-      throw new ConflictException('La oferta venció');
+      throw new ConflictException('offers.expired');
     }
   }
 

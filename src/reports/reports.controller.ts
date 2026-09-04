@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { RequestLocale } from '../common/decorators/request-locale.decorator';
+import { SupportedLocale } from '../localization/localization.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -52,14 +54,14 @@ export class ReportsController {
 
   @Get('ats-analytics')
   @RequirePermissions('applications.read')
-  atsOverview(@CurrentUser() actor: JwtPayload, @Query() query: AtsAnalyticsQueryDto) {
-    return this.atsAnalytics.overview(actor, query);
+  atsOverview(@CurrentUser() actor: JwtPayload, @Query() query: AtsAnalyticsQueryDto, @RequestLocale() locale: SupportedLocale) {
+    return this.atsAnalytics.overview(actor, query, locale);
   }
 
   @Get('ats-analytics/export')
   @RequirePermissions('applications.export')
-  atsExport(@CurrentUser() actor: JwtPayload, @Query() query: AtsAnalyticsQueryDto) {
-    return this.atsAnalytics.exportCsv(actor, query);
+  atsExport(@CurrentUser() actor: JwtPayload, @Query() query: AtsAnalyticsQueryDto, @RequestLocale() locale: SupportedLocale) {
+    return this.atsAnalytics.exportCsv(actor, query, locale);
   }
 
   @Get('ats-analytics/dashboards')

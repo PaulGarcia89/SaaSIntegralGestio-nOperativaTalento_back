@@ -42,7 +42,7 @@ describe('JobOffersService', () => {
 
   it('allows only tenant administrators to create offers', async () => {
     const service = new JobOffersService({} as any, {} as any, {} as any);
-    await expect(service.create('tenant-1', { ...actor, roles: ['HR_MANAGER'], roleScope: 'BRANCH_ADMIN' } as any, application.id, {} as any)).rejects.toThrow('Solo los usuarios administradores');
+    await expect(service.create('tenant-1', { ...actor, roles: ['HR_MANAGER'], roleScope: 'BRANCH_ADMIN' } as any, application.id, {} as any)).rejects.toThrow('offers.only_company_admins');
   });
 
   it('marks the offer approved only after both approvals are approved', async () => {

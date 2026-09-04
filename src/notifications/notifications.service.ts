@@ -552,6 +552,14 @@ export class NotificationsService {
     return null;
   }
 
+  /**
+   * OJO: los `title` / `message` en castellano de este mapa son solo el valor de
+   * respaldo. `createFromDomainEvent` los sustituye siempre por el catalogo, en
+   * el idioma del DESTINATARIO (`User.preferredLocale`), usando
+   * `notificationCode`. Los 12 eventos tienen codigo, asi que en la practica el
+   * texto de abajo nunca llega a guardarse; si se anade un evento nuevo hay que
+   * darle su `notificationCode` y su entrada en `notifications` del catalogo.
+   */
   private domainDefinition(eventName: DomainEventName): DomainNotificationDefinition {
     const definitions: Record<DomainEventName, DomainNotificationDefinition> = {
       'candidate.hired': { category: NotificationCategory.ATS, type: NotificationType.SUCCESS, title: 'Contratación confirmada', message: 'La contratación fue confirmada y el flujo de incorporación comenzó.', notificationCode: 'candidate_hired', sourceModule: 'ats', actionUrl: '/ats/candidates' },

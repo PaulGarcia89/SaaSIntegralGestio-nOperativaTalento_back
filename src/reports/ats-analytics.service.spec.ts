@@ -92,7 +92,7 @@ describe('AtsAnalyticsService', () => {
       to: '2026-07-31',
       branchId: 'branch-2',
       scope: 'tenant',
-    })).rejects.toThrow('Sucursal fuera del alcance autorizado');
+    })).rejects.toThrow('scope.branch_out_of_scope');
     expect(prisma.vacancyApplication.findMany).not.toHaveBeenCalled();
   });
 });

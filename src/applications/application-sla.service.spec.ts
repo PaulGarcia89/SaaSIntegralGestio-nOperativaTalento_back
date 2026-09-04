@@ -7,6 +7,9 @@ describe('ApplicationSlaService', () => {
   };
   const prisma = {
     vacancyApplication: { findMany: jest.fn(), updateMany: jest.fn() },
+    // El aviso de SLA se redacta en el idioma de cada destinatario, asi que el
+    // servicio consulta `preferredLocale` de los usuarios notificados.
+    user: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
   };
   const service = new ApplicationSlaService(prisma as never);

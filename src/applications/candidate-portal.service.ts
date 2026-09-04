@@ -244,13 +244,13 @@ export class CandidatePortalService {
   }
 
   async uploadResume(accountId: string, file: Express.Multer.File) {
-    if (!this.files || !this.antivirus) throw new BadRequestException('La carga de currículums no está disponible');
+    if (!this.files || !this.antivirus) throw new BadRequestException('applications_public.resume_upload_unavailable');
     const candidate = await this.prisma.candidate.findFirst({
       where: this.candidateIdentityWhere(accountId),
       orderBy: { accountId: 'desc' },
       select: { id: true, tenantId: true },
     });
-    if (!candidate) throw new NotFoundException('No se encontró el perfil del candidato');
+    if (!candidate) throw new NotFoundException('applications_public.candidate_profile_not_found');
 
     const application = await this.prisma.vacancyApplication.findFirst({
       where: { candidateId: candidate.id },

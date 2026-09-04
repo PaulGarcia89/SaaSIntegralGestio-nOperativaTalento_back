@@ -17,6 +17,8 @@ import { Request, Response } from 'express';
 import { ErrorCode } from '../errors/error-code.enum';
 import { RequestWithUser } from '../types/request-with-user.type';
 import { OperationalAlertService } from '../observability/operational-alert.service';
+import { localizeMessage } from '../../localization/catalogs/catalog';
+import { SupportedLocale } from '../../localization/localization.service';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -30,10 +32,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const response = context.getResponse<Response>();
 
     const payload = this.normalizeException(exception);
+    // El idioma lo resuelve el LocaleMiddleware. El log y la huella de alertas
+    // siguen usando `payload.message` sin traducir para que el fingerprint sea
+    // estable entre idiomas; solo se traduce lo que ve el usuario.
+    const locale: SupportedLocale =
+      (request as { locale?: SupportedLocale }).locale === 'en' ? 'en' : 'es';
     const body = {
       error: {
         code: payload.code,
-        message: payload.message,
+        message: localizeMessage(payload.message, locale),
         ...(payload.details !== undefined ? { details: payload.details } : {}),
         ...(payload.fieldErrors ? { fieldErrors: payload.fieldErrors } : {}),
         ...(payload.retryAfter !== undefined ? { retryAfter: payload.retryAfter } : {}),

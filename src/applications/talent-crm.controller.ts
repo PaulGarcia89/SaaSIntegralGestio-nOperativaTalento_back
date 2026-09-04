@@ -1,5 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ModuleCode } from '@prisma/client';
+import { RequestLocale } from '../common/decorators/request-locale.decorator';
+import { SupportedLocale } from '../localization/localization.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireModule } from '../common/decorators/module-access.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
@@ -121,8 +123,8 @@ export class TalentCrmController {
 
   @Get('duplicates')
   @RequirePermissions('applications.read')
-  duplicates(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query() query: ListDuplicateCandidatesDto) {
-    return this.talentCrm.findDuplicates(actor, request.tenant!.id, query);
+  duplicates(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query() query: ListDuplicateCandidatesDto, @RequestLocale() locale: SupportedLocale) {
+    return this.talentCrm.findDuplicates(actor, request.tenant!.id, query, locale);
   }
 
   @Post('duplicates/merge')
@@ -151,8 +153,8 @@ export class TalentCrmController {
 
   @Get('rediscovery')
   @RequirePermissions('applications.read')
-  rediscovery(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query() query: TalentSegmentFiltersDto) {
-    return this.talentCrm.rediscoverCandidates(actor, request.tenant!.id, query);
+  rediscovery(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Query() query: TalentSegmentFiltersDto, @RequestLocale() locale: SupportedLocale) {
+    return this.talentCrm.rediscoverCandidates(actor, request.tenant!.id, query, locale);
   }
 
   @Get('campaigns')
@@ -181,8 +183,8 @@ export class TalentCrmController {
 
   @Get('campaigns/:id/audience')
   @RequirePermissions('applications.read')
-  campaignAudience(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query() query: ListTalentCampaignAudienceDto) {
-    return this.talentCrm.getCampaignAudience(actor, request.tenant!.id, id, query);
+  campaignAudience(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query() query: ListTalentCampaignAudienceDto, @RequestLocale() locale: SupportedLocale) {
+    return this.talentCrm.getCampaignAudience(actor, request.tenant!.id, id, query, locale);
   }
 
   @Post('campaigns/:id/audience/review')

@@ -18,6 +18,8 @@ import { PrismaService } from "../common/prisma/prisma.service";
 import { AccessScope } from "../common/enums/access-scope.enum";
 import { JwtPayload } from "../common/interfaces/jwt-payload.interface";
 import { NotificationsService } from "../notifications/notifications.service";
+import { message } from "../localization/catalogs/catalog";
+import { SupportedLocale } from "../localization/localization.service";
 import {
   CreateAtsCommunicationTemplateDto,
   SendOfferDto,
@@ -42,51 +44,73 @@ export type EnqueueAtsEventInput = {
   inReplyToMessageId?: string;
 };
 
-const DEFAULT_TEMPLATES: Record<
+// Las plantillas por defecto se resuelven en el idioma de CADA destinatario, no en
+// el del reclutador que dispara el evento: el candidato recibe el correo en el idioma
+// de su cuenta (CandidateAccount.locale) y el usuario interno en el suyo
+// (User.preferredLocale). Las plantillas personalizadas del tenant son DATOS y no se
+// traducen: se envian tal como el cliente las redacto.
+const TEMPLATE_MESSAGE_KEYS: Record<
   AtsCommunicationType,
   { subject: string; body: string }
 > = {
   APPLICATION_CONFIRMATION: {
-    subject: "Recibimos tu postulación para {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, recibimos correctamente tu postulación. Te informaremos cuando avance el proceso.",
+    subject: "ats_comms.application_confirmation_subject",
+    body: "ats_comms.application_confirmation_body",
   },
   STAGE_UPDATE: {
-    subject: "Actualización de tu proceso para {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, tu postulación avanzó a la etapa {{stageName}}.",
+    subject: "ats_comms.stage_update_subject",
+    body: "ats_comms.stage_update_body",
   },
   REJECTION: {
-    subject: "Actualización sobre tu postulación para {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, agradecemos tu interés. En esta ocasión el proceso no continuará. Motivo: {{reason}}.",
+    subject: "ats_comms.rejection_subject",
+    body: "ats_comms.rejection_body",
   },
   INTERVIEW_SCHEDULED: {
-    subject: "Entrevista programada para {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, tu entrevista fue programada para {{interviewDate}}. {{interviewLocation}}",
+    subject: "ats_comms.interview_scheduled_subject",
+    body: "ats_comms.interview_scheduled_body",
   },
   INTERVIEW_REMINDER: {
-    subject: "Recordatorio de entrevista para {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, te recordamos tu entrevista el {{interviewDate}}. {{interviewLocation}}",
+    subject: "ats_comms.interview_reminder_subject",
+    body: "ats_comms.interview_reminder_body",
   },
   INTERVIEW_RESCHEDULED: {
-    subject: "Tu entrevista fue reprogramada",
-    body: "Hola {{candidateName}}, la entrevista para {{vacancyTitle}} fue reprogramada para {{interviewDate}}.",
+    subject: "ats_comms.interview_rescheduled_subject",
+    body: "ats_comms.interview_rescheduled_body",
   },
   INTERVIEW_CANCELLED: {
-    subject: "Entrevista cancelada para {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, la entrevista prevista para {{interviewDate}} fue cancelada.",
+    subject: "ats_comms.interview_cancelled_subject",
+    body: "ats_comms.interview_cancelled_body",
   },
   OFFER: {
-    subject: "Oferta para {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, queremos comunicarte que tu proceso avanzó a oferta. {{offerMessage}}",
+    subject: "ats_comms.offer_subject",
+    body: "ats_comms.offer_body",
   },
   APPROVAL_REQUEST: {
-    subject: "Aprobación requerida: {{candidateName}}",
-    body: "La postulación de {{candidateName}} para {{vacancyTitle}} solicita avanzar a {{stageName}}.",
+    subject: "ats_comms.approval_subject",
+    body: "ats_comms.approval_body",
   },
   MANUAL: {
-    subject: "Mensaje sobre {{vacancyTitle}}",
-    body: "Hola {{candidateName}}, {{message}}",
+    subject: "ats_comms.generic_subject",
+    body: "ats_comms.generic_body",
   },
 };
+
+function defaultTemplate(
+  type: AtsCommunicationType,
+  locale: SupportedLocale,
+): { subject: string; body: string } {
+  const keys = TEMPLATE_MESSAGE_KEYS[type];
+  return {
+    // Se pasa el texto sin interpolar: los {{marcadores}} los resuelve `render`
+    // con las variables de la postulacion, igual que antes.
+    subject: message(keys.subject as never, locale),
+    body: message(keys.body as never, locale),
+  };
+}
+
+function normalizeLocale(value: string | null | undefined): SupportedLocale {
+  return value === "en" ? "en" : "es";
+}
 
 @Injectable()
 export class AtsCommunicationsService {
@@ -112,6 +136,7 @@ export class AtsCommunicationsService {
                     email: true,
                     firstName: true,
                     lastName: true,
+                    preferredLocale: true,
                   },
                 },
               },
@@ -150,23 +175,42 @@ export class AtsCommunicationsService {
       message: "",
       ...(input.variables ?? {}),
     };
+    // Idioma del candidato: vive en su cuenta del portal, no en la sesion del
+    // reclutador. Si aun no tiene cuenta creada, se usa el idioma por defecto.
+    const candidateAccount = await tx.candidateAccount.findUnique({
+      where: { email: application.candidate.email.toLowerCase() },
+      select: {
+        locale: true,
+        statusUpdates: true,
+        interviewReminders: true,
+        offerNotifications: true,
+      },
+    });
+    const candidateLocale = normalizeLocale(candidateAccount?.locale);
     const messages = [];
     for (const audience of input.audiences ?? [
       AtsCommunicationAudience.CANDIDATE,
     ]) {
-      const recipients =
+      const recipients: {
+        email: string;
+        name: string;
+        userId: string | null;
+        locale: SupportedLocale;
+      }[] =
         audience === AtsCommunicationAudience.CANDIDATE
           ? [
               {
                 email: application.candidate.email,
                 name: application.candidate.fullName,
                 userId: null,
+                locale: candidateLocale,
               },
             ]
           : application.vacancy.responsibles.map(({ user }) => ({
               email: user.email,
               name: `${user.firstName} ${user.lastName}`.trim(),
               userId: user.id,
+              locale: normalizeLocale(user.preferredLocale),
             }));
       const template = await this.resolveTemplate(
         tx,
@@ -176,8 +220,8 @@ export class AtsCommunicationsService {
         input.type,
         audience,
       );
-      const definition = template ?? DEFAULT_TEMPLATES[input.type];
       for (const recipient of recipients) {
+        const definition = template ?? defaultTemplate(input.type, recipient.locale);
         const deduplicationKey = [
           input.type,
           application.id,
@@ -221,14 +265,7 @@ export class AtsCommunicationsService {
         });
         const candidatePreferences = recipient.userId
           ? null
-          : await tx.candidateAccount.findUnique({
-              where: { email: recipient.email.toLowerCase() },
-              select: {
-                statusUpdates: true,
-                interviewReminders: true,
-                offerNotifications: true,
-              },
-            });
+          : candidateAccount;
         const emailEnabled = recipient.userId
           ? ((
               await tx.notificationPreference.findUnique({
@@ -281,8 +318,8 @@ export class AtsCommunicationsService {
               lastError: emailEnabled
                 ? null
                 : recipient.userId
-                  ? "Canal de correo desactivado por el usuario"
-                  : "El candidato desactivó esta categoría de comunicaciones",
+                  ? message("ats_comms.email_channel_disabled", recipient.locale)
+                  : message("ats_comms.category_disabled", recipient.locale),
             },
           ],
         });

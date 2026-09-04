@@ -1,3 +1,5 @@
+import { message, localizeMessage } from '../localization/catalogs/catalog';
+import { SupportedLocale } from '../localization/localization.service';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AtsCommunicationAudience, AtsCommunicationType, CandidateCrmStatus, Prisma, TalentActivityType, TalentCampaignStatus, TalentRecipientStatus, TalentSequenceEnrollmentStatus } from '@prisma/client';
 import { createHash } from 'node:crypto';
@@ -174,7 +176,7 @@ export class TalentCrmService {
     return this.prisma.talentActivity.create({ data: { tenantId, candidateId, actorId: actor.sub, type: dto.type, subject: dto.subject.trim(), description: dto.description?.trim(), dueAt: dto.dueAt ? new Date(dto.dueAt) : undefined, completedAt: dto.completed ? new Date() : undefined } });
   }
 
-  async findDuplicates(actor: JwtPayload, tenantId: string, query: ListDuplicateCandidatesDto) {
+  async findDuplicates(actor: JwtPayload, tenantId: string, query: ListDuplicateCandidatesDto, locale: SupportedLocale = 'es') {
     const candidates = await this.prisma.candidate.findMany({
       where: this.candidateWhere(actor, tenantId),
       select: { id: true, fullName: true, email: true, phone: true, city: true, linkedinUrl: true, updatedAt: true, resumeFiles: { where: { status: 'ACTIVE' }, select: { sha256: true }, take: 1 }, applications: { select: { vacancyId: true } } },
@@ -188,7 +190,7 @@ export class TalentCrmService {
       for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
         const left = candidates[leftIndex];
         const right = candidates[rightIndex];
-        const signals = this.matchSignals(left, right, sharedIdentityKeys);
+        const signals = this.matchSignals(locale, left, right, sharedIdentityKeys);
         const score = Math.min(100, signals.reduce((total, signal) => total + signal.weight, 0));
         if (score < minimumScore) continue;
         const leftVacancies = new Set(left.applications.map((item) => item.vacancyId));
@@ -261,9 +263,9 @@ export class TalentCrmService {
     return { segmentId, total, candidates };
   }
 
-  async rediscoverCandidates(actor: JwtPayload, tenantId: string, filters: TalentSegmentFiltersDto) {
+  async rediscoverCandidates(actor: JwtPayload, tenantId: string, filters: TalentSegmentFiltersDto, locale: SupportedLocale = 'es') {
     const candidates = await this.prisma.candidate.findMany({ where: { ...this.segmentWhere(actor, tenantId, filters), applications: { some: { status: { in: ['REJECTED', 'WITHDRAWN'] } } } }, include: { talentTagAssignments: { include: { tag: true } }, applications: { include: { vacancy: { select: { title: true } } }, orderBy: { appliedAt: 'desc' }, take: 1 }, talentActivities: { orderBy: { createdAt: 'desc' }, take: 1 } }, take: 100, orderBy: { updatedAt: 'desc' } });
-    return candidates.map((candidate) => ({ id: candidate.id, fullName: candidate.fullName, email: candidate.email, city: candidate.city, competencies: candidate.talentTagAssignments.map((item) => item.tag.name), lastProcess: candidate.applications[0]?.vacancy.title ?? null, lastContactAt: candidate.talentActivities[0]?.createdAt ?? null, reason: 'Perfil con experiencia previa disponible para revisión.' }));
+    return candidates.map((candidate) => ({ id: candidate.id, fullName: candidate.fullName, email: candidate.email, city: candidate.city, competencies: candidate.talentTagAssignments.map((item) => item.tag.name), lastProcess: candidate.applications[0]?.vacancy.title ?? null, lastContactAt: candidate.talentActivities[0]?.createdAt ?? null, reason: message('talent_crm.suggestion_reason', locale) }));
   }
 
   listCampaigns(actor: JwtPayload, tenantId: string) {
@@ -280,7 +282,7 @@ export class TalentCrmService {
     const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId } });
     if (!campaign) throw new NotFoundException('Campaign not found');
     const approvalCount = await this.prisma.talentCampaignApproval.count({ where: { campaignId, tenantId } });
-    if (!campaign.audienceReviewedAt || !campaign.audienceReviewedById || !campaign.audienceFingerprint || approvalCount < 2) throw new BadRequestException('La campaña requiere audiencia revisada y dos aprobaciones de usuarios distintos.');
+    if (!campaign.audienceReviewedAt || !campaign.audienceReviewedById || !campaign.audienceFingerprint || approvalCount < 2) throw new BadRequestException('talent_crm.campaign_needs_review');
     // Dispatch is intentionally separated from review so no request can send an unapproved audience.
     return { campaignId, status: 'READY_FOR_DELIVERY_AUTHORIZATION', message: 'La audiencia fue revisada. La entrega de correo requiere una autorización de envío independiente.' };
   }
@@ -288,7 +290,7 @@ export class TalentCrmService {
   async prepareCampaignAudience(actor: JwtPayload, tenantId: string, campaignId: string) {
     const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId }, include: { segment: true } });
     if (!campaign) throw new NotFoundException('Campaign not found');
-    if (campaign.status === TalentCampaignStatus.RUNNING || campaign.status === TalentCampaignStatus.COMPLETED || campaign.status === TalentCampaignStatus.CANCELLED) throw new BadRequestException('La audiencia no se puede recalcular para esta campaña.');
+    if (campaign.status === TalentCampaignStatus.RUNNING || campaign.status === TalentCampaignStatus.COMPLETED || campaign.status === TalentCampaignStatus.CANCELLED) throw new BadRequestException('talent_crm.audience_not_recomputable');
     const candidates = await this.prisma.candidate.findMany({
       where: this.segmentWhere(actor, tenantId, campaign.segment.filters, true),
       select: { id: true, doNotContact: true, channelPreferences: { select: { emailEnabled: true, marketingEnabled: true, unsubscribedAt: true } }, applications: { where: this.applicationScope(actor), select: { id: true }, take: 1 } },
@@ -297,14 +299,19 @@ export class TalentCrmService {
     });
     const audience = candidates.map((candidate) => {
       const preferences = candidate.channelPreferences[0];
+      // `skipReason` se GUARDA en TalentCampaignRecipient: es historia de la
+      // campana. Por eso se persiste la CLAVE del catalogo, no el texto; la
+      // traduccion ocurre al leer, en getCampaignAudience. Las filas antiguas
+      // que ya tienen castellano se devuelven intactas (localizeMessage solo
+      // traduce lo que reconoce como clave).
       const skipReason = candidate.doNotContact
-        ? 'El candidato solicitó no recibir contacto.'
+        ? 'talent_crm.suppressed_do_not_contact'
         : preferences?.unsubscribedAt
-          ? 'El candidato se dio de baja de comunicaciones por correo.'
+          ? 'talent_crm.suppressed_unsubscribed'
           : preferences && (!preferences.emailEnabled || !preferences.marketingEnabled)
-            ? 'No existe consentimiento para campañas por correo.'
+            ? 'talent_crm.suppressed_no_consent'
             : !candidate.applications[0]
-              ? 'No tiene una postulación accesible para asociar el correo.'
+              ? 'talent_crm.suppressed_no_application'
               : null;
       return { candidateId: candidate.id, status: skipReason ? TalentRecipientStatus.SKIPPED : TalentRecipientStatus.PENDING, skipReason };
     });
@@ -317,7 +324,7 @@ export class TalentCrmService {
     return { campaignId, total: audience.length, eligible: audience.filter((item) => item.status === TalentRecipientStatus.PENDING).length, excluded: audience.filter((item) => item.status === TalentRecipientStatus.SKIPPED).length, audienceFingerprint: fingerprint };
   }
 
-  async getCampaignAudience(actor: JwtPayload, tenantId: string, campaignId: string, query: ListTalentCampaignAudienceDto) {
+  async getCampaignAudience(actor: JwtPayload, tenantId: string, campaignId: string, query: ListTalentCampaignAudienceDto, locale: SupportedLocale = 'es') {
     const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId }, select: { id: true, audiencePreparedAt: true, audienceReviewedAt: true, audienceReviewedById: true, audienceReviewNote: true, audienceFingerprint: true } });
     if (!campaign) throw new NotFoundException('Campaign not found');
     const pagination = normalizeOffsetPagination(query);
@@ -328,22 +335,26 @@ export class TalentCrmService {
       this.prisma.talentCampaignRecipient.count({ where: { ...where, status: TalentRecipientStatus.PENDING } }),
       this.prisma.talentCampaignRecipient.count({ where: { ...where, status: TalentRecipientStatus.SKIPPED } }),
     ]);
-    return { data, meta: { total, page: pagination.page, pageSize: pagination.pageSize, totalPages: Math.ceil(total / pagination.pageSize) }, summary: { eligible, excluded }, review: campaign };
+    const localized = data.map((item) => ({
+      ...item,
+      skipReason: item.skipReason ? localizeMessage(item.skipReason, locale) : item.skipReason,
+    }));
+    return { data: localized, meta: { total, page: pagination.page, pageSize: pagination.pageSize, totalPages: Math.ceil(total / pagination.pageSize) }, summary: { eligible, excluded }, review: campaign };
   }
 
   async reviewCampaignAudience(actor: JwtPayload, tenantId: string, campaignId: string, dto: ReviewTalentCampaignAudienceDto) {
-    if (!dto.confirm) throw new BadRequestException('Debes confirmar la audiencia antes de habilitar el envío.');
+    if (!dto.confirm) throw new BadRequestException('talent_crm.confirm_audience');
     const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId } });
     if (!campaign) throw new NotFoundException('Campaign not found');
-    if (!campaign.audiencePreparedAt || !campaign.audienceFingerprint) throw new BadRequestException('Primero prepara la audiencia de la campaña.');
-    if (campaign.audienceFingerprint !== dto.audienceFingerprint) throw new BadRequestException('La audiencia cambió. Vuelve a revisarla antes de enviar.');
+    if (!campaign.audiencePreparedAt || !campaign.audienceFingerprint) throw new BadRequestException('talent_crm.prepare_audience_first');
+    if (campaign.audienceFingerprint !== dto.audienceFingerprint) throw new BadRequestException('talent_crm.audience_changed');
     return this.prisma.talentCampaign.update({ where: { id: campaignId }, data: { audienceReviewedAt: new Date(), audienceReviewedById: actor.sub, audienceReviewNote: dto.note?.trim() ?? null } });
   }
 
   async approveCampaign(actor: JwtPayload, tenantId: string, campaignId: string, dto: ApproveTalentCampaignDto) {
     const campaign = await this.prisma.talentCampaign.findFirst({ where: { id: campaignId, tenantId } });
     if (!campaign) throw new NotFoundException('Campaign not found');
-    if (!campaign.audienceReviewedAt || !campaign.audienceFingerprint) throw new BadRequestException('Primero revisa la audiencia de la campaña.');
+    if (!campaign.audienceReviewedAt || !campaign.audienceFingerprint) throw new BadRequestException('talent_crm.review_audience_first');
     const approval = await this.prisma.talentCampaignApproval.upsert({ where: { campaignId_approverId: { campaignId, approverId: actor.sub } }, create: { tenantId, campaignId, approverId: actor.sub, note: dto.note?.trim() }, update: { note: dto.note?.trim() ?? null, approvedAt: new Date() } });
     const approvals = await this.prisma.talentCampaignApproval.count({ where: { campaignId, tenantId } });
     return { approval, approvals, required: 2, readyForDeliveryAuthorization: approvals >= 2 };
@@ -362,7 +373,7 @@ export class TalentCrmService {
   }
 
   async createSequence(actor: JwtPayload, tenantId: string, dto: CreateTalentSequenceDto) {
-    if (dto.steps.length !== dto.stepCount) throw new BadRequestException('El número de pasos no coincide con la secuencia');
+    if (dto.steps.length !== dto.stepCount) throw new BadRequestException('talent_crm.step_count_mismatch');
     if (dto.segmentId) await this.assertSegment(tenantId, dto.segmentId);
     return this.prisma.talentSequence.create({ data: { tenantId, segmentId: dto.segmentId, name: dto.name.trim(), description: dto.description?.trim(), createdById: actor.sub, steps: { create: dto.steps.map((step, position) => ({ position, delayHours: step.delayHours, subject: step.subject.trim(), body: step.body.trim() })) } }, include: { steps: { orderBy: { position: 'asc' } } } });
   }
@@ -420,17 +431,17 @@ export class TalentCrmService {
     if (!branch) throw new NotFoundException('Branch not found');
   }
 
-  private matchSignals(left: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }, right: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }, sharedIdentityKeys: Set<string>) {
+  private matchSignals(locale: SupportedLocale, left: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }, right: { fullName: string; email: string; phone: string | null; city: string | null; linkedinUrl: string | null; resumeFiles: { sha256: string }[] }, sharedIdentityKeys: Set<string>) {
     const signals: Array<{ label: string; weight: number }> = [];
-    if (left.email.trim().toLowerCase() === right.email.trim().toLowerCase()) signals.push({ label: 'Correo idéntico', weight: 100 });
+    if (left.email.trim().toLowerCase() === right.email.trim().toLowerCase()) signals.push({ label: message('talent_crm.signal_same_email', locale), weight: 100 });
     const leftPhone = this.phoneKey(left.phone); const rightPhone = this.phoneKey(right.phone);
-    if (leftPhone && leftPhone === rightPhone && !sharedIdentityKeys.has(`phone:${leftPhone}`)) signals.push({ label: 'Teléfono idéntico', weight: 55 });
+    if (leftPhone && leftPhone === rightPhone && !sharedIdentityKeys.has(`phone:${leftPhone}`)) signals.push({ label: message('talent_crm.signal_same_phone', locale), weight: 55 });
     const leftLinkedin = this.urlKey(left.linkedinUrl); const rightLinkedin = this.urlKey(right.linkedinUrl);
-    if (leftLinkedin && leftLinkedin === rightLinkedin && !sharedIdentityKeys.has(`linkedin:${leftLinkedin}`)) signals.push({ label: 'LinkedIn idéntico', weight: 55 });
+    if (leftLinkedin && leftLinkedin === rightLinkedin && !sharedIdentityKeys.has(`linkedin:${leftLinkedin}`)) signals.push({ label: message('talent_crm.signal_same_linkedin', locale), weight: 55 });
     const leftResume = left.resumeFiles[0]?.sha256; const rightResume = right.resumeFiles[0]?.sha256;
-    if (leftResume && leftResume === rightResume && !sharedIdentityKeys.has(`resume:${leftResume}`)) signals.push({ label: 'CV idéntico', weight: 75 });
-    if (this.textKey(left.fullName) === this.textKey(right.fullName)) signals.push({ label: 'Nombre idéntico', weight: 20 });
-    if (left.city && right.city && this.textKey(left.city) === this.textKey(right.city)) signals.push({ label: 'Ciudad idéntica', weight: 10 });
+    if (leftResume && leftResume === rightResume && !sharedIdentityKeys.has(`resume:${leftResume}`)) signals.push({ label: message('talent_crm.signal_same_resume', locale), weight: 75 });
+    if (this.textKey(left.fullName) === this.textKey(right.fullName)) signals.push({ label: message('talent_crm.signal_same_name', locale), weight: 20 });
+    if (left.city && right.city && this.textKey(left.city) === this.textKey(right.city)) signals.push({ label: message('talent_crm.signal_same_city', locale), weight: 10 });
     return signals;
   }
 

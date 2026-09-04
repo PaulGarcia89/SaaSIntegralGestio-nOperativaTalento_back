@@ -1,3 +1,5 @@
+import { message } from '../localization/catalogs/catalog';
+import { SupportedLocale } from '../localization/localization.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -10,6 +12,10 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AtsAnalyticsQueryDto, SaveAtsAnalyticsDashboardDto, UpsertHiringQualityReviewDto, UpsertRecruitmentSourceCostDto } from './dto/ats-analytics-query.dto';
 
+// Etiqueta sintetica para las postulaciones sin fuente atribuida. Se usa TAMBIEN
+// como clave de agrupacion y como clave de comparacion en `insights`, asi que NO
+// se traduce aqui: la traduccion se aplica al final, al construir la respuesta.
+const UNATTRIBUTED_SOURCE = 'No informado';
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const TERMINAL_STATUSES = new Set<ApplicationStatus>([
@@ -87,7 +93,7 @@ export interface AnalyticsContext {
 export class AtsAnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async overview(actor: JwtPayload, query: AtsAnalyticsQueryDto) {
+  async overview(actor: JwtPayload, query: AtsAnalyticsQueryDto, locale: SupportedLocale = 'es') {
     const context = await this.resolveContext(actor, query);
     const period = this.resolvePeriod(query);
     await this.validateDimensions(context, query);
@@ -192,7 +198,7 @@ export class AtsAnalyticsService {
     const recruiterPerformance = this.recruiterPerformance(applications, now);
     const interviewMetrics = this.interviews(interviews);
     const offerMetrics = this.offers(offers);
-    const rejectionReasons = this.rejections(applications);
+    const rejectionReasons = this.rejections(applications, locale);
     const trends = this.trends(
       applications,
       period.from,
@@ -202,7 +208,7 @@ export class AtsAnalyticsService {
 
     return {
       generatedAt: now.toISOString(),
-      source: 'Postulaciones, auditoría de etapas, entrevistas y ofertas persistentes',
+      source: message('ats_analytics.source', locale),
       period: {
         from: period.from.toISOString(),
         to: period.to.toISOString(),
@@ -229,7 +235,15 @@ export class AtsAnalyticsService {
       },
       funnel,
       trends,
-      sources,
+      // `insights` recibe abajo el arreglo `sources` SIN traducir, porque compara
+      // contra UNATTRIBUTED_SOURCE. Aqui solo se traduce lo que sale al cliente.
+      sources: sources.map((item) => ({
+        ...item,
+        source:
+          item.source === UNATTRIBUTED_SOURCE
+            ? message('ats_analytics.source_unattributed', locale)
+            : item.source,
+      })),
       vacancies: vacancyPerformance,
       recruiters: recruiterPerformance,
       sla,
@@ -240,7 +254,7 @@ export class AtsAnalyticsService {
       attribution: this.attribution(applications),
       forecast: this.forecast(vacancies, applications, now),
       rejectionReasons,
-      insights: this.insights({
+      insights: this.insights(locale, {
         applications: current.applications,
         funnel,
         sources,
@@ -251,28 +265,30 @@ export class AtsAnalyticsService {
     };
   }
 
-  async exportCsv(actor: JwtPayload, query: AtsAnalyticsQueryDto) {
-    const report = await this.overview(actor, query);
+  async exportCsv(actor: JwtPayload, query: AtsAnalyticsQueryDto, locale: SupportedLocale = 'es') {
+    const report = await this.overview(actor, query, locale);
+    const label = (key: string) => message(`ats_analytics.${key}` as never, locale);
+    const summary = label('csv_summary');
     const rows: Array<Array<string | number>> = [
-      ['Resumen', 'Postulaciones', report.summary.applications, ''],
-      ['Resumen', 'Candidatos únicos', report.summary.uniqueCandidates, ''],
-      ['Resumen', 'Contrataciones', report.summary.hires, ''],
-      ['Resumen', 'Conversión', report.summary.conversionRate, '%'],
-      ['Resumen', 'Tiempo promedio de contratación', report.summary.averageTimeToHireHours, 'horas'],
-      ['Resumen', 'Cumplimiento SLA', report.sla.complianceRate, '%'],
-      ...report.funnel.map((item) => ['Embudo', item.stageName, item.reached, `${item.conversionRate}%`]),
-      ...report.sources.map((item) => ['Fuente', item.source, item.applications, `${item.conversionRate}% · ${item.costPerHire ?? 0} ${item.currency ?? ''}`]),
-      ...report.qualityOfHire.byCheckpoint.map((item) => ['Calidad de contratación', `${item.checkpointDays} días`, item.averagePerformanceScore, `${item.retentionRate}% retención`]),
-      ...report.vacancies.map((item) => ['Vacante', item.title, item.applications, `${item.conversionRate}%`]),
-      ...report.recruiters.map((item) => ['Reclutador', item.name, item.applications, `${item.conversionRate}%`]),
-      ...report.rejectionReasons.map((item) => ['Descarte', item.label, item.count, `${item.percentage}%`]),
+      [summary, label('csv_applications'), report.summary.applications, ''],
+      [summary, label('csv_unique_candidates'), report.summary.uniqueCandidates, ''],
+      [summary, label('csv_hires'), report.summary.hires, ''],
+      [summary, label('csv_conversion'), report.summary.conversionRate, '%'],
+      [summary, label('csv_time_to_hire'), report.summary.averageTimeToHireHours, label('csv_hours')],
+      [summary, label('csv_sla_compliance'), report.sla.complianceRate, '%'],
+      ...report.funnel.map((item) => [label('csv_funnel'), item.stageName, item.reached, `${item.conversionRate}%`]),
+      ...report.sources.map((item) => [label('csv_source'), item.source, item.applications, `${item.conversionRate}% · ${item.costPerHire ?? 0} ${item.currency ?? ''}`]),
+      ...report.qualityOfHire.byCheckpoint.map((item) => [label('csv_quality_of_hire'), `${item.checkpointDays} ${label('csv_days')}`, item.averagePerformanceScore, `${item.retentionRate}% ${label('csv_retention')}`]),
+      ...report.vacancies.map((item) => [label('csv_vacancy'), item.title, item.applications, `${item.conversionRate}%`]),
+      ...report.recruiters.map((item) => [label('csv_recruiter'), item.name, item.applications, `${item.conversionRate}%`]),
+      ...report.rejectionReasons.map((item) => [label('csv_rejection'), item.label, item.count, `${item.percentage}%`]),
     ];
     const content = [
-      ['Dimensión', 'Indicador', 'Valor', 'Detalle'],
+      [label('csv_dimension'), label('csv_indicator'), label('csv_value'), label('csv_detail')],
       ...rows,
     ].map((row) => row.map((cell) => this.csvCell(cell)).join(',')).join('\r\n');
     return {
-      filename: `analitica-ats-${report.period.from.slice(0, 10)}-${report.period.to.slice(0, 10)}.csv`,
+      filename: `${label('csv_filename')}-${report.period.from.slice(0, 10)}-${report.period.to.slice(0, 10)}.csv`,
       mimeType: 'text/csv;charset=utf-8',
       content: `\uFEFF${content}`,
       generatedAt: report.generatedAt,
@@ -554,13 +570,13 @@ export class AtsAnalyticsService {
     };
   }
 
-  private rejections(applications: AnalyticsApplication[]) {
+  private rejections(applications: AnalyticsApplication[], locale: SupportedLocale) {
     const rejected = applications.filter((item) => item.status === ApplicationStatus.REJECTED);
     const grouped = new Map<string, { code: string | null; label: string; category: string | null; count: number }>();
     for (const application of rejected) {
       const reason = application.structuredRejectionReason;
       const key = reason?.id ?? 'UNSTRUCTURED';
-      const row = grouped.get(key) ?? { code: reason?.code ?? null, label: reason?.label ?? 'Sin motivo estructurado', category: reason?.category ?? null, count: 0 };
+      const row = grouped.get(key) ?? { code: reason?.code ?? null, label: reason?.label ?? message('ats_analytics.no_structured_reason', locale), category: reason?.category ?? null, count: 0 };
       row.count += 1;
       grouped.set(key, row);
     }
@@ -603,35 +619,35 @@ export class AtsAnalyticsService {
     return vacancies.filter((vacancy) => vacancy.status === 'OPEN').map((vacancy) => { const hires = applications.filter((item) => item.vacancyId === vacancy.id && item.status === ApplicationStatus.HIRED).length; const remainingOpenings = Math.max(0, vacancy.openings - hires); return { vacancyId: vacancy.id, title: vacancy.title, remainingOpenings, historicalSample: historicalHires.length, averageDaysToHire, estimatedFillDate: historicalHires.length && remainingOpenings ? new Date(now.getTime() + averageDaysToHire * DAY).toISOString() : null }; });
   }
 
-  private insights(input: { applications: number; funnel: Array<{ stageName: string; dropOffRate: number; averageHours: number }>; sources: Array<{ source: string; applications: number }>; sla: { breached: number; complianceRate: number }; interviews: { noShowRate: number }; offers: { acceptanceRate: number; total: number } }) {
+  private insights(locale: SupportedLocale, input: { applications: number; funnel: Array<{ stageName: string; dropOffRate: number; averageHours: number }>; sources: Array<{ source: string; applications: number }>; sla: { breached: number; complianceRate: number }; interviews: { noShowRate: number }; offers: { acceptanceRate: number; total: number } }) {
     const insights: Array<{ severity: 'info' | 'warning' | 'critical'; code: string; title: string; detail: string }> = [];
     const bottleneck = [...input.funnel].sort((a, b) => b.averageHours - a.averageHours)[0];
-    if (bottleneck?.averageHours > 0) insights.push({ severity: bottleneck.averageHours > 120 ? 'warning' : 'info', code: 'STAGE_BOTTLENECK', title: `Mayor permanencia: ${bottleneck.stageName}`, detail: `Promedio de ${this.round(bottleneck.averageHours)} horas en la etapa.` });
+    if (bottleneck?.averageHours > 0) insights.push({ severity: bottleneck.averageHours > 120 ? 'warning' : 'info', code: 'STAGE_BOTTLENECK', title: message('ats_analytics.insight_bottleneck_title', locale, 'es', { stage: bottleneck.stageName }), detail: message('ats_analytics.insight_bottleneck_detail', locale, 'es', { hours: this.round(bottleneck.averageHours) }) });
     const dropOff = [...input.funnel].sort((a, b) => b.dropOffRate - a.dropOffRate)[0];
-    if (dropOff?.dropOffRate >= 20) insights.push({ severity: dropOff.dropOffRate >= 50 ? 'critical' : 'warning', code: 'FUNNEL_DROP_OFF', title: `Pérdida elevada en ${dropOff.stageName}`, detail: `${dropOff.dropOffRate}% no continúa desde la etapa anterior.` });
-    const unattributed = input.sources.find((item) => item.source === 'No informado')?.applications ?? 0;
-    if (this.percent(unattributed, input.applications) >= 20) insights.push({ severity: 'warning', code: 'SOURCE_QUALITY', title: 'Origen de candidatos incompleto', detail: `${this.percent(unattributed, input.applications)}% de las postulaciones no tiene fuente atribuida.` });
-    if (input.sla.breached > 0) insights.push({ severity: input.sla.complianceRate < 70 ? 'critical' : 'warning', code: 'SLA_RISK', title: 'Postulaciones fuera de SLA', detail: `${input.sla.breached} postulaciones requieren atención.` });
-    if (input.interviews.noShowRate >= 10) insights.push({ severity: 'warning', code: 'INTERVIEW_NO_SHOW', title: 'Ausencias en entrevistas', detail: `La tasa de ausencia es ${input.interviews.noShowRate}%.` });
-    if (input.offers.total > 0 && input.offers.acceptanceRate < 70) insights.push({ severity: 'warning', code: 'OFFER_ACCEPTANCE', title: 'Aceptación de ofertas por debajo del objetivo', detail: `La aceptación actual es ${input.offers.acceptanceRate}%.` });
+    if (dropOff?.dropOffRate >= 20) insights.push({ severity: dropOff.dropOffRate >= 50 ? 'critical' : 'warning', code: 'FUNNEL_DROP_OFF', title: message('ats_analytics.insight_dropoff_title', locale, 'es', { stage: dropOff.stageName }), detail: message('ats_analytics.insight_dropoff_detail', locale, 'es', { rate: dropOff.dropOffRate }) });
+    const unattributed = input.sources.find((item) => item.source === UNATTRIBUTED_SOURCE)?.applications ?? 0;
+    if (this.percent(unattributed, input.applications) >= 20) insights.push({ severity: 'warning', code: 'SOURCE_QUALITY', title: message('ats_analytics.insight_source_title', locale), detail: message('ats_analytics.insight_source_detail', locale, 'es', { rate: this.percent(unattributed, input.applications) }) });
+    if (input.sla.breached > 0) insights.push({ severity: input.sla.complianceRate < 70 ? 'critical' : 'warning', code: 'SLA_RISK', title: message('ats_analytics.insight_sla_title', locale), detail: message('ats_analytics.insight_sla_detail', locale, 'es', { count: input.sla.breached }) });
+    if (input.interviews.noShowRate >= 10) insights.push({ severity: 'warning', code: 'INTERVIEW_NO_SHOW', title: message('ats_analytics.insight_noshow_title', locale), detail: message('ats_analytics.insight_noshow_detail', locale, 'es', { rate: input.interviews.noShowRate }) });
+    if (input.offers.total > 0 && input.offers.acceptanceRate < 70) insights.push({ severity: 'warning', code: 'OFFER_ACCEPTANCE', title: message('ats_analytics.insight_offer_title', locale), detail: message('ats_analytics.insight_offer_detail', locale, 'es', { rate: input.offers.acceptanceRate }) });
     return insights;
   }
 
   private async resolveContext(actor: JwtPayload, query: AtsAnalyticsQueryDto): Promise<AnalyticsContext> {
     const global = actor.isSuperAdmin && actor.isGlobalContext && !query.tenantId;
     const tenantId = global ? null : query.tenantId ?? actor.activeTenantId ?? actor.tenantId;
-    if (query.tenantId && !actor.isSuperAdmin && !actor.allowedTenantIds.includes(query.tenantId)) throw new ForbiddenException('Empresa fuera del alcance autorizado');
+    if (query.tenantId && !actor.isSuperAdmin && !actor.allowedTenantIds.includes(query.tenantId)) throw new ForbiddenException('scope.tenant_out_of_scope');
     const branchRestricted = !actor.isSuperAdmin && actor.scope === AccessScope.BRANCH;
     let branchId = query.scope === 'tenant' && !branchRestricted ? null : query.branchId ?? actor.activeBranchId;
     if (branchRestricted) {
       branchId = query.branchId ?? actor.activeBranchId;
-      if (!branchId || !actor.allowedBranchIds.includes(branchId)) throw new ForbiddenException('Sucursal fuera del alcance autorizado');
+      if (!branchId || !actor.allowedBranchIds.includes(branchId)) throw new ForbiddenException('scope.branch_out_of_scope');
     } else if (branchId && !actor.isSuperAdmin && actor.allowedBranchIds.length > 0 && !actor.allowedBranchIds.includes(branchId)) {
-      throw new ForbiddenException('Sucursal fuera del alcance autorizado');
+      throw new ForbiddenException('scope.branch_out_of_scope');
     }
     if (branchId) {
       const branch = await this.prisma.branch.findFirst({ where: { id: branchId, ...(tenantId ? { tenantId } : {}) }, select: { name: true } });
-      if (!branch) throw new NotFoundException('Sucursal no encontrada');
+      if (!branch) throw new NotFoundException('scope.branch_not_found');
       return { type: 'BRANCH', tenantId, branchId, branchName: branch.name };
     }
     return { type: global ? 'GLOBAL' : 'TENANT', tenantId, branchId: null, branchName: null };
@@ -640,11 +656,11 @@ export class AtsAnalyticsService {
   private async validateDimensions(context: AnalyticsContext, query: AtsAnalyticsQueryDto) {
     if (query.vacancyId) {
       const vacancy = await this.prisma.vacancy.findFirst({ where: { id: query.vacancyId, ...(context.tenantId ? { tenantId: context.tenantId } : {}), ...(context.branchId ? { branchId: context.branchId } : {}) }, select: { id: true } });
-      if (!vacancy) throw new NotFoundException('Vacante no encontrada');
+      if (!vacancy) throw new NotFoundException('scope.vacancy_not_found');
     }
     if (query.recruiterId) {
       const user = await this.prisma.user.findFirst({ where: { id: query.recruiterId, ...(context.tenantId ? { tenantId: context.tenantId } : {}), ...(context.branchId ? { OR: [{ activeBranchId: context.branchId }, { branchAccesses: { some: { branchId: context.branchId } } }] } : {}) }, select: { id: true } });
-      if (!user) throw new NotFoundException('Reclutador no encontrado');
+      if (!user) throw new NotFoundException('scope.recruiter_not_found');
     }
   }
 
@@ -659,8 +675,8 @@ export class AtsAnalyticsService {
   private resolvePeriod(query: AtsAnalyticsQueryDto) {
     const to = query.to ? new Date(query.to.length === 10 ? `${query.to}T23:59:59.999Z` : query.to) : new Date();
     const from = query.from ? new Date(query.from.length === 10 ? `${query.from}T00:00:00.000Z` : query.from) : new Date(to.getTime() - 89 * DAY);
-    if (from > to) throw new BadRequestException('La fecha inicial debe ser anterior a la fecha final');
-    if (to.getTime() - from.getTime() > 366 * DAY) throw new BadRequestException('El periodo máximo permitido es de 366 días');
+    if (from > to) throw new BadRequestException('scope.invalid_date_range');
+    if (to.getTime() - from.getTime() > 366 * DAY) throw new BadRequestException('scope.period_too_long');
     const duration = to.getTime() - from.getTime() + 1;
     return { from, to, previousFrom: new Date(from.getTime() - duration), previousTo: new Date(from.getTime() - 1) };
   }
@@ -676,7 +692,7 @@ export class AtsAnalyticsService {
       const source = this.stringValue(data[key]);
       if (source) return source.trim();
     }
-    return 'No informado';
+    return UNATTRIBUTED_SOURCE;
   }
 
   private bucket(value: Date, granularity: 'day' | 'week' | 'month') {

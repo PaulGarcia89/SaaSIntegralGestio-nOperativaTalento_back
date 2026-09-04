@@ -204,7 +204,7 @@ export class ApplicationsService {
 
   async createReferral(user: JwtPayload, tenantId: string, dto: CreateEmployeeReferralDto) {
     const vacancy = await this.prisma.vacancy.findFirst({ where: { id: dto.vacancyId, tenantId, status: 'OPEN', ...(user.scope === AccessScope.BRANCH && !user.isSuperAdmin ? { branchId: { in: user.allowedBranchIds } } : {}) }, select: { id: true } });
-    if (!vacancy) throw new NotFoundException('Vacante no disponible para referidos.');
+    if (!vacancy) throw new NotFoundException('applications_public.referral_vacancy_unavailable');
     return this.prisma.employeeReferral.create({ data: { tenantId, vacancyId: vacancy.id, referrerUserId: user.sub, referralCode: `REF-${randomBytes(5).toString('hex').toUpperCase()}`, candidateEmail: dto.candidateEmail?.trim().toLowerCase(), candidateName: dto.candidateName?.trim() }, include: { vacancy: { select: { id: true, title: true } } } });
   }
 
@@ -216,10 +216,10 @@ export class ApplicationsService {
     resume?: Express.Multer.File,
     consentContext?: { ip?: string; userAgent?: string; portalId?: string },
   ) {
-    if (dto.website) throw new BadRequestException('No fue posible validar la postulación');
+    if (dto.website) throw new BadRequestException('applications_public.could_not_validate');
     const startedAt = dto.formStartedAt ? new Date(dto.formStartedAt).getTime() : 0;
     if (startedAt && (!Number.isFinite(startedAt) || Date.now() - startedAt < 2500)) {
-      throw new BadRequestException('Completa la postulación con calma e inténtalo nuevamente');
+      throw new BadRequestException('applications_public.slow_down');
     }
     await this.assertPublicRateLimit(`apply:${vacancyId}:${this.hashDraftToken(consentContext?.ip ?? "unknown")}`);
     if (
@@ -542,7 +542,7 @@ export class ApplicationsService {
       await this.prisma.publicRequestRateLimit.update({ where: { keyHash }, data: { hits: 1, windowStartedAt: now, expiresAt: new Date(now.getTime() + PUBLIC_LIMIT_WINDOW_MS * 2) } });
       return;
     }
-    throw new HttpException('Has realizado demasiados intentos. Espera un momento y vuelve a intentarlo.', HttpStatus.TOO_MANY_REQUESTS);
+    throw new HttpException('applications_public.too_many_attempts', HttpStatus.TOO_MANY_REQUESTS);
   }
 
   private async recordConversionEvent(tenantId: string, vacancyId: string, eventKey: string, kind: string, metadata?: Record<string, unknown>) {
@@ -699,7 +699,7 @@ export class ApplicationsService {
     };
   }
 
-  async decisionEvidence(id: string, actor: JwtPayload, tenantId: string) {
+  async decisionEvidence(id: string, actor: JwtPayload, tenantId: string, locale: SupportedLocale = 'es') {
     const application = await this.prisma.vacancyApplication.findFirst({
       where: { id, tenantId, ...this.buildBranchScopedWhere(actor) },
       include: {
@@ -725,7 +725,7 @@ export class ApplicationsService {
       generatedAt: new Date().toISOString(),
       generatedBy: { id: actor.sub, email: actor.email },
       application,
-      disclaimer: 'Expediente operativo para revisión interna, auditoría y asesoría legal. Verifique requisitos locales de retención, privacidad y admisibilidad probatoria.',
+      disclaimer: message('applications_public.evidence_disclaimer', locale),
     };
   }
 
@@ -1969,7 +1969,7 @@ export class ApplicationsService {
     const parsed = new Date(expected);
     if (Number.isNaN(parsed.getTime()) || current.getTime() !== parsed.getTime()) {
       throw new ConflictException(
-        'La postulación fue modificada por otra persona. Actualiza la vista antes de continuar.',
+        'applications_public.modified_elsewhere',
       );
     }
   }
