@@ -1,4 +1,4 @@
-import { mapBalanceForUx, mapLotForUx, mapMovementForUx, previewUx, resolveNextAction } from './restaurant-inventory-ux.mapper';
+import { mapBalanceForUx, mapLotForUx, mapMovementForUx, mapOperationForUx, previewUx, resolveNextAction } from './restaurant-inventory-ux.mapper';
 
 describe('restaurant inventory UX mappers', () => {
   it('derives stable stock status and next action without changing source fields', () => {
@@ -13,6 +13,8 @@ describe('restaurant inventory UX mappers', () => {
 
   it('keeps stable action codes for operations and lot status', () => {
     expect(resolveNextAction('DRAFT')).toBe('confirm_operation');
+    expect(mapOperationForUx({ status: 'DRAFT' }, 'Entrada')).toMatchObject({ nextAction: 'confirm_operation', nextActionLabel: 'Revisar y confirmar', displayStatus: 'Pendiente de confirmación' });
+    expect(mapOperationForUx({ status: 'DRAFT', blocked: true }, 'Consumo')).toMatchObject({ blockerLabel: 'Inventario insuficiente', blockerOwner: 'Responsable de abastecimiento' });
     expect(mapMovementForUx({ movementType: 'CONSUMPTION', direction: 'OUT', ingredientName: 'Tomate' })).toMatchObject({ displayDirection: 'Salida', activityDescription: 'Salida de inventario: Tomate' });
     expect(mapLotForUx({ remainingQuantity: 3, expirationDate: '2020-01-01T00:00:00.000Z' })).toMatchObject({ lotStatus: 'EXPIRED' });
   });

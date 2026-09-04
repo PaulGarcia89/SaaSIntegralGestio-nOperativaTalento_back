@@ -5,13 +5,20 @@ export type InventoryUxAction = {
 };
 
 const operationLabels: Record<string, string> = {
-  DRAFT: 'Borrador',
-  CONFIRMED: 'Confirmado',
+  DRAFT: 'Pendiente de confirmación',
+  CONFIRMED: 'Aplicado',
   CANCELLED: 'Cancelado',
-  SENT: 'Enviado',
+  SENT: 'Esperando recepción',
+  IN_TRANSIT: 'En tránsito',
   RECEIVED: 'Recibido',
-  IN_REVIEW: 'En revisión',
-  REVIEW: 'En revisión',
+  IN_REVIEW: 'Pendiente de aprobación',
+  REVIEW: 'Pendiente de aprobación',
+  APPROVED: 'Aprobado',
+  ACTIVE: 'Activo',
+  INACTIVE: 'Inactivo',
+  EXPIRED: 'Vencido',
+  DEPLETED: 'Agotado',
+  BLOCKED: 'Bloqueado',
 };
 
 export function displayStatus(status: string | null | undefined): string | null {
@@ -36,9 +43,14 @@ export function operationActions(status: string | null | undefined, blocked = fa
 
 export function mapOperationForUx<T extends Record<string, any>>(row: T, kind: string): T & Record<string, any> {
   const blocked = Boolean(row.blocked);
+  const nextAction = resolveNextAction(row.status, blocked);
   Object.assign(row, {
     displayStatus: displayStatus(row.status),
-    nextAction: resolveNextAction(row.status, blocked),
+    nextAction,
+    nextActionLabel: blocked ? 'Resolver el bloqueo de inventario' : row.status === 'DRAFT' ? 'Revisar y confirmar' : row.status === 'SENT' ? 'Confirmar recepción' : row.status === 'IN_REVIEW' || row.status === 'REVIEW' ? 'Aprobar el conteo' : null,
+    blockerLabel: blocked ? 'Inventario insuficiente' : null,
+    blockerOwner: blocked ? 'Responsable de abastecimiento' : null,
+    resolutionHint: blocked ? 'Reponer existencias o solicitar una autorización de excepción.' : null,
     actionsAvailable: operationActions(row.status, blocked),
     activityDescription: `${kind} ${displayStatus(row.status)?.toLowerCase() ?? 'actualizado'}`,
   });
@@ -56,6 +68,10 @@ export function mapBalanceForUx<T extends Record<string, any>>(row: T, lotSummar
     displayStatus: blocked ? 'Bajo mínimo' : 'Disponible',
     blocked,
     nextAction: blocked ? 'create_purchase_or_receipt' : null,
+    nextActionLabel: blocked ? 'Crear compra o registrar entrada' : null,
+    blockerLabel: blocked ? 'Stock igual o inferior al mínimo' : null,
+    blockerOwner: blocked ? 'Responsable de abastecimiento' : null,
+    resolutionHint: blocked ? 'Revisa las sugerencias de compra o registra una entrada.' : null,
     actionsAvailable: operationActions(undefined, false),
     lotSummary,
   };
@@ -83,8 +99,12 @@ export function previewUx<T extends Record<string, any>>(preview: T, rows: Array
   return {
     ...preview,
     blocked,
-    warnings: blocked ? [{ code: 'INSUFFICIENT_STOCK', message: 'La operación requiere más existencia de la disponible.' }] : [],
+    warnings: blocked ? [{ code: 'INSUFFICIENT_STOCK', message: 'La operación requiere más existencia de la disponible.', owner: 'Responsable de abastecimiento', resolution: 'Reponer existencias o solicitar una autorización de excepción.' }] : [],
     nextAction: blocked ? 'resolve_stock_shortage' : 'confirm_operation',
+    nextActionLabel: blocked ? 'Resolver el bloqueo de inventario' : 'Confirmar operación',
+    blockerLabel: blocked ? 'Inventario insuficiente' : null,
+    blockerOwner: blocked ? 'Responsable de abastecimiento' : null,
+    resolutionHint: blocked ? 'Revisa el stock resultante antes de continuar.' : null,
     actionsAvailable: [{ code: 'confirm_operation', label: 'Confirmar', enabled: !blocked }],
   };
 }
