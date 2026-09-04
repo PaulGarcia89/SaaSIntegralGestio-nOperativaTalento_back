@@ -18,6 +18,10 @@ export const en = {
     review_application: 'Review new application',
     prepare_interview: 'Prepare interview',
   },
+  applications_ats: {
+    no_undoable_transition: "There's no move of your own that can be undone",
+    previous_stage_gone: 'The previous stage is no longer available',
+  },
   notifications: {
     candidate_hired: { title: 'Hiring confirmed', message: 'Hiring was confirmed and onboarding has started.' },
     application_stage_changed: { title: 'Application stage updated', message: 'An application changed stage in the pipeline.' },

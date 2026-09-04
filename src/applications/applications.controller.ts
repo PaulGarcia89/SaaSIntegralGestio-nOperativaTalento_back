@@ -23,6 +23,8 @@ import { BulkUpdateApplicationsDto } from './dto/bulk-update-applications.dto';
 import { DeleteResumeDto, ReplaceResumeDto } from './dto/file-operation.dto';
 import { CreateApplicationSavedViewDto, CreateEmployeeReferralDto, UpdateApplicationSavedViewDto } from './dto/application-operations.dto';
 import { ApplicationSlaService } from './application-sla.service';
+import { RequestLocale } from '../common/decorators/request-locale.decorator';
+import { SupportedLocale } from '../localization/localization.service';
 
 @Controller('applications')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
@@ -223,8 +225,9 @@ export class ApplicationsController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Body() dto: UndoApplicationTransitionDto,
+    @RequestLocale() locale: SupportedLocale,
   ) {
-    return this.applicationsService.undoLatestTransition(id, user, request.tenant!.id, dto.expectedUpdatedAt);
+    return this.applicationsService.undoLatestTransition(id, user, request.tenant!.id, dto.expectedUpdatedAt, locale);
   }
 
   @Post(':id/transitions/:requestId/approve')

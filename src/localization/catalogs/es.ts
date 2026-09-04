@@ -18,6 +18,10 @@ export const es = {
     review_application: 'Revisar nueva postulación',
     prepare_interview: 'Preparar entrevista',
   },
+  applications_ats: {
+    no_undoable_transition: 'No hay una transición propia que se pueda deshacer',
+    previous_stage_gone: 'La etapa anterior ya no está disponible',
+  },
   notifications: {
     candidate_hired: { title: 'Contratación confirmada', message: 'La contratación fue confirmada y el flujo de incorporación comenzó.' },
     application_stage_changed: { title: 'Etapa de candidatura actualizada', message: 'Una candidatura cambió de etapa en el pipeline.' },

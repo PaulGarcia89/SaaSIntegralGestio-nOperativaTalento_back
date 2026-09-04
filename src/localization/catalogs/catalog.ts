@@ -14,7 +14,9 @@ export type MessageCode =
   | 'applications.submitted'
   | 'applications.already_submitted'
   | 'dashboard.review_application'
-  | 'dashboard.prepare_interview';
+  | 'dashboard.prepare_interview'
+  | 'applications_ats.no_undoable_transition'
+  | 'applications_ats.previous_stage_gone';
 
 export type NotificationMessageCode =
   | 'candidate_hired'

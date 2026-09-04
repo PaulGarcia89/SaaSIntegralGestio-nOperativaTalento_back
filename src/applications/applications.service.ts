@@ -34,6 +34,8 @@ import { AtsCommunicationsService } from "../ats-communications/ats-communicatio
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { createHash } from 'crypto';
 import { Response } from 'express';
+import { message } from '../localization/catalogs/catalog';
+import { SupportedLocale } from '../localization/localization.service';
 
 const transitionApprovalAdminRoles = new Set(['SUPERADMIN', 'PLATFORM_ADMIN', 'TENANT_ADMIN', 'ADMIN']);
 
@@ -1308,6 +1310,7 @@ export class ApplicationsService {
     actor: JwtPayload,
     tenantId: string,
     expectedUpdatedAt: string,
+    locale: SupportedLocale = 'es',
   ) {
     const application = await this.findApplicationState(id, actor, tenantId);
     this.assertExpectedVersion(application.updatedAt, expectedUpdatedAt);
@@ -1327,11 +1330,11 @@ export class ApplicationsService {
     });
     const previous = latest?.previousValue as { status?: ApplicationStatus; stageId?: string | null } | null;
     if (!latest || latestOverall?.id !== latest.id || !previous?.status || !previous.stageId) {
-      throw new BadRequestException('No hay una transición propia que se pueda deshacer');
+      throw new BadRequestException(message('applications_ats.no_undoable_transition', locale));
     }
     const previousStatus = previous.status;
     const previousStage = application.vacancy.stages.find((stage) => stage.id === previous.stageId);
-    if (!previousStage) throw new BadRequestException('La etapa anterior ya no está disponible');
+    if (!previousStage) throw new BadRequestException(message('applications_ats.previous_stage_gone', locale));
 
     await this.prisma.$transaction(async (tx) => {
       await tx.vacancyApplication.update({
