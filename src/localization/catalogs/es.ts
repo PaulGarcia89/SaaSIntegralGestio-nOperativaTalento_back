@@ -14,6 +14,10 @@ export const es = {
     submitted: 'Tu postulación fue enviada correctamente.',
     already_submitted: 'Ya existe una postulación para esta vacante.',
   },
+  dashboard: {
+    review_application: 'Revisar nueva postulación',
+    prepare_interview: 'Preparar entrevista',
+  },
   notifications: {
     candidate_hired: { title: 'Contratación confirmada', message: 'La contratación fue confirmada y el flujo de incorporación comenzó.' },
     application_stage_changed: { title: 'Etapa de candidatura actualizada', message: 'Una candidatura cambió de etapa en el pipeline.' },

@@ -13,6 +13,8 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
+import { message } from '../localization/catalogs/catalog';
+import { SupportedLocale } from '../localization/localization.service';
 
 type Tone = 'info' | 'success' | 'warning' | 'danger';
 
@@ -41,13 +43,13 @@ type Metric = {
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async operational(actor: JwtPayload) {
+  async operational(actor: JwtPayload, locale: SupportedLocale = 'es') {
     const generatedAt = new Date();
     const global = actor.isSuperAdmin && actor.isGlobalContext;
     const role = this.role(actor);
     const data = global
       ? await this.globalDashboard(generatedAt)
-      : await this.tenantDashboard(actor, role, generatedAt);
+      : await this.tenantDashboard(actor, role, generatedAt, locale);
     const prioritized = [...data.alerts, ...data.tasks].sort(
       (a, b) => this.priority(b) - this.priority(a),
     );
@@ -159,7 +161,7 @@ export class DashboardService {
     };
   }
 
-  private async tenantDashboard(actor: JwtPayload, role: string, now: Date) {
+  private async tenantDashboard(actor: JwtPayload, role: string, now: Date, locale: SupportedLocale = 'es') {
     const tenantId = actor.activeTenantId ?? actor.tenantId;
     const branchId = actor.activeBranchId;
     const branchWhere = branchId ? { branchId } : {};
@@ -376,9 +378,11 @@ export class DashboardService {
         this.item({
           id: item.id,
           kind: 'task',
-          title: 'Revisar nueva postulación',
+          title: message('dashboard.review_application', locale),
           description: `${item.candidate.fullName} · ${item.vacancy.title}`,
           tone: 'info',
+          // `module` es un IDENTIFICADOR, no texto para leer: el frontend
+          // filtra y decide la etiqueta del botón a partir de él. No traducir.
           module: 'Reclutamiento',
           href: `/ats/candidates/${item.candidate.id}`,
           occurredAt: item.appliedAt,
@@ -389,7 +393,7 @@ export class DashboardService {
         this.item({
           id: item.id,
           kind: 'task',
-          title: 'Preparar entrevista',
+          title: message('dashboard.prepare_interview', locale),
           description: `${item.application.candidate.fullName} · ${item.application.vacancy.title}`,
           tone: 'info',
           module: 'Entrevistas',

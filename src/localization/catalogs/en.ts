@@ -14,6 +14,10 @@ export const en = {
     submitted: 'Your application was submitted successfully.',
     already_submitted: 'An application already exists for this job.',
   },
+  dashboard: {
+    review_application: 'Review new application',
+    prepare_interview: 'Prepare interview',
+  },
   notifications: {
     candidate_hired: { title: 'Hiring confirmed', message: 'Hiring was confirmed and onboarding has started.' },
     application_stage_changed: { title: 'Application stage updated', message: 'An application changed stage in the pipeline.' },

@@ -12,7 +12,9 @@ export type MessageCode =
   | 'vacancies.public_title'
   | 'vacancies.private_access_required'
   | 'applications.submitted'
-  | 'applications.already_submitted';
+  | 'applications.already_submitted'
+  | 'dashboard.review_application'
+  | 'dashboard.prepare_interview';
 
 export type NotificationMessageCode =
   | 'candidate_hired'
