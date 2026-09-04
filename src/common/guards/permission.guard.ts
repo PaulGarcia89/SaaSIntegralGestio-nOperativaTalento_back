@@ -5,6 +5,7 @@ import { AccessScope } from '../enums/access-scope.enum';
 import { RequestWithUser } from '../types/request-with-user.type';
 import { AppException } from '../errors/app-exception';
 import { ErrorCode } from '../errors/error-code.enum';
+import { aliasLegacyActivos, registroDeAliasLegacy } from './legacy-permission-usage';
 
 @Injectable()
 export class PermissionGuard implements CanActivate {
@@ -30,16 +31,26 @@ export class PermissionGuard implements CanActivate {
     }
 
     const ownedPermissions = new Set(request.user?.permissions ?? []);
-    const allowLegacyInventoryPermissions = process.env.INVENTORY_LEGACY_PERMISSION_FALLBACK !== 'false';
+    const allowLegacyInventoryPermissions = aliasLegacyActivos();
+    // Se anota que alias resolvio cada permiso para poder medir la dependencia
+    // real del atajo antes de retirarlo. No altera ninguna decision.
+    const aliasUsados: Array<{ permission: string; alias: string }> = [];
     const hasPermission = (permission: string) => {
       if (ownedPermissions.has(permission)) return true;
-      if (permission === 'inventory.read') return ownedPermissions.has('inventory.view');
-      if (permission === 'inventory.view') return ownedPermissions.has('inventory.read');
-      if (permission === 'inventory.create') return ownedPermissions.has('restaurant_inventory.manage');
-      if (permission === 'inventory.update') return ownedPermissions.has('restaurant_inventory.manage');
-      if (permission === 'inventory.confirm') return ownedPermissions.has('restaurant_inventory.manage');
-      if (permission === 'inventory.cancel') return ownedPermissions.has('restaurant_inventory.manage');
-      if (permission === 'inventory.report.view') return ownedPermissions.has('restaurant_inventory.manage');
+      const anotar = (alias: string) => {
+        aliasUsados.push({ permission, alias });
+        return true;
+      };
+      if (permission === 'inventory.read' && ownedPermissions.has('inventory.view')) return anotar('inventory.view');
+      if (permission === 'inventory.view' && ownedPermissions.has('inventory.read')) return anotar('inventory.read');
+      if (permission === 'inventory.read' || permission === 'inventory.view') return false;
+      for (const directo of ['inventory.create', 'inventory.update', 'inventory.confirm', 'inventory.cancel', 'inventory.report.view']) {
+        if (permission === directo) {
+          return ownedPermissions.has('restaurant_inventory.manage')
+            ? anotar('restaurant_inventory.manage')
+            : false;
+        }
+      }
       const legacyAliases: Record<string, string[]> = {
         'restaurant_inventory.receipts.create': ['restaurant_inventory.manage', 'inventory.create', 'inventory.manage'],
         'restaurant_inventory.receipts.confirm': ['restaurant_inventory.manage', 'inventory.confirm', 'inventory.manage'],
@@ -74,10 +85,19 @@ export class PermissionGuard implements CanActivate {
         'restaurant_inventory.commissary.manage': ['restaurant_inventory.manage', 'inventory.create', 'inventory.confirm', 'inventory.manage'],
         'restaurant_inventory.budgets.manage': ['restaurant_inventory.manage', 'inventory.create', 'inventory.update', 'inventory.confirm', 'inventory.manage'],
       };
-      return allowLegacyInventoryPermissions && (legacyAliases[permission] ?? []).some((alias) => ownedPermissions.has(alias));
+      if (!allowLegacyInventoryPermissions) return false;
+      const aliasCoincidente = (legacyAliases[permission] ?? []).find((alias) => ownedPermissions.has(alias));
+      return aliasCoincidente ? anotar(aliasCoincidente) : false;
     };
     const hasAllPermissions = (requiredPermissions ?? []).every(hasPermission);
     const hasAnyPermission = !anyPermissions || anyPermissions.some((permission) => ownedPermissions.has(permission));
+
+    if (hasAllPermissions && hasAnyPermission && aliasUsados.length > 0) {
+      const tenantId = request.tenant?.id ?? request.user?.activeTenantId ?? request.user?.tenantId ?? null;
+      for (const uso of aliasUsados) {
+        registroDeAliasLegacy.registrar(uso.permission, uso.alias, tenantId);
+      }
+    }
 
     if (!hasAllPermissions || !hasAnyPermission) {
       throw new AppException(

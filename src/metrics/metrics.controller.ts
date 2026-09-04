@@ -36,6 +36,22 @@ export class MetricsController {
     return this.atsStorage.inspect();
   }
 
+  @Get('tenant-scope')
+  @GlobalOnly()
+  @RequirePermissions('metrics.operations.read')
+  @AuditAction('TENANT_SCOPE_REPORT_INSPECTED')
+  getTenantScopeReport(@CurrentUser() user: JwtPayload) {
+    return this.metricsService.getTenantScopeReport(user);
+  }
+
+  @Get('legacy-permission-aliases')
+  @GlobalOnly()
+  @RequirePermissions('metrics.operations.read')
+  @AuditAction('LEGACY_PERMISSION_ALIASES_INSPECTED')
+  getLegacyPermissionAliases(@CurrentUser() user: JwtPayload) {
+    return this.metricsService.getLegacyPermissionAliasReport(user);
+  }
+
   @Get('runtime-usage')
   @GlobalOnly()
   @RequirePermissions('metrics.operations.read')

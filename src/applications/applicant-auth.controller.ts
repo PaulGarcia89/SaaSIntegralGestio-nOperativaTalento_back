@@ -1,21 +1,27 @@
 import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { RateLimit } from '../common/rate-limit/rate-limit.decorator';
 import { Request, Response } from 'express';
 import { ApplicantAuthService } from './applicant-auth.service';
 import { ApplicantLoginDto, ApplicantRegisterDto } from './dto/applicant-auth.dto';
 import { ApplicantAuthGuard, ApplicantRequest } from './applicant-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 
 const REFRESH_COOKIE = 'applicant_refresh_token';
 
 @Controller('applicant-auth')
+@Public()
 export class ApplicantAuthController {
   constructor(private readonly auth: ApplicantAuthService) {}
 
+  @RateLimit({ name: 'applicant-register', limit: 5, windowSeconds: 3600, scope: 'email' })
   @Post('register')
   async register(@Body() dto: ApplicantRegisterDto, @Res({ passthrough: true }) response: Response) { return this.writeSession(response, await this.auth.register(dto)); }
 
+  @RateLimit({ name: 'applicant-login', limit: 10, windowSeconds: 900, scope: 'email' })
   @Post('login')
   async login(@Body() dto: ApplicantLoginDto, @Res({ passthrough: true }) response: Response) { return this.writeSession(response, await this.auth.login(dto)); }
 
+  @RateLimit({ name: 'applicant-refresh', limit: 60, windowSeconds: 900 })
   @Post('refresh')
   async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) { return this.writeSession(response, await this.auth.refresh(this.readCookie(request, REFRESH_COOKIE))); }
 

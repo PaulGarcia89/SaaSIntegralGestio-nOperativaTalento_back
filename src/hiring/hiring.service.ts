@@ -162,6 +162,7 @@ export class HiringService {
     const updated = await this.prisma.hiringContractDocument.update({ where: { id: doc.id }, data: { status, reviewedById: actor.sub, reviewedAt: now, acceptedAt: status === HiringContractDocumentStatus.APPROVED ? now : null, rejectedAt: status === HiringContractDocumentStatus.REJECTED ? now : null, rejectionReason: dto.reason?.trim() ?? null } });
     const contract = await this.mustGet(tenantId, contractId);
     await this.event(tenantId, contractId, contract.status, contract.status, 'REVIEW_DOCUMENT', actor, { documentId, previousStatus: doc.status, nextStatus: status, reason: dto.reason?.trim() });
+    await this.syncDocumentGate(tenantId, contractId, actor);
     return updated;
   }
 
@@ -216,6 +217,45 @@ export class HiringService {
   async history(tenantId: string, id: string) {
     const events = await this.prisma.hiringContractStateEvent.findMany({ where: { tenantId, contractId: id }, orderBy: { occurredAt: 'asc' } });
     return events.map((event) => ({ ...event, description: this.progressResolver.describeActivity(event) }));
+  }
+
+  /**
+   * Mueve la contratación a `COMPLIANCE_REVIEW` cuando ya no queda ningún
+   * documento obligatorio pendiente, y la devuelve a `DOCUMENTS_PENDING` si
+   * vuelve a faltar alguno.
+   *
+   * Sin esto la etapa de revisión final era inalcanzable: ningún método del
+   * servicio escribía `COMPLIANCE_REVIEW` ni `READY_TO_HIRE`, así que los
+   * contratos se quedaban detenidos en `DOCUMENTS_PENDING` o
+   * `SIGNATURES_PENDING` y el botón de confirmar del frontend, condicionado a
+   * esos dos estados, no llegaba a renderizarse nunca. `confirm()` ya aceptaba
+   * `COMPLIANCE_REVIEW`, de modo que esto completa la transición que faltaba
+   * en lugar de relajar ninguna validación.
+   */
+  private async syncDocumentGate(tenantId: string, contractId: string, actor: JwtPayload) {
+    const contract = await this.prisma.hiringContract.findFirst({ where: { id: contractId, tenantId } });
+    if (!contract || !contract.isActive) return;
+
+    const GATED: string[] = ['DOCUMENTS_PENDING', 'SIGNATURES_PENDING', 'COMPLIANCE_REVIEW'];
+    if (!GATED.includes(contract.status)) return;
+
+    const pending = await this.prisma.hiringContractDocument.count({
+      where: { tenantId, contractId, required: true, status: { notIn: [HiringContractDocumentStatus.APPROVED, HiringContractDocumentStatus.SIGNED, HiringContractDocumentStatus.WAIVED] } },
+    });
+
+    const target = pending === 0 ? 'COMPLIANCE_REVIEW' : 'DOCUMENTS_PENDING';
+    if (contract.status === target) return;
+    // Nunca se retrocede desde firmas por esta vía: ese estado lo gobierna el
+    // proveedor de firma, no la revisión documental.
+    if (target === 'DOCUMENTS_PENDING' && contract.status === 'SIGNATURES_PENDING') return;
+
+    const updated = await this.prisma.hiringContract.update({
+      where: { id: contractId },
+      data: target === 'COMPLIANCE_REVIEW'
+        ? { status: 'COMPLIANCE_REVIEW', currentStage: 'compliance_review', nextAction: 'Review and confirm hiring', nextActor: 'HR' }
+        : { status: 'DOCUMENTS_PENDING', currentStage: 'documents_pending', nextAction: 'Collect and review documents', nextActor: 'CANDIDATE' },
+    });
+    await this.event(tenantId, contractId, contract.status, updated.status, 'DOCUMENT_GATE', actor, { pendingRequiredDocuments: pending });
   }
 
   private include(withHistory = false): any {

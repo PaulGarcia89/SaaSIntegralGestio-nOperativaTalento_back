@@ -1,0 +1,255 @@
+{
+  "_comentario": "Linea base del aislamiento multiempresa. La prueba falla si algun archivo aumenta su numero de consultas sin filtro de tenant. Regenerar solo tras REDUCIRLO: npx ts-node test/architecture/generar-linea-base.ts",
+  "_generado": "2026-09-04",
+  "accesosDinamicos": 4,
+  "archivos": {
+    "applications/applicant-auth.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "applications/application-sla.service.ts": {
+      "colectiva": 4,
+      "escritura": 0
+    },
+    "applications/applications.service.ts": {
+      "colectiva": 14,
+      "escritura": 0
+    },
+    "applications/candidate-auth.service.ts": {
+      "colectiva": 3,
+      "escritura": 1
+    },
+    "applications/candidate-portal.service.ts": {
+      "colectiva": 15,
+      "escritura": 0
+    },
+    "applications/talent-crm.service.ts": {
+      "colectiva": 19,
+      "escritura": 0
+    },
+    "ats-communications/ats-communications.service.ts": {
+      "colectiva": 3,
+      "escritura": 0
+    },
+    "ats-communications/communication-governance.service.ts": {
+      "colectiva": 11,
+      "escritura": 0
+    },
+    "audit-logs/audit-logs.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "audit/audit.service.ts": {
+      "colectiva": 0,
+      "escritura": 1
+    },
+    "automation/automation.service.ts": {
+      "colectiva": 17,
+      "escritura": 0
+    },
+    "branches/branches.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "career-portals/career-portal-access.guard.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "career-portals/career-portals.service.ts": {
+      "colectiva": 8,
+      "escritura": 0
+    },
+    "common/files/ats-private-file.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "common/files/ats-storage-operations.service.ts": {
+      "colectiva": 5,
+      "escritura": 0
+    },
+    "company-registrations/company-registrations.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "dashboard/dashboard.service.ts": {
+      "colectiva": 6,
+      "escritura": 0
+    },
+    "domain-events/integration-event-tracking.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "domain-events/outbox-dispatcher.service.ts": {
+      "colectiva": 4,
+      "escritura": 0
+    },
+    "employees/employees.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "hiring/hiring.service.ts": {
+      "colectiva": 3,
+      "escritura": 0
+    },
+    "inventory/inventory.service.ts": {
+      "colectiva": 7,
+      "escritura": 0
+    },
+    "job-offers/job-offers.service.ts": {
+      "colectiva": 8,
+      "escritura": 0
+    },
+    "localization/localization.service.ts": {
+      "colectiva": 3,
+      "escritura": 0
+    },
+    "metrics/metrics.service.ts": {
+      "colectiva": 19,
+      "escritura": 0
+    },
+    "notifications/notifications.service.ts": {
+      "colectiva": 5,
+      "escritura": 0
+    },
+    "onboarding/candidate-preboarding.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "onboarding/onboarding-automation.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "onboarding/onboarding-retention.service.ts": {
+      "colectiva": 4,
+      "escritura": 0
+    },
+    "onboarding/onboarding.service.ts": {
+      "colectiva": 5,
+      "escritura": 0
+    },
+    "recruitment/competency-ai-assessment.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "recruitment/interview-self-scheduling.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "recruitment/recruitment.service.ts": {
+      "colectiva": 9,
+      "escritura": 0
+    },
+    "recruitment/scorecards.service.ts": {
+      "colectiva": 2,
+      "escritura": 1
+    },
+    "reports/ats-analytics.service.ts": {
+      "colectiva": 7,
+      "escritura": 0
+    },
+    "reports/reports.service.ts": {
+      "colectiva": 6,
+      "escritura": 0
+    },
+    "restaurant-inventory/restaurant-commercial.service.ts": {
+      "colectiva": 2,
+      "escritura": 1
+    },
+    "restaurant-inventory/restaurant-commissary.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "restaurant-inventory/restaurant-inventory-audit.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "restaurant-inventory/restaurant-inventory.service.ts": {
+      "colectiva": 45,
+      "escritura": 1
+    },
+    "restaurant-inventory/restaurant-purchasing.service.ts": {
+      "colectiva": 1,
+      "escritura": 1
+    },
+    "restaurant-inventory/restaurant-reports.service.ts": {
+      "colectiva": 26,
+      "escritura": 0
+    },
+    "restaurant-inventory/sales-import.service.ts": {
+      "colectiva": 3,
+      "escritura": 0
+    },
+    "signatures/docuseal.service.ts": {
+      "colectiva": 5,
+      "escritura": 0
+    },
+    "signatures/signatures.service.ts": {
+      "colectiva": 6,
+      "escritura": 0
+    },
+    "subscriptions/subscriptions.service.ts": {
+      "colectiva": 0,
+      "escritura": 1
+    },
+    "training/training-admin.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "training/training-analytics.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "training/training-assessment-admin.service.ts": {
+      "colectiva": 5,
+      "escritura": 0
+    },
+    "training/training-assignment-admin.service.ts": {
+      "colectiva": 7,
+      "escritura": 0
+    },
+    "training/training-assignment-reminder.service.ts": {
+      "colectiva": 4,
+      "escritura": 0
+    },
+    "training/training-course-scheduler.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "training/training-launch.service.ts": {
+      "colectiva": 5,
+      "escritura": 0
+    },
+    "training/training-learning-path.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "training/training-video.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "training/training-webhook-delivery.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "training/training.service.ts": {
+      "colectiva": 6,
+      "escritura": 0
+    },
+    "vacancies/personnel-requisitions.service.ts": {
+      "colectiva": 1,
+      "escritura": 0
+    },
+    "vacancies/vacancies.service.ts": {
+      "colectiva": 11,
+      "escritura": 2
+    },
+    "workflow-master/workflow-master.service.ts": {
+      "colectiva": 2,
+      "escritura": 0
+    },
+    "workflows/workflows.service.ts": {
+      "colectiva": 34,
+      "escritura": 1
+    }
+  }
+}

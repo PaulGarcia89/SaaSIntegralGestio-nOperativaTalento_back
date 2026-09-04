@@ -1,8 +1,10 @@
 import { Controller, Get, Param, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { AtsPrivateFileService } from './ats-private-file.service';
+import { Public } from '../../common/decorators/public.decorator';
 
 @Controller('public/ats-files')
+@Public()
 export class AtsFileAccessController {
   constructor(private readonly files: AtsPrivateFileService) {}
 

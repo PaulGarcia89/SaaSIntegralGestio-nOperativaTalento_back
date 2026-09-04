@@ -8,3 +8,6 @@ output
 tmp
 .prisma
 .DS_Store
+deploy/
+.env.lan
+.env.*.local

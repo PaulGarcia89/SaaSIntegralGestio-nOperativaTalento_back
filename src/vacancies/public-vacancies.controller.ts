@@ -1,8 +1,10 @@
 import { Controller, Get, Headers, Param, Query } from '@nestjs/common';
 import { CareerPortalsService } from '../career-portals/career-portals.service';
 import { ListPublicVacanciesDto } from './dto/list-public-vacancies.dto';
+import { Public } from '../common/decorators/public.decorator';
 
 @Controller('public/vacancies')
+@Public()
 export class PublicVacanciesController {
   constructor(private readonly careerPortalsService: CareerPortalsService) {}
 

@@ -60,3 +60,67 @@ describe('HiringService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
+
+describe('HiringService · puerta documental', () => {
+  const actor = { sub: 'user-1', role: 'HR' } as any;
+
+  const build = (contract: any, pendingRequired: number) => {
+    const prisma = {
+      hiringContract: {
+        findFirst: jest.fn().mockResolvedValue(contract),
+        update: jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...contract, ...data })),
+      },
+      hiringContractDocument: { count: jest.fn().mockResolvedValue(pendingRequired) },
+      hiringContractStateEvent: { create: jest.fn() },
+    } as any;
+    const service = new HiringService(prisma, {} as any, {} as any, new HiringProgressResolver());
+    return { prisma, service };
+  };
+
+  it('abre la revisión final cuando ya no falta ningún documento obligatorio', async () => {
+    const { prisma, service } = build({ id: 'c1', tenantId: 't1', status: 'DOCUMENTS_PENDING', isActive: true }, 0);
+
+    await (service as any).syncDocumentGate('t1', 'c1', actor);
+
+    expect(prisma.hiringContract.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'COMPLIANCE_REVIEW', currentStage: 'compliance_review', nextActor: 'HR' }),
+    }));
+    expect(prisma.hiringContractStateEvent.create).toHaveBeenCalled();
+  });
+
+  it('devuelve la contratación a documentos si vuelve a faltar uno', async () => {
+    const { prisma, service } = build({ id: 'c1', tenantId: 't1', status: 'COMPLIANCE_REVIEW', isActive: true }, 2);
+
+    await (service as any).syncDocumentGate('t1', 'c1', actor);
+
+    expect(prisma.hiringContract.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'DOCUMENTS_PENDING', nextActor: 'CANDIDATE' }),
+    }));
+  });
+
+  it('no retrocede desde firmas: ese estado lo gobierna el proveedor de firma', async () => {
+    const { prisma, service } = build({ id: 'c1', tenantId: 't1', status: 'SIGNATURES_PENDING', isActive: true }, 1);
+
+    await (service as any).syncDocumentGate('t1', 'c1', actor);
+
+    expect(prisma.hiringContract.update).not.toHaveBeenCalled();
+  });
+
+  it('deja intactas las contrataciones ya cerradas o canceladas', async () => {
+    const cerrada = build({ id: 'c1', tenantId: 't1', status: 'HIRED', isActive: false }, 0);
+    await (cerrada.service as any).syncDocumentGate('t1', 'c1', actor);
+    expect(cerrada.prisma.hiringContract.update).not.toHaveBeenCalled();
+
+    const fuera = build({ id: 'c1', tenantId: 't1', status: 'OFFER_SENT', isActive: true }, 0);
+    await (fuera.service as any).syncDocumentGate('t1', 'c1', actor);
+    expect(fuera.prisma.hiringContract.update).not.toHaveBeenCalled();
+  });
+
+  it('no repite la transición si ya está en el estado destino', async () => {
+    const { prisma, service } = build({ id: 'c1', tenantId: 't1', status: 'COMPLIANCE_REVIEW', isActive: true }, 0);
+
+    await (service as any).syncDocumentGate('t1', 'c1', actor);
+
+    expect(prisma.hiringContract.update).not.toHaveBeenCalled();
+  });
+});

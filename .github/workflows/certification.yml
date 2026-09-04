@@ -33,10 +33,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/certification?schema=public
       REDIS_URL: redis://127.0.0.1:6379/0
-      JWT_ACCESS_SECRET: certification-access-secret-at-least-32-characters
-      JWT_REFRESH_SECRET: certification-refresh-secret-at-least-32-characters
-      SCORM_SIGNING_KEY: certification-scorm-secret-at-least-32-characters
-      WEBHOOK_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       SCORM_ALLOW_UNSCANNED_UPLOADS: "true"
       NOTIFICATION_DELIVERY_WORKER_ENABLED: "false"
       ATS_SLA_WORKER_ENABLED: "false"
@@ -47,6 +43,15 @@ jobs:
       PUBLIC_FRONTEND_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
+      - name: Generar secretos efimeros para esta ejecucion
+        run: |
+          {
+            echo "JWT_ACCESS_SECRET=$(openssl rand -hex 32)"
+            echo "JWT_REFRESH_SECRET=$(openssl rand -hex 32)"
+            echo "SCORM_SIGNING_KEY=$(openssl rand -hex 32)"
+            echo "WEBHOOK_ENCRYPTION_KEY=$(openssl rand -hex 32)"
+            echo "ATS_FILE_SIGNING_SECRET=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22

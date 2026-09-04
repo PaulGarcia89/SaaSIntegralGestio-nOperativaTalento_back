@@ -15,6 +15,7 @@ import { CreateScormPackageDto, CreateTrainingSessionDto, CreateTrainingWebhookD
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingIntegrationsService } from './training-integrations.service';
 import { TrainingScormStorageService } from './training-scorm-storage.service';
+import { Public } from '../common/decorators/public.decorator';
 @Controller('training/integrations')
 @UseGuards(JwtAuthGuard,TenantGuard,SubscriptionGuard,ModuleAccessGuard,TrainingAccessGuard,PermissionGuard)
 @RequireModule(ModuleCode.TRAINING)
@@ -51,6 +52,7 @@ export class TrainingIntegrationsController {
 }
 
 @Controller('training/scorm')
+@Public()
 export class PublicTrainingScormController {
   constructor(private readonly scormStorage: TrainingScormStorageService) {}
   @Get(':id/launch')

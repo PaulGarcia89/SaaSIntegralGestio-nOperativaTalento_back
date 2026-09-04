@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -24,6 +24,9 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { OperationalAlertService } from './common/observability/operational-alert.service';
 import { RequestLoggingMiddleware } from './common/logging/request-logging.middleware';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
+import { SecurityHeadersMiddleware } from './common/security/security-headers.middleware';
+import { RateLimitModule } from './common/rate-limit/rate-limit.module';
+import { GlobalJwtAuthGuard } from './common/guards/global-jwt-auth.guard';
 import { PlatformModule } from './platform/platform.module';
 import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -60,6 +63,7 @@ import { EmailModule } from './email/email.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    RateLimitModule,
     MessagingModule,
     PrismaModule,
     AtsFileStorageModule,
@@ -111,6 +115,14 @@ import { EmailModule } from './email/email.module';
   providers: [
     OperationalAlertService,
     {
+      // Invierte el valor por defecto de la autenticacion: todo exige token
+      // salvo lo marcado con @Public(). DESACTIVADO hasta que se ponga
+      // GLOBAL_AUTH_GUARD_ENABLED=true; mientras tanto no altera el
+      // comportamiento actual. Ver docs/GLOBAL_AUTH_GUARD.md.
+      provide: APP_GUARD,
+      useClass: GlobalJwtAuthGuard,
+    },
+    {
       provide: APP_INTERCEPTOR,
       useClass: ActivityTrackingInterceptor,
     },
@@ -126,6 +138,14 @@ import { EmailModule } from './email/email.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestContextMiddleware, RequestLoggingMiddleware, AuditLogMiddleware, LocaleMiddleware).forRoutes('*');
+    consumer
+      .apply(
+        SecurityHeadersMiddleware,
+        RequestContextMiddleware,
+        RequestLoggingMiddleware,
+        AuditLogMiddleware,
+        LocaleMiddleware,
+      )
+      .forRoutes('*');
   }
 }

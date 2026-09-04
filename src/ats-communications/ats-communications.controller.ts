@@ -31,6 +31,7 @@ import {
   CreateAtsCommunicationTemplateDto,
   SendOfferDto,
 } from "./dto/ats-communication.dto";
+import { Public } from '../common/decorators/public.decorator';
 
 @Controller("ats/communications")
 @UseGuards(
@@ -167,6 +168,7 @@ export class AtsCommunicationsController {
 }
 
 @Controller("webhooks/communications")
+@Public()
 export class CommunicationWebhooksController {
   constructor(private readonly governance: CommunicationGovernanceService) {}
 

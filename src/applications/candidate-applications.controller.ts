@@ -5,8 +5,10 @@ import { ApplicationsService } from './applications.service';
 import { CandidateAuthGuard, CandidateRequest } from './candidate-auth.guard';
 import { CandidatePortalService } from './candidate-portal.service';
 import { CreateCandidatePrivacyRequestDto, CreateCandidateSupportRequestDto, ReplyCandidateConversationDto, WithdrawCandidateApplicationDto } from './dto/candidate-self-service.dto';
+import { Public } from '../common/decorators/public.decorator';
 
 @Controller('candidate/applications')
+@Public()
 @UseGuards(CandidateAuthGuard)
 export class CandidateApplicationsController {
   constructor(

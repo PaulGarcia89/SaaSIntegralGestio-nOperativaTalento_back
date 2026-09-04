@@ -5,6 +5,7 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { MESSAGE_QUEUE_LIST } from '../messaging/messaging.constants';
 import { MessageBusPort } from '../messaging/message-bus.port';
 import { MESSAGE_BUS } from '../messaging/message-bus.tokens';
+import { registroDeAliasLegacy } from '../common/guards/legacy-permission-usage';
 
 type TenantAccessSummary = {
   tenantId: string;
@@ -32,6 +33,25 @@ export class MetricsService {
     private readonly prisma: PrismaService,
     @Inject(MESSAGE_BUS) private readonly messageBus: MessageBusPort,
   ) {}
+
+  /**
+   * Inventario de consultas sin filtro de tenant observadas por este proceso.
+   * Alimenta la decision de pasar `TENANT_SCOPE_ENFORCEMENT` a `block`.
+   * Auditoria 2026-09-04, hallazgo CRITICO-3.
+   */
+  getTenantScopeReport(actor: JwtPayload) {
+    this.ensureSuperAdmin(actor);
+    return this.prisma.informeDeAislamiento();
+  }
+
+  /**
+   * Dependencia real de los alias de compatibilidad de permisos de inventario.
+   * Auditoria 2026-09-04, hallazgo ALTA-8.
+   */
+  getLegacyPermissionAliasReport(actor: JwtPayload) {
+    this.ensureSuperAdmin(actor);
+    return { ...registroDeAliasLegacy.resumen(), usos: registroDeAliasLegacy.informe() };
+  }
 
   async getTenantActivity(actor: JwtPayload, requestedMinutes?: number) {
     this.ensureSuperAdmin(actor);

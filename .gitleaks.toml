@@ -1,0 +1,17 @@
+# Configuracion de escaneo de secretos.
+# Se ejecuta en CI sobre el arbol de trabajo (--no-git). Cuando el historial este
+# purgado, retirar --no-git del workflow para cubrir tambien los commits antiguos.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Plantillas de configuracion sin valores reales"
+paths = [
+  '''\.env\.[^/]*example$''',
+  '''(^|/)docs/.*\.md$''',
+  '''(^|/)AUDITORIA_ARQUITECTURA_.*\.md$''',
+]
+regexes = [
+  '''replace-with-[a-z0-9-]+''',
+  '''ChangeMe123!''',
+]

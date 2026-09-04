@@ -38,6 +38,7 @@ import {
 import { ReorderTrainingEntitiesDto } from './dto/training-course-authoring.dto';
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingAssessmentAdminService } from './training-assessment-admin.service';
+import { Public } from '../common/decorators/public.decorator';
 
 @Controller('training/admin')
 @UseGuards(
@@ -269,6 +270,7 @@ export class TrainingAssessmentAdminController {
 }
 
 @Controller('public/training-certificates')
+@Public()
 export class PublicTrainingCertificateController {
   constructor(private readonly service: TrainingAssessmentAdminService) {}
 

@@ -1,0 +1,9 @@
+node_modules
+dist
+compiled-server
+coverage
+output
+tmp
+prisma/migrations
+prisma/migrations_legacy
+package-lock.json

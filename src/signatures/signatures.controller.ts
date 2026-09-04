@@ -13,6 +13,7 @@ import { RequestWithUser } from '../common/types/request-with-user.type';
 import { CreateSignaturePackageDto, CreateSignatureTemplateDto, SubmitSignatureConsentDto } from './dto/signatures.dto';
 import { SignaturesService } from './signatures.service';
 import { DocuSealService } from './docuseal.service';
+import { Public } from '../common/decorators/public.decorator';
 
 @Controller('signatures')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
@@ -80,6 +81,7 @@ export class SignaturesController {
 }
 
 @Controller('public/signatures')
+@Public()
 export class PublicSignaturesController {
   constructor(private readonly service: SignaturesService) {}
 
@@ -95,6 +97,7 @@ export class PublicSignaturesController {
 }
 
 @Controller('webhooks/docuseal')
+@Public()
 export class DocuSealWebhookController {
   constructor(private readonly docuSeal: DocuSealService) {}
 

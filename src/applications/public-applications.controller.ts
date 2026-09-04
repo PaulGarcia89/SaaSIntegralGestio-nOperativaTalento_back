@@ -5,8 +5,10 @@ import { CreatePublicApplicationDto } from './dto/create-public-application.dto'
 import { CandidateAuthGuard, CandidateRequest } from './candidate-auth.guard';
 import { Response } from 'express';
 import { PublicApplicationDraftDto } from './dto/public-application-draft.dto';
+import { Public } from '../common/decorators/public.decorator';
 
 @Controller('public/vacancies/:vacancyId/applications')
+@Public()
 export class PublicApplicationsController {
   constructor(private readonly applicationsService: ApplicationsService) {}
 

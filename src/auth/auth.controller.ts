@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RateLimit } from '../common/rate-limit/rate-limit.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AuditAction } from '../audit/audit-action.decorator';
@@ -22,6 +23,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
+  @RateLimit({ name: 'auth-login', limit: 10, windowSeconds: 900, scope: 'email' })
   @AuditAction('AUTH_LOGIN')
   async login(
     @Body() dto: LoginDto,
@@ -38,6 +40,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @RateLimit({ name: 'auth-refresh', limit: 60, windowSeconds: 900 })
   @AuditAction('AUTH_REFRESH')
   async refresh(
     @Body() dto: RefreshTokenDto,
@@ -126,6 +129,7 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @RateLimit({ name: 'auth-impersonation', limit: 20, windowSeconds: 3600, scope: 'user' })
   @Post('impersonation/start')
   @AuditAction('AUTH_IMPERSONATION_START')
   startImpersonation(@CurrentUser() user: JwtPayload, @Body() dto: StartImpersonationDto) {
