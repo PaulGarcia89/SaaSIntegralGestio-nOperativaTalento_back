@@ -169,15 +169,19 @@ export class JobOffersService {
     if (offer.status !== JobOfferStatus.APPROVED) throw new ConflictException('offers.needs_both_approvals');
     const version = this.currentVersion(offer);
     if (version.validUntil.getTime() <= Date.now()) throw new BadRequestException('offers.validity_already_ended');
-    const pdf = this.pdfFor(offer, version);
-    // El correo de la oferta lo lee el CANDIDATO: va en el idioma de su cuenta
-    // del portal, no en el del reclutador que pulsa «enviar».
+    // El correo y el PDF los lee el CANDIDATO: van en el idioma de su cuenta del
+    // portal, no en el del reclutador que pulsa «enviar».
     const candidateAccount = await this.prisma.candidateAccount.findUnique({
       where: { email: offer.application.candidate.email.toLowerCase() },
       select: { locale: true },
     });
     const candidateLocale: SupportedLocale =
       candidateAccount?.locale === 'en' ? 'en' : 'es';
+    // Este es el ejemplar RECTOR: el que se firma y cuya huella se registra.
+    // Su idioma queda fijado en `pdfLocale` para que cualquier auditoria
+    // posterior pueda regenerarlo byte a byte, aunque el candidato cambie
+    // despues el idioma de su portal.
+    const pdf = this.pdfFor(offer, version, candidateLocale, candidateLocale);
     const token = randomBytes(32).toString('base64url');
     const origin = publicFrontendUrl();
     const signingUrl = `${origin}/sign/${token}`;
@@ -209,7 +213,7 @@ export class JobOffersService {
           auditEvents: { create: { tenantId, actorId: actor.sub, action: 'OFFER_SENT', outcome: 'SUCCESS', evidence: { offerId, version: version.version, pdfSha256: jobOfferPdfHash(pdf) } } },
         },
       });
-      await tx.jobOfferVersion.update({ where: { id: version.id }, data: { pdfSha256: jobOfferPdfHash(pdf), pdfGeneratedAt: new Date() } });
+      await tx.jobOfferVersion.update({ where: { id: version.id }, data: { pdfSha256: jobOfferPdfHash(pdf), pdfLocale: candidateLocale, pdfGeneratedAt: new Date() } });
       await tx.jobOffer.update({ where: { id: offerId }, data: { status: JobOfferStatus.SENT } });
       await this.communications.enqueueEvent(tx, {
         tenantId,
@@ -237,9 +241,9 @@ export class JobOffersService {
     return { cancelled: true };
   }
 
-  async pdfForStaff(tenantId: string, actor: JwtPayload, offerId: string, versionNumber?: number) {
+  async pdfForStaff(tenantId: string, actor: JwtPayload, offerId: string, versionNumber: number | undefined, locale: SupportedLocale = 'es') {
     const offer = await this.getStaffOffer(tenantId, actor, offerId);
-    return this.pdfResult(offer, versionNumber);
+    return this.pdfResult(offer, versionNumber, locale);
   }
 
   async listForCandidate(accountId: string) {
@@ -252,9 +256,9 @@ export class JobOffersService {
     return offers.filter((offer) => offer.status !== JobOfferStatus.DRAFT && offer.status !== JobOfferStatus.PENDING_APPROVAL);
   }
 
-  async candidatePdf(accountId: string, offerId: string, versionNumber?: number) {
+  async candidatePdf(accountId: string, offerId: string, versionNumber: number | undefined, locale: SupportedLocale = 'es') {
     const offer = await this.getCandidateOffer(accountId, offerId);
-    return this.pdfResult(offer, versionNumber);
+    return this.pdfResult(offer, versionNumber, locale);
   }
 
   async candidateSigningLink(accountId: string, offerId: string) {
@@ -421,8 +425,16 @@ export class JobOffersService {
     return version;
   }
 
-  private pdfFor(offer: any, version: any) {
+  /**
+   * `locale` es el idioma en que se rinde este ejemplar; `governingLocale`, el
+   * del ejemplar rector. Cuando difieren, el PDF sale marcado como traduccion
+   * de cortesia: el lector ve el documento en su idioma sin que se rompa la
+   * correspondencia entre lo firmado y `pdfSha256`.
+   */
+  private pdfFor(offer: any, version: any, locale: SupportedLocale, governingLocale: SupportedLocale) {
     return createJobOfferPdf({
+      locale,
+      governingLocale,
       companyName: offer.application.vacancy.tenant.name,
       candidateName: offer.application.candidate.fullName,
       jobTitle: version.jobTitle,
@@ -436,10 +448,18 @@ export class JobOffersService {
     });
   }
 
-  private pdfResult(offer: any, versionNumber?: number) {
+  private pdfResult(offer: any, versionNumber: number | undefined, locale: SupportedLocale) {
     const version = versionNumber ? offer.versions.find((item: any) => item.version === versionNumber) : this.currentVersion(offer);
     if (!version) throw new NotFoundException('offers.version_not_found');
-    return { buffer: this.pdfFor(offer, version), filename: `oferta-${offer.application.candidate.fullName.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-v${version.version}.pdf` };
+    // `pdfLocale` vacio = oferta anterior a que el PDF fuera bilingue, cuando
+    // todo se generaba en castellano. Ese sigue siendo su ejemplar rector.
+    const governingLocale: SupportedLocale = version.pdfLocale === 'en' ? 'en' : 'es';
+    const stem = message('offer_pdf.filename', locale);
+    const name = offer.application.candidate.fullName.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    return {
+      buffer: this.pdfFor(offer, version, locale, governingLocale),
+      filename: `${stem}-${name}-v${version.version}-${locale}.pdf`,
+    };
   }
 
   private async offerTemplate(tx: Prisma.TransactionClient, tenantId: string, actorId: string) {

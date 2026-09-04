@@ -1,5 +1,6 @@
 import { AccessScope } from '../common/enums/access-scope.enum';
 import { JobOffersService } from './job-offers.service';
+import { jobOfferPdfHash } from './job-offer-pdf';
 
 const actor = {
   sub: 'user-1', firstName: 'Laura', lastName: 'RRHH', email: 'laura@example.test',
@@ -85,5 +86,50 @@ describe('JobOffersService', () => {
 
     expect(workflows.createHiringWorkflow).toHaveBeenCalledWith('tenant-1', expect.any(Object), expect.objectContaining({ applicationId: application.id, jobTitle: 'Analista' }));
     expect(prisma.jobOffer.update).toHaveBeenCalledWith(expect.objectContaining({ data: { conversionWorkflowId: 'workflow-1', conversionError: null } }));
+  });
+});
+
+describe('JobOffersService — idioma del PDF y cadena probatoria', () => {
+  const version = {
+    id: 'version-1', version: 1, jobTitle: 'Analista', currency: 'USD',
+    salaryAmount: { toString: () => '60000' }, periodicity: 'ANNUAL',
+    employmentStartDate: new Date('2026-10-01T00:00:00.000Z'),
+    validUntil: new Date('2026-09-20T00:00:00.000Z'),
+    benefits: ['Seguro médico'], message: 'Bienvenida.',
+  };
+  const offerFor = (pdfLocale: string | null) => ({
+    id: 'offer-1', currentVersion: 1,
+    application: { candidate: { fullName: 'Ana Pérez' }, vacancy: { tenant: { name: 'Empresa Demo' } } },
+    versions: [{ ...version, pdfLocale }],
+  });
+  const service = () => new JobOffersService({} as any, {} as any, {} as any);
+
+  // La descarga sigue el idioma del lector: era el requisito.
+  it('rinde el PDF en el idioma de quien lo descarga', () => {
+    const enIngles = (service() as any).pdfResult(offerFor('es'), undefined, 'en');
+    expect(enIngles.buffer.toString()).toContain('Job offer v1');
+    expect(enIngles.filename).toBe('job-offer-ana-p-rez-v1-en.pdf');
+  });
+
+  // ...pero solo el ejemplar en el idioma rector reproduce la huella firmada.
+  it('solo el ejemplar rector reproduce la huella registrada al enviar', () => {
+    const rector = (service() as any).pdfResult(offerFor('es'), undefined, 'es');
+    const traduccion = (service() as any).pdfResult(offerFor('es'), undefined, 'en');
+    expect(jobOfferPdfHash(rector.buffer)).not.toBe(jobOfferPdfHash(traduccion.buffer));
+    expect(traduccion.buffer.toString()).toContain('Courtesy translation');
+    expect(rector.buffer.toString()).not.toContain('Courtesy translation');
+  });
+
+  // Las ofertas anteriores a la columna no tienen `pdfLocale`: su ejemplar
+  // rector es el castellano, que es el unico que llegaron a generar.
+  it('trata las ofertas antiguas sin pdfLocale como rectoras en castellano', () => {
+    const antigua = (service() as any).pdfResult(offerFor(null), undefined, 'es');
+    const explicita = (service() as any).pdfResult(offerFor('es'), undefined, 'es');
+    expect(jobOfferPdfHash(antigua.buffer)).toBe(jobOfferPdfHash(explicita.buffer));
+  });
+
+  it('marca como traduccion el castellano cuando el rector es ingles', () => {
+    const pdf = (service() as any).pdfResult(offerFor('en'), undefined, 'es');
+    expect(pdf.buffer.toString()).toContain('Traduccion de cortesia');
   });
 });

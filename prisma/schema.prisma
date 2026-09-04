@@ -5022,6 +5022,7 @@ model JobOfferVersion {
   message               String?
   counterproposalReason String?
   pdfSha256             String?
+  pdfLocale             String?                 @db.VarChar(5)
   pdfGeneratedAt        DateTime?
   createdById           String?
   createdAt             DateTime                @default(now())

@@ -17,6 +17,8 @@ import { ScopeGuard } from '../common/guards/scope.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
+import { RequestLocale } from '../common/decorators/request-locale.decorator';
+import { SupportedLocale } from '../localization/localization.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { RequestWithUser } from '../common/types/request-with-user.type';
@@ -79,8 +81,8 @@ export class JobOffersController {
 
   @Get(':id/pdf')
   @RequirePermissions('applications.read')
-  async pdf(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query('version', new ParseIntPipe({ optional: true })) version: number | undefined, @Res() response: Response) {
-    const file = await this.offers.pdfForStaff(request.tenant!.id, actor, id, version);
+  async pdf(@Req() request: RequestWithUser, @CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query('version', new ParseIntPipe({ optional: true })) version: number | undefined, @RequestLocale() locale: SupportedLocale, @Res() response: Response) {
+    const file = await this.offers.pdfForStaff(request.tenant!.id, actor, id, version, locale);
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
     response.send(file.buffer);
@@ -96,8 +98,8 @@ export class CandidateJobOffersController {
   list(@Req() request: CandidateRequest) { return this.offers.listForCandidate(request.candidate.sub); }
 
   @Get(':id/pdf')
-  async pdf(@Req() request: CandidateRequest, @Param('id') id: string, @Query('version', new ParseIntPipe({ optional: true })) version: number | undefined, @Res() response: Response) {
-    const file = await this.offers.candidatePdf(request.candidate.sub, id, version);
+  async pdf(@Req() request: CandidateRequest, @Param('id') id: string, @Query('version', new ParseIntPipe({ optional: true })) version: number | undefined, @RequestLocale() locale: SupportedLocale, @Res() response: Response) {
+    const file = await this.offers.candidatePdf(request.candidate.sub, id, version, locale);
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
     response.send(file.buffer);
