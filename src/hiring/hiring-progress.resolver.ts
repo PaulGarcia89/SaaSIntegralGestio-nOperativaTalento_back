@@ -1,3 +1,6 @@
+import { message, MessageCode } from '../localization/catalogs/catalog';
+import { SupportedLocale } from '../localization/localization.service';
+
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Borrador',
   DATA_REVIEW: 'Revisión de datos',
@@ -29,7 +32,7 @@ const ACTIONS: Record<string, { code: string; label: string; description: string
 const ORDER = ['DATA_REVIEW', 'OFFER_PREPARATION', 'OFFER_SENT', 'OFFER_ACCEPTED', 'DOCUMENTS_PENDING', 'SIGNATURES_PENDING', 'COMPLIANCE_REVIEW', 'HIRED'];
 
 export class HiringProgressResolver {
-  resolve(contract: any) {
+  resolve(contract: any, locale: SupportedLocale = 'es') {
     const status = String(contract.status ?? 'DRAFT');
     const documents = Array.isArray(contract.documents) ? contract.documents : [];
     const signatures = Array.isArray(contract.signatures) ? contract.signatures : [];
@@ -38,12 +41,12 @@ export class HiringProgressResolver {
     const pendingDocuments = requiredDocuments.filter((document: any) => !['APPROVED', 'SIGNED', 'WAIVED'].includes(document.status));
     const completed = ORDER.filter((step) => this.stepComplete(status, step));
     const pending = ORDER.filter((step) => !this.stepComplete(status, step));
-    const blockers = this.blockers(status, pendingDocuments, signatures);
+    const blockers = this.blockers(status, pendingDocuments, signatures, locale);
     const next = ACTIONS[status] ?? ACTIONS.DATA_REVIEW;
     const actionBlockers = status === 'OFFER_PREPARATION' && !contract.jobOfferId
-      ? [{ code: 'OFFER_NOT_CONFIGURED', message: 'Configura una oferta antes de enviarla.', field: 'jobOfferId' }]
+      ? [{ code: 'OFFER_NOT_CONFIGURED', message: message('hiring_progress.offer_not_configured', locale), field: 'jobOfferId' }]
       : blockers;
-    const lastActivity = this.lastActivity(contract);
+    const lastActivity = this.lastActivity(contract, locale);
     const progressPercentage = Math.round((completed.length / ORDER.length) * 100);
     const availableActions = Object.values(ACTIONS).filter((action) => this.isAvailable(action.code, status, actionBlockers));
 
@@ -76,11 +79,11 @@ export class HiringProgressResolver {
     return index >= 0 && ORDER.indexOf(status) >= index;
   }
 
-  private blockers(status: string, pendingDocuments: any[], signatures: any[]) {
+  private blockers(status: string, pendingDocuments: any[], signatures: any[], locale: SupportedLocale = 'es') {
     const blockers: Array<{ code: string; message: string; field?: string }> = [];
-    if (['DOCUMENTS_PENDING', 'COMPLIANCE_REVIEW', 'READY_TO_HIRE'].includes(status) && pendingDocuments.length) blockers.push({ code: 'REQUIRED_DOCUMENTS_MISSING', message: `Faltan ${pendingDocuments.length} documento(s) obligatorio(s).` });
-    if (status === 'SIGNATURES_PENDING' && signatures.some((signature: any) => ['PENDING', 'PROCESSING', 'RETRYING'].includes(signature.status))) blockers.push({ code: 'SIGNATURES_PENDING', message: 'Hay solicitudes de firma pendientes.' });
-    if (status === 'OFFER_SENT' || status === 'AWAITING_OFFER_RESPONSE') blockers.push({ code: 'WAITING_CANDIDATE', message: 'La contratación está esperando una respuesta del candidato.' });
+    if (['DOCUMENTS_PENDING', 'COMPLIANCE_REVIEW', 'READY_TO_HIRE'].includes(status) && pendingDocuments.length) blockers.push({ code: 'REQUIRED_DOCUMENTS_MISSING', message: pendingDocuments.length === 1 ? message('hiring_progress.docs_missing_one', locale) : message('hiring_progress.docs_missing_many', locale, 'es', { count: pendingDocuments.length }) });
+    if (status === 'SIGNATURES_PENDING' && signatures.some((signature: any) => ['PENDING', 'PROCESSING', 'RETRYING'].includes(signature.status))) blockers.push({ code: 'SIGNATURES_PENDING', message: message('hiring_progress.signatures_pending', locale) });
+    if (status === 'OFFER_SENT' || status === 'AWAITING_OFFER_RESPONSE') blockers.push({ code: 'WAITING_CANDIDATE', message: message('hiring_progress.waiting_candidate', locale) });
     return blockers;
   }
 
@@ -94,17 +97,24 @@ export class HiringProgressResolver {
     return 'pending';
   }
 
-  private lastActivity(contract: any) {
+  private lastActivity(contract: any, locale: SupportedLocale = 'es') {
     const event = Array.isArray(contract.stateHistory)
       ? contract.stateHistory.reduce((latest: any, candidate: any) => !latest || new Date(candidate.occurredAt).getTime() > new Date(latest.occurredAt).getTime() ? candidate : latest, null)
       : contract.stateHistory;
     if (!event) return null;
-    return { action: event.action, description: this.activityDescription(event), occurredAt: event.occurredAt, actorUserId: event.actorUserId ?? null };
+    return { action: event.action, description: this.activityDescription(event, locale), occurredAt: event.occurredAt, actorUserId: event.actorUserId ?? null };
   }
 
-  private activityDescription(event: any) {
-    const descriptions: Record<string, string> = { CREATE_CONTRACT: 'Se creó la contratación.', SEND_OFFER: 'Se envió la oferta al candidato.', ACCEPT_OFFER: 'El candidato aceptó la oferta.', REJECT_OFFER: 'El candidato rechazó la oferta.', CONFIRM_CONTRACT: 'Se confirmó la contratación.', CANCEL_CONTRACT: 'Se canceló la contratación.' };
-    return descriptions[event.action] ?? 'Se actualizó la contratación.';
+  private activityDescription(event: any, locale: SupportedLocale = 'es') {
+    const codes: Record<string, MessageCode> = {
+      CREATE_CONTRACT: 'hiring_progress.activity_create',
+      SEND_OFFER: 'hiring_progress.activity_send_offer',
+      ACCEPT_OFFER: 'hiring_progress.activity_accept_offer',
+      REJECT_OFFER: 'hiring_progress.activity_reject_offer',
+      CONFIRM_CONTRACT: 'hiring_progress.activity_confirm',
+      CANCEL_CONTRACT: 'hiring_progress.activity_cancel',
+    };
+    return message(codes[event.action] ?? 'hiring_progress.activity_update', locale);
   }
 
   private actorLabel(code: string) { return code === 'CANDIDATE' ? 'Candidato' : code === 'HR' ? 'Recursos Humanos' : code; }

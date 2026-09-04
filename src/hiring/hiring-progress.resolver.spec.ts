@@ -37,4 +37,16 @@ describe('HiringProgressResolver', () => {
     expect(progress.availableActions).toEqual([expect.objectContaining({ code: 'SEND_OFFER' })]);
     expect(resolver.describeActivity({ action: 'SEND_OFFER' })).toBe('Se envió la oferta al candidato.');
   });
+
+  it('devuelve los bloqueos en el idioma pedido', () => {
+    const contract = { status: 'DOCUMENTS_PENDING', currentStage: 'documents_pending', documents: [{ required: true, status: 'REQUIRED' }, { required: true, status: 'REQUIRED' }] };
+    expect(resolver.resolve(contract, 'es').blockers[0].message).toBe('Faltan 2 documentos obligatorios.');
+    expect(resolver.resolve(contract, 'en').blockers[0].message).toBe('2 required documents are missing.');
+  });
+
+  it('usa el singular cuando falta un solo documento', () => {
+    const contract = { status: 'DOCUMENTS_PENDING', currentStage: 'documents_pending', documents: [{ required: true, status: 'REQUIRED' }] };
+    expect(resolver.resolve(contract, 'es').blockers[0].message).toBe('Falta 1 documento obligatorio.');
+    expect(resolver.resolve(contract, 'en').blockers[0].message).toBe('1 required document is missing.');
+  });
 });

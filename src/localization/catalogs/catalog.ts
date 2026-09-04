@@ -16,7 +16,19 @@ export type MessageCode =
   | 'dashboard.review_application'
   | 'dashboard.prepare_interview'
   | 'applications_ats.no_undoable_transition'
-  | 'applications_ats.previous_stage_gone';
+  | 'applications_ats.previous_stage_gone'
+  | 'hiring_progress.docs_missing_one'
+  | 'hiring_progress.docs_missing_many'
+  | 'hiring_progress.signatures_pending'
+  | 'hiring_progress.waiting_candidate'
+  | 'hiring_progress.offer_not_configured'
+  | 'hiring_progress.activity_create'
+  | 'hiring_progress.activity_send_offer'
+  | 'hiring_progress.activity_accept_offer'
+  | 'hiring_progress.activity_reject_offer'
+  | 'hiring_progress.activity_confirm'
+  | 'hiring_progress.activity_cancel'
+  | 'hiring_progress.activity_update';
 
 export type NotificationMessageCode =
   | 'candidate_hired'
@@ -32,10 +44,17 @@ export type NotificationMessageCode =
   | 'handoff_completed'
   | 'compliance_closed';
 
-export function message(code: MessageCode, locale: SupportedLocale, fallback: SupportedLocale = 'es'): string {
+/**
+ * `params` interpola `{{nombre}}`, igual que el `translate` del frontend.
+ *
+ * Hace falta para los mensajes con cantidades: en singular y plural el numero
+ * no va en el mismo sitio en todos los idiomas, asi que concatenar no sirve.
+ */
+export function message(code: MessageCode, locale: SupportedLocale, fallback: SupportedLocale = 'es', params: Record<string, string | number> = {}): string {
   const lookup = (selected: SupportedLocale) => code.split('.').reduce<unknown>((value, key) => (value && typeof value === 'object' && key in value ? (value as Record<string, unknown>)[key] : undefined), catalogs[selected]);
   const result = lookup(locale) ?? lookup(fallback) ?? lookup('es');
-  return typeof result === 'string' ? result : code;
+  if (typeof result !== 'string') return code;
+  return result.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(params[name] ?? `{{${name}}}`));
 }
 
 export function notificationMessage(code: NotificationMessageCode, locale: SupportedLocale) {

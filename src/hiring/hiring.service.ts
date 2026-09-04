@@ -9,6 +9,7 @@ import { JobOffersService } from '../job-offers/job-offers.service';
 import { HiringProgressResolver } from './hiring-progress.resolver';
 import { AppException } from '../common/errors/app-exception';
 import { ErrorCode } from '../common/errors/error-code.enum';
+import { SupportedLocale } from '../localization/localization.service';
 
 @Injectable()
 export class HiringService {
@@ -166,9 +167,9 @@ export class HiringService {
     return updated;
   }
 
-  async calculateProgress(tenantId: string, id: string) {
+  async calculateProgress(tenantId: string, id: string, locale: SupportedLocale = 'es') {
     const contract = await this.mustGet(tenantId, id, true);
-    return this.progressResolver.resolve(contract);
+    return this.progressResolver.resolve(contract, locale);
   }
 
   async confirm(tenantId: string, actor: JwtPayload, id: string, requestId?: string) {

@@ -13,6 +13,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { HiringService } from './hiring.service';
 import { CancelHiringContractDto, ConfigureHiringOfferDto, CreateHiringContractDto, ListHiringContractsDto, RequestHiringDocumentsDto, ReviewHiringDocumentDto, UpdateHiringContractDto } from './dto/hiring.dto';
+import { RequestLocale } from '../common/decorators/request-locale.decorator';
+import { SupportedLocale } from '../localization/localization.service';
 
 @Controller('hiring')
 @UseGuards(JwtAuthGuard, TenantGuard, SubscriptionGuard, ModuleAccessGuard, ScopeGuard, PermissionGuard)
@@ -66,7 +68,7 @@ export class HiringController {
 
   @Get(':id/progress')
   @RequirePermissions('applications.read')
-  progress(@Req() request: RequestWithUser, @Param('id') id: string) { return this.service.calculateProgress(request.tenant!.id, id); }
+  progress(@Req() request: RequestWithUser, @Param('id') id: string, @RequestLocale() locale: SupportedLocale) { return this.service.calculateProgress(request.tenant!.id, id, locale); }
 
   @Post(':id/confirm')
   @RequirePermissions('applications.update')
