@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { JobPublicationStatus, Prisma, VacancyStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 import { CreateVacancyDto } from './dto/create-vacancy.dto';
@@ -135,6 +135,8 @@ export class VacanciesService {
           skipDuplicates: true,
         });
       }
+
+      await this.syncMarketplacePublication(tx, tenantId, vacancy.id, vacancy.status);
 
       await tx.vacancyChangeEvent.create({
         data: {
@@ -331,6 +333,9 @@ export class VacanciesService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.vacancy.update({ where: { id }, data });
+      if (dto.status !== undefined && dto.status !== before.status) {
+        await this.syncMarketplacePublication(tx, tenantId, id, dto.status);
+      }
       if (locationBranchIds) {
         await tx.vacancyLocation.deleteMany({ where: { vacancyId: id } });
         await tx.vacancyLocation.createMany({
@@ -431,6 +436,62 @@ export class VacanciesService {
     return this.findOne(id, tenantId, actor);
   }
 
+  /**
+   * Mantiene la publicación de la vacante en el mercado público al día con su
+   * estado.
+   *
+   * La migración `20260826120000_add_career_portals_and_publications` creó
+   * una publicación PUBLIC_MARKETPLACE para cada vacante abierta que existía
+   * ENTONCES, pero ningún código la creaba después: toda vacante abierta desde
+   * la aplicación a partir de esa fecha quedaba invisible en el portal público
+   * y nadie podía postularse a ella. Reproducido en local: cuatro vacantes
+   * abiertas, cero publicaciones.
+   *
+   * Misma forma que la del backfill —canal PUBLIC_MARKETPLACE, portal
+   * «marketplace», `publicSlug` = id de la vacante— para que las vacantes
+   * nuevas y las migradas sean indistinguibles para el portal y para el flujo
+   * de postulación. Abierta ⇒ PUBLISHED; pausada ⇒ PAUSED; cerrada o cubierta
+   * ⇒ ARCHIVED con fecha de cierre. Sin portal «marketplace» no hace nada:
+   * no inventa un portal que la migración no creó.
+   */
+  private async syncMarketplacePublication(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    vacancyId: string,
+    status: VacancyStatus,
+  ) {
+    const marketplace = await tx.careerPortal.findFirst({
+      where: { slug: 'marketplace', type: 'MARKETPLACE', isActive: true },
+      select: { id: true },
+    });
+    if (!marketplace) return;
+
+    const publicationStatus: JobPublicationStatus =
+      status === 'OPEN' ? 'PUBLISHED' : status === 'PAUSED' ? 'PAUSED' : 'ARCHIVED';
+    const now = new Date();
+
+    await tx.jobPublication.upsert({
+      where: {
+        vacancyId_channel_portalId: { vacancyId, channel: 'PUBLIC_MARKETPLACE', portalId: marketplace.id },
+      },
+      update: {
+        status: publicationStatus,
+        ...(publicationStatus === 'PUBLISHED' ? { publishedAt: now, closesAt: null } : {}),
+        ...(publicationStatus === 'ARCHIVED' ? { closesAt: now } : {}),
+      },
+      create: {
+        tenantId,
+        vacancyId,
+        portalId: marketplace.id,
+        channel: 'PUBLIC_MARKETPLACE',
+        status: publicationStatus,
+        publicSlug: vacancyId,
+        publishedAt: publicationStatus === 'PUBLISHED' ? now : null,
+        closesAt: publicationStatus === 'ARCHIVED' ? now : null,
+      },
+    });
+  }
+
   async clone(id: string, tenantId: string, actor: JwtPayload, reason?: string) {
     const source = await this.prisma.vacancy.findFirst({
       where: { id, tenantId, ...this.vacancyScope(actor) },
@@ -496,6 +557,10 @@ export class VacanciesService {
     if (before.status === 'ARCHIVED') return before;
     await this.prisma.$transaction([
       this.prisma.vacancy.update({ where: { id }, data: { status: 'ARCHIVED' } }),
+      this.prisma.jobPublication.updateMany({
+        where: { vacancyId: id, channel: 'PUBLIC_MARKETPLACE' },
+        data: { status: 'ARCHIVED', closesAt: new Date() },
+      }),
       this.prisma.vacancyChangeEvent.create({
         data: {
           tenantId,

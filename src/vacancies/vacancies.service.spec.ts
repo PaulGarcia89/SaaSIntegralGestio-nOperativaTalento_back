@@ -13,6 +13,8 @@ describe('VacanciesService', () => {
     vacancyResponsible: { createMany: jest.fn() },
     vacancyLocation: { createMany: jest.fn() },
     vacancyChangeEvent: { create: jest.fn() },
+    careerPortal: { findFirst: jest.fn() },
+    jobPublication: { upsert: jest.fn() },
   };
   const prisma = {
     branch: { findFirst: jest.fn() },
@@ -38,6 +40,8 @@ describe('VacanciesService', () => {
     prisma.branch.findFirst.mockResolvedValue({ id: 'branch-1' });
     prisma.user.count.mockResolvedValue(1);
     tx.vacancy.create.mockResolvedValue({ id: 'vacancy-1', title: 'Operations coordinator', status: 'OPEN' });
+    tx.careerPortal.findFirst.mockResolvedValue({ id: 'marketplace-1' });
+    tx.jobPublication.upsert.mockResolvedValue({});
     tx.vacancy.findUniqueOrThrow.mockResolvedValue({
       id: 'vacancy-1',
       stages: [{ code: 'APPLIED', position: 0 }],
@@ -130,5 +134,71 @@ describe('VacanciesService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('VacanciesService · publicación en el mercado público', () => {
+  // La migración 20260826120000 creó una publicación para cada vacante
+  // abierta que existía entonces, pero nada la creaba después: toda vacante
+  // abierta desde la aplicación quedaba invisible en el portal público y nadie
+  // podía postularse. Estas pruebas fijan que crear y cambiar de estado
+  // mantienen la publicación al día, con la misma forma que la del backfill.
+  function armar() {
+    const tx = {
+      vacancy: { create: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
+      vacancyStage: { createMany: jest.fn(), deleteMany: jest.fn() },
+      vacancyResponsible: { createMany: jest.fn(), deleteMany: jest.fn() },
+      vacancyLocation: { createMany: jest.fn(), deleteMany: jest.fn() },
+      vacancyChangeEvent: { create: jest.fn() },
+      careerPortal: { findFirst: jest.fn().mockResolvedValue({ id: 'marketplace-1' }) },
+      jobPublication: { upsert: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      branch: { findFirst: jest.fn().mockResolvedValue({ id: 'branch-1' }) },
+      user: { count: jest.fn().mockResolvedValue(1) },
+      $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const service = new VacanciesService(prisma as never, { assertCapacity: jest.fn() } as never);
+    return { tx, prisma, service };
+  }
+  const actor = {
+    sub: '0f8fad5b-d9cb-469f-a165-70867728950e', tenantId: 'tenant-1', roles: ['RECRUITER'], role: 'RECRUITER',
+    permissions: ['vacancies.create'], scope: AccessScope.TENANT, allowedTenantIds: ['tenant-1'], allowedBranchIds: ['branch-1'], isSuperAdmin: false,
+  } as JwtPayload;
+
+  it('una vacante abierta se publica en el mercado con la misma forma que el backfill', async () => {
+    const { tx, service } = armar();
+    tx.vacancy.create.mockResolvedValue({ id: 'vacancy-1', title: 'Cocinero', status: 'OPEN' });
+    tx.vacancy.findUniqueOrThrow.mockResolvedValue({ id: 'vacancy-1', stages: [], responsibles: [] });
+
+    await service.create('tenant-1', actor, { branchId: 'branch-1', title: 'Cocinero', status: 'OPEN' } as never);
+
+    expect(tx.jobPublication.upsert).toHaveBeenCalledTimes(1);
+    const llamada = tx.jobPublication.upsert.mock.calls[0][0];
+    expect(llamada.where).toEqual({ vacancyId_channel_portalId: { vacancyId: 'vacancy-1', channel: 'PUBLIC_MARKETPLACE', portalId: 'marketplace-1' } });
+    expect(llamada.create).toEqual(expect.objectContaining({ tenantId: 'tenant-1', vacancyId: 'vacancy-1', portalId: 'marketplace-1', channel: 'PUBLIC_MARKETPLACE', status: 'PUBLISHED', publicSlug: 'vacancy-1' }));
+    expect(llamada.create.publishedAt).toBeInstanceOf(Date);
+  });
+
+  it('una vacante creada en pausa queda con la publicación en pausa, no publicada', async () => {
+    const { tx, service } = armar();
+    tx.vacancy.create.mockResolvedValue({ id: 'vacancy-2', title: 'Mesero', status: 'PAUSED' });
+    tx.vacancy.findUniqueOrThrow.mockResolvedValue({ id: 'vacancy-2', stages: [], responsibles: [] });
+
+    await service.create('tenant-1', actor, { branchId: 'branch-1', title: 'Mesero', status: 'PAUSED' } as never);
+
+    expect(tx.jobPublication.upsert.mock.calls[0][0].create.status).toBe('PAUSED');
+    expect(tx.jobPublication.upsert.mock.calls[0][0].create.publishedAt).toBeNull();
+  });
+
+  it('sin portal «marketplace» no inventa ninguna publicación', async () => {
+    const { tx, service } = armar();
+    tx.careerPortal.findFirst.mockResolvedValue(null);
+    tx.vacancy.create.mockResolvedValue({ id: 'vacancy-3', title: 'Barista', status: 'OPEN' });
+    tx.vacancy.findUniqueOrThrow.mockResolvedValue({ id: 'vacancy-3', stages: [], responsibles: [] });
+
+    await service.create('tenant-1', actor, { branchId: 'branch-1', title: 'Barista', status: 'OPEN' } as never);
+
+    expect(tx.jobPublication.upsert).not.toHaveBeenCalled();
   });
 });
