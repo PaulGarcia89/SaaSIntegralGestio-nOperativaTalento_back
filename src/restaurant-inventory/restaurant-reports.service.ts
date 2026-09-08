@@ -53,6 +53,21 @@ export class RestaurantReportsService {
     const page = Math.max(1, Number(f.page) || 1); const pageSize = Math.min(200, Math.max(1, Number(f.pageSize) || 50)); const total = rows.length;
     return { rows: rows.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)), filters: { branchId: f.branchId ?? null, warehouseId: f.warehouseId ?? null, ingredientId: f.ingredientId ?? null, categoryId: f.categoryId ?? null, periodStart: start?.toISOString() ?? null, periodEnd: end?.toISOString() ?? null } };
   }
+  /**
+   * Consumo por día, sumado. Antes cada movimiento de salida era un punto de
+   * la serie: diez salidas del mismo día daban diez barras con la misma
+   * etiqueta, una encima de otra, y el gráfico se leía como una sola barra
+   * con cifras superpuestas. El contrato (`label`, `value`) no cambia.
+   */
+  private consumptionByDay(movements: Array<{ occurredAt: Date; totalCost: unknown }>) {
+    const byDay = new Map<string, number>();
+    for (const movement of movements) {
+      const day = new Date(movement.occurredAt).toISOString().slice(0, 10);
+      byDay.set(day, (byDay.get(day) ?? 0) + Number(movement.totalCost));
+    }
+    return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([label, value]) => ({ label, value: Math.round(value * 100) / 100 }));
+  }
+
   async advancedDashboard(tenantId: string, f: RestaurantReportFilters) {
     const scope = this.scope(tenantId, f);
     const period = this.period(f);
@@ -66,11 +81,12 @@ export class RestaurantReportsService {
       this.prisma.restaurantStockCount.findMany({ where: { ...scope, status: 'APPROVED', ...(period ? { countedAt: period } : {}) }, include: { items: true } }),
     ]);
     const criticalIngredients = ingredients.map((ingredient) => ({ name: ingredient.name, stock: balances.filter((balance) => balance.ingredientId === ingredient.id).reduce((sum, balance) => sum + Number(balance.quantityOnHand), 0), minimum: Number(ingredient.minimumStock) })).filter((item) => item.stock <= item.minimum).slice(0, 10);
+    const ingredientNames = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient.name]));
     const inventoryValue = balances.reduce((sum, balance) => sum + Number(balance.quantityOnHand) * Number(balance.averageCost), 0);
     const periodConsumption = movements.reduce((sum, movement) => sum + Number(movement.totalCost), 0);
     const wasteValue = waste.reduce((sum, record) => sum + record.items.reduce((itemSum, item) => itemSum + Number(item.convertedInventoryQuantity) * Number(item.unitCostSnapshot), 0), 0);
     const inventoryDifference = counts.reduce((sum, count) => sum + count.items.reduce((itemSum, item) => itemSum + Number(item.varianceValue), 0), 0);
-    return { inventoryValue, periodConsumption, waste: wasteValue, inventoryDifference, criticalIngredients, upcomingExpirations: lots.map((lot: any) => ({ name: lot.ingredientId, lot: lot.lotNumber, expiresAt: lot.expirationDate, quantity: Number(lot.remainingQuantity) })), highestCostRecipes: recipes.map((recipe: any) => ({ name: recipe.name, cost: Number(recipe.calculatedCost) })).sort((a, b) => b.cost - a.cost).slice(0, 5), lowestMarginRecipes: recipes.map((recipe: any) => ({ name: recipe.name, margin: recipe.sellingPrice ? (Number(recipe.sellingPrice) - Number(recipe.calculatedCost)) / Number(recipe.sellingPrice) * 100 : 0 })).sort((a, b) => a.margin - b.margin).slice(0, 5), consumptionTrend: movements.map((movement: any) => ({ label: new Date(movement.occurredAt).toISOString().slice(0, 10), value: Number(movement.totalCost) })), purchaseSuggestions: criticalIngredients.map((item) => ({ ingredientName: item.name, suggestedQuantity: Math.max(0, item.minimum - item.stock), unit: '', reason: 'Existencia bajo mínimo' })) };
+    return { inventoryValue, periodConsumption, waste: wasteValue, inventoryDifference, criticalIngredients, upcomingExpirations: lots.map((lot: any) => ({ name: ingredientNames.get(lot.ingredientId) ?? lot.ingredientId, lot: lot.lotNumber, expiresAt: lot.expirationDate, quantity: Number(lot.remainingQuantity) })), highestCostRecipes: recipes.map((recipe: any) => ({ name: recipe.name, cost: Number(recipe.calculatedCost) })).sort((a, b) => b.cost - a.cost).slice(0, 5), lowestMarginRecipes: recipes.map((recipe: any) => ({ name: recipe.name, margin: recipe.sellingPrice ? (Number(recipe.sellingPrice) - Number(recipe.calculatedCost)) / Number(recipe.sellingPrice) * 100 : 0 })).sort((a, b) => a.margin - b.margin).slice(0, 5), consumptionTrend: this.consumptionByDay(movements), purchaseSuggestions: criticalIngredients.map((item) => ({ ingredientName: item.name, suggestedQuantity: Math.max(0, item.minimum - item.stock), unit: '', reason: 'Existencia bajo mínimo' })) };
   }
   async indicators(tenantId: string, f: RestaurantReportFilters = {}) {
     const scope = this.scope(tenantId, f); const period = this.period(f); const days = period && f.from && f.to ? Math.max(1, (new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000) : 30;
