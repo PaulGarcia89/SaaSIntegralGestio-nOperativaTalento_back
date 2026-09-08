@@ -184,6 +184,45 @@ describe('EmployeesService documentary records', () => {
     });
   });
 
+  it('summarises a branch: incomplete profiles, documents and recent changes, scoped like the list', async () => {
+    const { service, prisma } = setup();
+    const now = new Date();
+    const soon = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+    prisma.employee.groupBy = jest.fn().mockResolvedValue([
+      { status: 'ACTIVE', _count: { _all: 7 } },
+      { status: 'INACTIVE', _count: { _all: 1 } },
+    ]);
+    prisma.employee.count = jest.fn().mockResolvedValue(2);
+    prisma.employee.findMany
+      .mockResolvedValueOnce([{ id: 'employee-2', name: 'Luis Mora', jobTitle: null, phone: '305', emergencyContactName: null }])
+      .mockResolvedValueOnce([{ id: 'employee-1', name: 'Ana Perez' }, { id: 'employee-2', name: 'Luis Mora' }]);
+    prisma.employeeDocument.count = jest.fn()
+      .mockResolvedValueOnce(3)   // pendiente de revisión
+      .mockResolvedValueOnce(1)   // vencidos
+      .mockResolvedValueOnce(2);  // por vencer
+    prisma.employeeDocument.findMany.mockResolvedValue([
+      { id: 'doc-1', employeeId: 'employee-1', category: 'I9', originalName: 'i9.pdf', expiresAt: soon, employee: { name: 'Ana Perez' } },
+    ]);
+    prisma.auditLog.findMany.mockResolvedValue([
+      { id: 'audit-1', action: 'EMPLOYEE_RECORD_REGISTERED', entityId: 'employee-2', email: 'admin@example.com', actorRole: 'ADMIN', createdAt },
+    ]);
+
+    const result = await service.summary({ isSuperAdmin: true } as any, tenantId, branchId, {});
+
+    expect(result.headcount).toEqual({ total: 8, active: 7, inactive: 1, suspended: 0, terminated: 0 });
+    expect(result.incompleteProfiles.count).toBe(2);
+    expect(result.incompleteProfiles.sample[0]).toEqual({ id: 'employee-2', name: 'Luis Mora', missing: ['jobTitle', 'emergencyContactName'] });
+    expect(result.documents).toMatchObject({ pendingReview: 3, expired: 1, expiringWithin30Days: 2 });
+    expect(result.documents.sample[0]).toMatchObject({ employeeName: 'Ana Perez', category: 'I9', expired: false });
+    expect(result.recentChanges[0]).toMatchObject({ employeeName: 'Luis Mora', actorEmail: 'admin@example.com' });
+    // La auditoría se pide solo para los expedientes que el actor puede ver.
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ entityType: 'Employee', entityId: { in: ['employee-1', 'employee-2'] } }),
+    }));
+    // La sucursal se valida contra la empresa activa, como en la lista.
+    expect(prisma.branch.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: branchId, tenantId } }));
+  });
+
   it('builds a payroll and compliance snapshot without exposing sensitive data', async () => {
     const { service, prisma } = setup();
     prisma.employee.findFirst.mockReset().mockResolvedValue({

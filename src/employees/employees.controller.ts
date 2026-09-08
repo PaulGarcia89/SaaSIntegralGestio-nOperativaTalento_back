@@ -11,6 +11,7 @@ import { CurrentBranch } from '../common/decorators/current-branch.decorator';
 import { RegisterEmployeeDto } from './dto/register-employee.dto';
 import { BulkLoadEmployeesDto } from './dto/bulk-load-employees.dto';
 import { ListEmployeesDto } from './dto/list-employees.dto';
+import { EmployeesSummaryQueryDto } from './dto/employees-summary-query.dto';
 import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -59,6 +60,18 @@ export class EmployeesController {
     @Query() query: ListEmployeesDto,
   ) {
     return this.employeesService.findAll(request.tenant!.id, branch.id, query);
+  }
+
+  // Antes de ':id': Nest resuelve rutas en orden de declaración y «summary»
+  // se leería como un identificador.
+  @Get('summary')
+  @RequirePermissions('employees.read')
+  summary(
+    @Req() request: RequestWithUser,
+    @CurrentBranch() branch: { id: string },
+    @Query() query: EmployeesSummaryQueryDto,
+  ) {
+    return this.employeesService.summary(request.user, request.tenant!.id, branch.id, query);
   }
 
   @Get(':id')

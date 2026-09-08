@@ -9,6 +9,7 @@ import { normalizeOffsetPagination } from '../common/utils/pagination.util';
 import { RegisterEmployeeDto } from './dto/register-employee.dto';
 import { BulkLoadEmployeesDto } from './dto/bulk-load-employees.dto';
 import { ListEmployeesDto } from './dto/list-employees.dto';
+import { EmployeesSummaryQueryDto } from './dto/employees-summary-query.dto';
 import { TransferEmployeeDto } from './dto/transfer-employee.dto';
 import { AssignEmployeeBranchDto } from './dto/assign-employee-branch.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -358,6 +359,137 @@ export class EmployeesService {
         pageSize: pagination.pageSize,
         totalPages: Math.ceil(total / pagination.pageSize),
       },
+    };
+  }
+
+  /**
+   * Resumen del módulo de Personas para una sucursal: lo que el panel
+   * necesita y que hasta ahora solo existía expediente por expediente.
+   *
+   * Solo lectura. Sin migración, sin permiso nuevo: exige `employees.read`
+   * (el mismo que la lista) y aplica el mismo recorte por sucursal y por
+   * alcance del actor que `findAll`, así que quien no puede listar a
+   * alguien tampoco lo cuenta aquí.
+   *
+   * Definiciones, para que la cifra signifique lo mismo en todas partes:
+   *   · Perfil incompleto: empleado sin cargo, sin teléfono o sin contacto
+   *     de emergencia (los tres datos mínimos de un expediente operativo).
+   *   · Documentos: se cuentan los vigentes (no borrados, no sustituidos);
+   *     «por vencer» = vence en los próximos 30 días; «vencidos» = ya venció.
+   *   · Cambios recientes: últimas entradas de auditoría sobre expedientes
+   *     de esta sucursal.
+   * Las muestras traen como mucho `SAMPLE` elementos; la cifra es total.
+   */
+  async summary(actor: JwtPayload, tenantId: string, activeBranchId: string, query: EmployeesSummaryQueryDto) {
+    const SAMPLE = 5;
+    const branchId = query.branchId ?? activeBranchId;
+    await this.assertBranchBelongsToTenant(branchId, tenantId);
+    this.assertBranchInActorScope(actor, branchId);
+
+    const now = new Date();
+    const expiringBefore = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const scope: Prisma.EmployeeWhereInput = {
+      AND: [
+        { tenantId, deletedAt: null },
+        this.buildBranchScopedWhere(actor, tenantId),
+        { branchAssignments: { some: { tenantId, branchId, releasedAt: null } } },
+      ],
+    };
+    const incompleteWhere: Prisma.EmployeeWhereInput = {
+      AND: [
+        scope,
+        { status: EmployeeStatus.ACTIVE },
+        { OR: [{ jobTitle: null }, { jobTitle: '' }, { phone: null }, { phone: '' }, { emergencyContactName: null }, { emergencyContactName: '' }] },
+      ],
+    };
+    const documentScope: Prisma.EmployeeDocumentWhereInput = {
+      tenantId,
+      deletedAt: null,
+      status: { notIn: ['SUPERSEDED', 'DELETED'] },
+      employee: scope,
+    };
+
+    const [byStatus, incompleteCount, incompleteSample, pendingReview, expired, expiringSoon, documentSample, scopedEmployees] = await Promise.all([
+      this.prisma.employee.groupBy({ by: ['status'], where: scope, _count: { _all: true } }),
+      this.prisma.employee.count({ where: incompleteWhere }),
+      this.prisma.employee.findMany({
+        where: incompleteWhere,
+        select: { id: true, name: true, jobTitle: true, phone: true, emergencyContactName: true },
+        orderBy: { updatedAt: 'desc' },
+        take: SAMPLE,
+      }),
+      this.prisma.employeeDocument.count({ where: { ...documentScope, status: 'PENDING_REVIEW' } }),
+      this.prisma.employeeDocument.count({ where: { ...documentScope, expiresAt: { lte: now } } }),
+      this.prisma.employeeDocument.count({ where: { ...documentScope, expiresAt: { gt: now, lte: expiringBefore } } }),
+      this.prisma.employeeDocument.findMany({
+        where: { ...documentScope, expiresAt: { lte: expiringBefore } },
+        select: { id: true, employeeId: true, category: true, originalName: true, expiresAt: true, employee: { select: { name: true } } },
+        orderBy: { expiresAt: 'asc' },
+        take: SAMPLE,
+      }),
+      this.prisma.employee.findMany({ where: scope, select: { id: true, name: true }, take: 2000 }),
+    ]);
+
+    const names = new Map(scopedEmployees.map((employee) => [employee.id, employee.name]));
+    const recentChanges = scopedEmployees.length
+      ? await this.prisma.auditLog.findMany({
+          where: { tenantId, entityType: 'Employee', entityId: { in: scopedEmployees.map((employee) => employee.id) } },
+          select: { id: true, action: true, entityId: true, email: true, actorRole: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        })
+      : [];
+
+    const counts = Object.fromEntries(byStatus.map((row) => [row.status, row._count._all])) as Partial<Record<EmployeeStatus, number>>;
+    const total = byStatus.reduce((sum, row) => sum + row._count._all, 0);
+
+    return {
+      branchId,
+      generatedAt: now,
+      headcount: {
+        total,
+        active: counts.ACTIVE ?? 0,
+        inactive: counts.INACTIVE ?? 0,
+        suspended: counts.SUSPENDED ?? 0,
+        terminated: counts.TERMINATED ?? 0,
+      },
+      incompleteProfiles: {
+        count: incompleteCount,
+        criteria: ['jobTitle', 'phone', 'emergencyContactName'],
+        sample: incompleteSample.map((employee) => ({
+          id: employee.id,
+          name: employee.name,
+          missing: [
+            ...(employee.jobTitle ? [] : ['jobTitle']),
+            ...(employee.phone ? [] : ['phone']),
+            ...(employee.emergencyContactName ? [] : ['emergencyContactName']),
+          ],
+        })),
+      },
+      documents: {
+        pendingReview,
+        expired,
+        expiringWithin30Days: expiringSoon,
+        sample: documentSample.map((document) => ({
+          id: document.id,
+          employeeId: document.employeeId,
+          employeeName: document.employee.name,
+          category: document.category,
+          originalName: document.originalName,
+          expiresAt: document.expiresAt,
+          expired: Boolean(document.expiresAt && document.expiresAt <= now),
+        })),
+      },
+      recentChanges: recentChanges.map((entry) => ({
+        id: entry.id,
+        action: entry.action,
+        employeeId: entry.entityId,
+        employeeName: entry.entityId ? names.get(entry.entityId) ?? null : null,
+        actorEmail: entry.email,
+        actorRole: entry.actorRole,
+        createdAt: entry.createdAt,
+      })),
+      truncated: scopedEmployees.length >= 2000,
     };
   }
 
