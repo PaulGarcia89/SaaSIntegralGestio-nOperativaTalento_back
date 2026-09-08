@@ -318,7 +318,11 @@ test('vacancy reads bind resource id, tenant id and assigned branch in one query
   );
   assert.equal(capturedWhere.id, rbacFixtures.vacancies.b.id);
   assert.equal(capturedWhere.tenantId, rbacFixtures.tenants.a.id);
-  assert.deepEqual(capturedWhere.branchId, { in: [rbacFixtures.branches.a1.id] });
+  // Una vacante puede tener varias sedes: el recorte va por `locations`, no
+  // por `branchId`, pero sigue exigiendo una de las sucursales asignadas.
+  assert.deepEqual(capturedWhere.locations, {
+    some: { branchId: { in: [rbacFixtures.branches.a1.id] } },
+  });
 });
 
 test('recruitment vacancy setup is restricted to assigned branches', async () => {
@@ -509,8 +513,15 @@ test('candidate portal queries only applications owned by the authenticated cand
     },
   } as any);
   await service.listForCandidate(rbacFixtures.candidates.a.accountId);
+  // Los perfiles fusionados en esta cuenta también cuentan como propios;
+  // cada rama del OR sigue atada al mismo accountId autenticado.
   assert.deepEqual(capturedWhere, {
-    candidate: { accountId: rbacFixtures.candidates.a.accountId },
+    candidate: {
+      OR: [
+        { accountId: rbacFixtures.candidates.a.accountId },
+        { mergedCandidates: { some: { accountId: rbacFixtures.candidates.a.accountId } } },
+      ],
+    },
   });
 });
 
@@ -576,6 +587,9 @@ test('interviewer reads include assignment, tenant and branch constraints', asyn
       },
       count: () => Promise.resolve(0),
     },
+    // El listado concilia antes las aprobaciones de jefes de contratación;
+    // sin solicitudes pendientes no hay nada que conciliar.
+    applicationStageTransitionRequest: { findMany: async () => [] },
     $transaction: (operations: Promise<unknown>[]) => Promise.all(operations),
   } as any);
   const interviewer = actorFixture('INTERVIEWER');
@@ -622,6 +636,11 @@ test('an application cannot be marked hired without creating its employee workfl
         writes += 1;
       },
     },
+    // La etapa destino se resuelve antes de la regla: devolver una etapa
+    // «contratado» obliga a pasar por la comprobación que se prueba aquí.
+    vacancyStage: {
+      findFirst: async () => ({ id: 'stage-hired', applicationStatus: 'HIRED', requiresApproval: false, requiredApprovals: 1 }),
+    },
   } as any);
 
   await expectStatus(
@@ -634,7 +653,9 @@ test('an application cannot be marked hired without creating its employee workfl
       ),
     400,
   );
-  assert.equal(reads, 0);
+  // Leer el expediente para decidir es legítimo; lo que no puede haber es
+  // ninguna escritura.
+  assert.ok(reads >= 1);
   assert.equal(writes, 0);
 });
 
