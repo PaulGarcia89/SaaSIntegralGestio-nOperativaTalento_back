@@ -123,17 +123,30 @@ export class TrainingAdminService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const scope = this.scopeFilter(tenantId, actor, query.scope);
+    // El filtro de empresa vive dentro de `scope` como un `OR`
+    // (`[{ tenantId }, { tenantId: null }]`). Antes se extendía con `...scope`
+    // y a continuación se escribía `OR: query.search ? [...] : undefined`, que
+    // lo SOBRESCRIBÍA: con búsqueda quedaban solo las cláusulas de texto y sin
+    // ella `OR: undefined`. En los dos casos el filtro de empresa desaparecía y
+    // un administrador veía los cursos de todas las empresas. Ahora cada
+    // condición va en su propia rama de un `AND`.
     const where: Prisma.TrainingCourseWhereInput = {
-      ...scope,
-      status: query.status,
-      categoryId: query.categoryId,
-      OR: query.search
-        ? [
-            { title: { contains: query.search, mode: 'insensitive' } },
-            { summary: { contains: query.search, mode: 'insensitive' } },
-            { slug: { contains: query.search, mode: 'insensitive' } },
-          ]
-        : undefined,
+      AND: [
+        scope,
+        ...(query.status ? [{ status: query.status }] : []),
+        ...(query.categoryId ? [{ categoryId: query.categoryId }] : []),
+        ...(query.search
+          ? [
+              {
+                OR: [
+                  { title: { contains: query.search, mode: 'insensitive' as const } },
+                  { summary: { contains: query.search, mode: 'insensitive' as const } },
+                  { slug: { contains: query.search, mode: 'insensitive' as const } },
+                ],
+              },
+            ]
+          : []),
+      ],
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.trainingCourse.findMany({

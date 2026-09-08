@@ -270,3 +270,49 @@ describe('training course deletion', () => {
     expect(prisma.trainingCourse.delete).not.toHaveBeenCalled();
   });
 });
+
+describe('training course listing keeps tenants apart', () => {
+  // Un administrador de empresa veía los cursos de TODAS las empresas: el
+  // filtro de empresa se construía como `OR` y la cláusula de búsqueda, que
+  // también era un `OR`, lo sobrescribía al escribirse después en el mismo
+  // objeto. Sin búsqueda quedaba `OR: undefined`, que es no filtrar.
+  const actor = { sub: 'admin-1', tenantId: 'tenant-1', activeTenantId: 'tenant-1', isSuperAdmin: false, isGlobalContext: false } as any;
+
+  function serviceCapturing() {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const count = jest.fn().mockResolvedValue(0);
+    const prisma = {
+      trainingCourse: { findMany, count },
+      $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
+    } as any;
+    return { service: new TrainingAdminService(prisma, {} as any), findMany };
+  }
+
+  const tenantClauseOf = (where: any) =>
+    (where.AND as any[]).find((clause) => Array.isArray(clause.OR) && clause.OR.some((c: any) => 'tenantId' in c));
+
+  it('sin búsqueda, la lista sigue limitada a la empresa y al catálogo global', async () => {
+    const { service, findMany } = serviceCapturing();
+    await service.listCourses('tenant-1', actor, {} as any);
+    const where = findMany.mock.calls[0][0].where;
+    expect(tenantClauseOf(where)).toEqual({ OR: [{ tenantId: 'tenant-1' }, { tenantId: null }] });
+  });
+
+  it('con búsqueda, la búsqueda se AÑADE al filtro de empresa en vez de sustituirlo', async () => {
+    const { service, findMany } = serviceCapturing();
+    await service.listCourses('tenant-1', actor, { search: 'caja' } as any);
+    const where = findMany.mock.calls[0][0].where;
+    expect(tenantClauseOf(where)).toEqual({ OR: [{ tenantId: 'tenant-1' }, { tenantId: null }] });
+    const searchClause = (where.AND as any[]).find((clause) => Array.isArray(clause.OR) && clause.OR.some((c: any) => 'title' in c));
+    expect(searchClause.OR).toHaveLength(3);
+  });
+
+  it('el estado y la categoría filtran sin quitar la empresa', async () => {
+    const { service, findMany } = serviceCapturing();
+    await service.listCourses('tenant-1', actor, { status: TrainingCourseStatus.PUBLISHED, categoryId: 'cat-1' } as any);
+    const where = findMany.mock.calls[0][0].where;
+    expect(tenantClauseOf(where)).toBeDefined();
+    expect(where.AND).toContainEqual({ status: TrainingCourseStatus.PUBLISHED });
+    expect(where.AND).toContainEqual({ categoryId: 'cat-1' });
+  });
+});
