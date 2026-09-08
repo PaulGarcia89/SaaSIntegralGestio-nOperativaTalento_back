@@ -112,8 +112,8 @@ export class RestaurantReportQueryDto {
   @IsOptional() @IsUUID() supplierId?: string;
   @IsOptional() @IsDateString() from?: string;
   @IsOptional() @IsDateString() to?: string;
-  @IsOptional() @IsNumber() @Min(1) page?: number;
-  @IsOptional() @IsNumber() @Min(1) pageSize?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) pageSize?: number;
   @IsOptional() @IsString() sort?: string;
   @IsOptional() @IsIn(['asc', 'desc']) direction?: 'asc' | 'desc';
 }
