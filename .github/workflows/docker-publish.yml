@@ -1,4 +1,4 @@
-name: Publicar imagen Docker del backend
+name: Publicar imágenes Docker de backend y PostgreSQL
 
 on:
   push:
@@ -16,6 +16,16 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: saas-integral-backend
+            context: .
+            dockerfile: ./Dockerfile
+          - image: saas-integral-postgres
+            context: ./docker/postgres
+            dockerfile: ./docker/postgres/Dockerfile
 
     steps:
       - name: Descargar codigo
@@ -32,7 +42,7 @@ jobs:
         id: metadata
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
             type=raw,value=latest
             type=sha,format=short
@@ -40,8 +50,8 @@ jobs:
       - name: Construir y publicar imagen
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}

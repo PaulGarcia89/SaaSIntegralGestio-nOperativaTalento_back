@@ -111,4 +111,25 @@ describe('TrainingVideoService', () => {
     expect(result.completedAt).toEqual(firstCompletion);
     expect(tx.trainingVideoProgressEvent.create).toHaveBeenCalledTimes(1);
   });
+  it('requires contiguous playback for a 100 percent course', async () => {
+    const {service,prisma}=setup({watchedSeconds:10,lastPositionSeconds:10,lastHeartbeatAt:new Date(Date.now()-10000),playbackSessionId:'s',completedAt:null});
+    prisma.trainingLesson.findFirst.mockResolvedValue({id:'lesson-1',durationSeconds:100,requiredCompletionPercentage:100});
+    const result=await service.heartbeat('tenant-1','user-1',{assignmentId:'assignment-1',lessonId:'lesson-1',playbackSessionId:'s',currentTimeSeconds:100,durationSeconds:100,isPlaying:true,clientTimestamp:new Date().toISOString()},request);
+    expect(result.watchedSeconds).toBe(10);
+    expect(result.completedAt).toBeNull();
+  });
+  it('does not count replayed sections twice in a strict course', async () => {
+    const {service,prisma}=setup({watchedSeconds:50,lastPositionSeconds:10,lastHeartbeatAt:new Date(Date.now()-10000),playbackSessionId:'s',completedAt:null});
+    prisma.trainingLesson.findFirst.mockResolvedValue({id:'lesson-1',durationSeconds:100,requiredCompletionPercentage:100});
+    const result=await service.heartbeat('tenant-1','user-1',{assignmentId:'assignment-1',lessonId:'lesson-1',playbackSessionId:'s',currentTimeSeconds:20,durationSeconds:100,isPlaying:true,clientTimestamp:new Date().toISOString()},request);
+    expect(result.watchedSeconds).toBe(50);
+  });
+  it('credits the final seconds and completes only at 100 percent', async () => {
+    const {service,prisma}=setup({watchedSeconds:98,lastPositionSeconds:98,lastHeartbeatAt:new Date(Date.now()-2000),playbackSessionId:'s',completedAt:null});
+    prisma.trainingLesson.findFirst.mockResolvedValue({id:'lesson-1',durationSeconds:100,requiredCompletionPercentage:100});
+    const result=await service.heartbeat('tenant-1','user-1',{assignmentId:'assignment-1',lessonId:'lesson-1',playbackSessionId:'s',currentTimeSeconds:100,durationSeconds:100,isPlaying:true,clientTimestamp:new Date().toISOString()},request);
+    expect(result.serverCompletionPercentage).toBe(100);
+    expect(result.completedAt).toBeInstanceOf(Date);
+  });
+
 });

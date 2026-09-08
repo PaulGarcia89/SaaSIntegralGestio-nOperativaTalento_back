@@ -9,3 +9,16 @@ coverage
 .env
 .DS_Store
 prisma/migrations_legacy
+
+# Exclude local credentials, backups and runtime artifacts from published images
+.env*
+output
+tmp
+.cache
+.claude
+.codex
+storage
+*.dump
+*.bak
+*.pem
+*.key

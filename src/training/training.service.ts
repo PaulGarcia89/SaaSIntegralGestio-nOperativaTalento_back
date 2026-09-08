@@ -919,6 +919,13 @@ export class TrainingService {
       throw new NotFoundException('Training lesson not found');
     }
 
+    if (dto.completed && lesson.type === TrainingCourseStepType.VIDEO && lesson.requiredCompletionPercentage === 100) {
+      const verified = await this.prisma.trainingVideoProgress.findFirst({
+        where: { tenantId, userId, lessonId, completionPercentage: 100, completedAt: { not: null },
+          assignment: { tenantId, userId, courseId: lesson.module.courseId } },
+      });
+      if (!verified) throw new ForbiddenException('Debes ver el video completo antes de aprobar esta lección.');
+    }
     const now = new Date();
     if (requestId) {
       const previous = await this.prisma.trainingLessonProgress.findFirst({

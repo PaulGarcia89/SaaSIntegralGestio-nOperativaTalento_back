@@ -183,13 +183,14 @@ export class TrainingVideoService {
       });
       const progress = await tx.trainingVideoProgress.upsert({
         where: { assignmentId_lessonId: { assignmentId: dto.assignmentId, lessonId: dto.lessonId } },
-        update: { playbackSessionId: dto.playbackSessionId, startedAt: existing?.startedAt ?? now },
+        update: { playbackSessionId: dto.playbackSessionId, startedAt: existing?.startedAt ?? now, lastHeartbeatAt: now },
         create: {
           tenantId,
           assignmentId: dto.assignmentId,
           lessonId: dto.lessonId,
           userId,
           playbackSessionId: dto.playbackSessionId,
+          lastHeartbeatAt: now,
           startedAt: now,
         },
       });
@@ -229,14 +230,24 @@ export class TrainingVideoService {
         : 0;
       const forwardMovement = dto.currentTimeSeconds - previousPosition;
       const reasonableMovement = forwardMovement >= 0 && forwardMovement <= elapsed * rate + SEEK_GRACE_SECONDS;
-      const credited = dto.isPlaying && reasonableMovement ? Math.floor(Math.min(elapsed * rate, MAX_HEARTBEAT_SECONDS)) : 0;
-      const watchedSeconds = Math.min(duration, (existing?.watchedSeconds ?? 0) + credited);
+      const strict = context.requiredCompletionPercentage === 100;
+      if (strict && (!existing || existing.playbackSessionId !== dto.playbackSessionId)) {
+        throw new ConflictException('Inicia o reanuda el video antes de registrar su avance.');
+      }
+      const watched = existing?.watchedSeconds ?? 0;
+      // A strict course credits contiguous new content only, never repeated sections.
+      const contiguous = previousPosition <= watched && dto.currentTimeSeconds <= watched + Math.ceil(elapsed) + 1;
+      const credited = strict
+        ? (dto.isPlaying && rate === 1 && reasonableMovement && contiguous
+            ? Math.max(0, dto.currentTimeSeconds - watched) : 0)
+        : (dto.isPlaying && reasonableMovement ? Math.floor(Math.min(elapsed * rate, MAX_HEARTBEAT_SECONDS)) : 0);
+      const watchedSeconds = Math.min(duration, watched + credited);
       const completionPercentage = Math.min(100, Math.floor((watchedSeconds / duration) * 100));
       const completed = completionPercentage >= context.requiredCompletionPercentage;
       const progress = await tx.trainingVideoProgress.upsert({
         where: { assignmentId_lessonId: { assignmentId: dto.assignmentId, lessonId: dto.lessonId } },
         update: {
-          lastPositionSeconds: dto.currentTimeSeconds,
+          lastPositionSeconds: strict ? Math.min(dto.currentTimeSeconds, watchedSeconds) : dto.currentTimeSeconds,
           highestPositionSeconds: Math.max(existing?.highestPositionSeconds ?? 0, dto.currentTimeSeconds),
           watchedSeconds,
           completionPercentage,
@@ -250,7 +261,7 @@ export class TrainingVideoService {
           assignmentId: dto.assignmentId,
           lessonId: dto.lessonId,
           userId,
-          lastPositionSeconds: dto.currentTimeSeconds,
+          lastPositionSeconds: strict ? Math.min(dto.currentTimeSeconds, watchedSeconds) : dto.currentTimeSeconds,
           highestPositionSeconds: dto.currentTimeSeconds,
           watchedSeconds,
           completionPercentage,
