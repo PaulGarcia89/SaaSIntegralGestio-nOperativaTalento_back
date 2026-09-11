@@ -28,6 +28,13 @@ describe('training course editorial workflow', () => {
     expect(allowedTrainingCourseTransitions.PAUSED).toContain(
       TrainingCourseStatus.PUBLISHED,
     );
+    // Un curso pausado tiene que poder volver al ciclo editorial: publicar
+    // exige gates aprobados de la versión actual, los gates solo nacen al
+    // entrar en revisión, y editar la fundación sube la versión. Sin estas dos
+    // salidas, pausar + editar dejaba el curso sin forma de publicarse nunca
+    // más.
+    expect(allowedTrainingCourseTransitions.PAUSED).toContain(TrainingCourseStatus.IN_REVIEW);
+    expect(allowedTrainingCourseTransitions.PAUSED).toContain(TrainingCourseStatus.DRAFT);
     expect(allowedTrainingCourseTransitions.RETIRED).toHaveLength(0);
   });
 });

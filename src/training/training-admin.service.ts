@@ -106,7 +106,25 @@ export const allowedTrainingCourseTransitions: Record<
     TrainingCourseStatus.ARCHIVED,
     TrainingCourseStatus.RETIRED,
   ],
+  /*
+   * PAUSED admite volver a revisión y a borrador.
+   *
+   * Sin esas dos salidas, un curso pausado quedaba ENCERRADO. La cadena era:
+   * publicar exige los cuatro gates de calidad aprobados para la versión
+   * ACTUAL; los gates solo se crean al entrar en IN_REVIEW —y
+   * `requestQualityReviews` exige ese mismo estado—; y editar la fundación
+   * pedagógica dispara `DESIGN_UPDATED`, que incrementa la versión y deja sin
+   * valor las aprobaciones anteriores. De modo que pausar un curso publicado,
+   * editarlo y querer volver a publicarlo llevaba a un estado del que solo se
+   * salía archivando o retirando: el curso no se podía publicar nunca más.
+   *
+   * Es exactamente el camino que la propia pantalla recomienda para editar un
+   * curso publicado, así que el callejón se alcanzaba siguiendo las
+   * instrucciones.
+   */
   PAUSED: [
+    TrainingCourseStatus.IN_REVIEW,
+    TrainingCourseStatus.DRAFT,
     TrainingCourseStatus.PUBLISHED,
     TrainingCourseStatus.ARCHIVED,
     TrainingCourseStatus.RETIRED,
