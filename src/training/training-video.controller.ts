@@ -4,7 +4,6 @@ import {
   Controller,
   Get,
   Headers,
-  NotFoundException,
   Param,
   Post,
   Req,
@@ -28,6 +27,7 @@ import { RequestWithUser } from '../common/types/request-with-user.type';
 import { TrainingAccessGuard } from './training-access.guard';
 import { TrainingObjectStorageService } from './training-object-storage.service';
 import { TrainingVideoService } from './training-video.service';
+import { enviarVideo } from './training-video-stream';
 import {
   CreateTrainingVideoDto,
   StartTrainingVideoDto,
@@ -104,36 +104,7 @@ export class TrainingVideoController {
     @Res() response: Response,
   ) {
     const asset = await this.videos.getVideoAsset(req.tenant!.id, req.user.sub, assignmentId, lessonId);
-    const buffer = await this.readVideo(asset.storageKey);
-    const requested = this.parseRange(range, buffer.length);
-    response.setHeader('Content-Type', 'video/mp4');
-    response.setHeader('Accept-Ranges', 'bytes');
-    response.setHeader('Content-Length', requested.end - requested.start + 1);
-    response.setHeader('Content-Range', `bytes ${requested.start}-${requested.end}/${buffer.length}`);
-    response.status(requested.partial ? 206 : 200).send(buffer.subarray(requested.start, requested.end + 1));
-  }
-
-  private parseRange(range: string | undefined, size: number) {
-    if (!range) return { start: 0, end: size - 1, partial: false };
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (!match) return { start: 0, end: size - 1, partial: false };
-    const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]) - 1);
-    const end = match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > end || start >= size) {
-      return { start: 0, end: size - 1, partial: false };
-    }
-    return { start, end, partial: true };
-  }
-
-  private async readVideo(storageKey: string) {
-    try {
-      return await this.storage.readKey(storageKey);
-    } catch (error: any) {
-      if (error?.code === 'ENOENT' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) {
-        throw new NotFoundException('Video file is missing from configured storage');
-      }
-      throw error;
-    }
+    await enviarVideo(this.storage, asset.storageKey, range, response);
   }
 }
 
@@ -196,36 +167,7 @@ export class TrainingVideoAdminController {
     @Res() response: Response,
   ) {
     const asset = await this.videos.getAdminVideoAsset(req.tenant!.id, courseId, lessonId);
-    const buffer = await this.readVideo(asset.storageKey);
-    const requested = this.parseRange(range, buffer.length);
-    response.setHeader('Content-Type', 'video/mp4');
-    response.setHeader('Accept-Ranges', 'bytes');
-    response.setHeader('Content-Length', requested.end - requested.start + 1);
-    response.setHeader('Content-Range', `bytes ${requested.start}-${requested.end}/${buffer.length}`);
-    response.status(requested.partial ? 206 : 200).send(buffer.subarray(requested.start, requested.end + 1));
-  }
-
-  private parseRange(range: string | undefined, size: number) {
-    if (!range) return { start: 0, end: size - 1, partial: false };
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (!match) return { start: 0, end: size - 1, partial: false };
-    const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]) - 1);
-    const end = match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > end || start >= size) {
-      return { start: 0, end: size - 1, partial: false };
-    }
-    return { start, end, partial: true };
-  }
-
-  private async readVideo(storageKey: string) {
-    try {
-      return await this.storage.readKey(storageKey);
-    } catch (error: any) {
-      if (error?.code === 'ENOENT' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) {
-        throw new NotFoundException('Video file is missing from configured storage');
-      }
-      throw error;
-    }
+    await enviarVideo(this.storage, asset.storageKey, range, response);
   }
 
   @Get(':courseId/progress')

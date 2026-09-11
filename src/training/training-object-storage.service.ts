@@ -1,7 +1,7 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
 import { createReadStream } from 'node:fs';
-import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 
@@ -74,6 +74,51 @@ export class TrainingObjectStorageService {
     const absolute = path.resolve(root, key);
     if (!absolute.startsWith(`${root}${path.sep}`)) throw new Error('Unsafe storage key');
     return readFile(absolute);
+  }
+
+  /**
+   * Tamaño y flujo de un rango de bytes, SIN cargar el objeto en memoria.
+   *
+   * `readKey` devuelve el objeto entero en un `Buffer`. Para un ZIP de SCORM de
+   * unos megabytes da igual; para un video de hasta 500 MB no: cada petición de
+   * rango —y un navegador emite varias por reproducción— reservaba el archivo
+   * completo en RAM y solo después recortaba el trozo pedido. Con dos o tres
+   * personas viendo un curso a la vez, el proceso se queda sin memoria.
+   *
+   * Aquí el tamaño se consulta aparte (`stat` o `HeadObject`) y solo se
+   * transporta el rango solicitado: en disco con `createReadStream(start, end)`
+   * y en S3 con la cabecera `Range`, que el propio servicio resuelve sin
+   * mandar el resto del objeto.
+   */
+  async statKey(key: string): Promise<{ size: number }> {
+    if (this.client) {
+      const response = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      if (typeof response.ContentLength !== 'number') throw new Error('Object size is unknown');
+      return { size: response.ContentLength };
+    }
+    const info = await stat(this.resolveKey(key));
+    return { size: info.size };
+  }
+
+  async streamKeyRange(key: string, start: number, end: number): Promise<Readable> {
+    if (this.client) {
+      const response = await this.client.send(new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Range: `bytes=${start}-${end}`,
+      }));
+      if (!response.Body) throw new Error('Object body is empty');
+      return response.Body as Readable;
+    }
+    return createReadStream(this.resolveKey(key), { start, end });
+  }
+
+  /** Una sola comprobación de ruta seguro para las tres lecturas por clave. */
+  private resolveKey(key: string) {
+    const root = path.resolve(process.env.SCORM_STORAGE_ROOT ?? path.join(process.cwd(), 'storage', 'scorm'));
+    const absolute = path.resolve(root, key);
+    if (!absolute.startsWith(`${root}${path.sep}`)) throw new Error('Unsafe storage key');
+    return absolute;
   }
 
   describe() {
