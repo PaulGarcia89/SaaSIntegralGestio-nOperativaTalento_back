@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -150,7 +151,30 @@ export class TrainingVideoAdminController {
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({ destination: '/tmp' }),
     limits: { fileSize: Number(process.env.TRAINING_VIDEO_MAX_UPLOAD_BYTES ?? 500 * 1024 * 1024), files: 1 },
-    fileFilter: (_req, file, callback) => callback(null, file.mimetype === 'video/mp4' && file.originalname.toLowerCase().endsWith('.mp4')),
+    /*
+     * Rechazar con un ERROR, no con `callback(null, false)`.
+     *
+     * Con `false`, multer descarta el archivo en silencio y el controlador
+     * recibe `file === undefined`: el servicio respondía entonces «A video file
+     * or an authorized video URL is required», es decir, «no enviaste archivo»
+     * a alguien que sí lo envió. Quien subía un .mov, o un .mp4 que su equipo
+     * declara como `video/quicktime`, recibía un mensaje que apuntaba al sitio
+     * equivocado y no tenía forma de averiguar que el problema era el formato.
+     *
+     * El tipo declarado por el navegador no es fiable —hay equipos donde un
+     * .mp4 llega sin tipo o como `application/octet-stream`—, así que manda la
+     * extensión y el tipo solo descarta cuando dice explícitamente otra cosa.
+     * El servicio vuelve a comprobarlo: esto no relaja nada.
+     */
+    fileFilter: (_req, file, callback) => {
+      const esMp4 = file.originalname.toLowerCase().endsWith('.mp4');
+      const tipoContradice = Boolean(file.mimetype) && file.mimetype !== 'video/mp4' && file.mimetype !== 'application/octet-stream';
+      if (!esMp4 || tipoContradice) {
+        callback(new BadRequestException('Only MP4 video files are supported'), false);
+        return;
+      }
+      callback(null, true);
+    },
   }))
   video(
     @Req() req: RequestWithUser,
