@@ -294,6 +294,13 @@ export class RecruitmentService {
     actor: JwtPayload,
     dto: ScheduleInterviewDto,
   ) {
+    if (dto.clientRequestId) {
+      const existing = await this.prisma.applicationInterview.findFirst({ where: { tenantId, clientRequestId: dto.clientRequestId, application: { vacancy: this.vacancyBranchScope(actor) } }, include: interviewInclude });
+      if (existing) {
+        if (existing.applicationId !== dto.applicationId) throw new BadRequestException("La solicitud ya pertenece a otra entrevista.");
+        return existing;
+      }
+    }
     const startsAt = this.parseDate(dto.startsAt, "startsAt");
     if (startsAt.getTime() <= Date.now()) throw new BadRequestException("Elige una fecha y hora futuras para la entrevista.");
     const endsAt = this.parseDate(dto.endsAt, "endsAt");
@@ -343,6 +350,8 @@ export class RecruitmentService {
     });
     if (!interviewer)
       throw new BadRequestException("Interviewer must belong to the tenant");
+    try { new Intl.DateTimeFormat("en", { timeZone: dto.timezone }).format(); } catch { throw new BadRequestException("Zona horaria inválida."); }
+    const calendar = dto.calendarProvider && dto.calendarProvider !== "ZOOM" ? await this.calendars?.resolveCompanyConnection(tenantId, dto.interviewerUserId, dto.calendarProvider) : undefined;
     const panelUserIds = [
       ...new Set([dto.interviewerUserId, ...(dto.participantUserIds ?? [])]),
     ];
@@ -411,6 +420,14 @@ export class RecruitmentService {
       && !pipelineStage.requiresApproval
       && !pipelineStage.requiredFields.length);
     const created = await this.prisma.$transaction(async (tx) => {
+      if (dto.clientRequestId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${dto.clientRequestId}))`;
+        const existing = await tx.applicationInterview.findFirst({ where: { tenantId, clientRequestId: dto.clientRequestId }, include: interviewInclude });
+        if (existing) {
+          if (existing.applicationId !== dto.applicationId) throw new BadRequestException("La solicitud ya pertenece a otra entrevista.");
+          return existing;
+        }
+      }
       const interview = await tx.applicationInterview.create({
         data: {
           tenantId,
@@ -428,6 +445,11 @@ export class RecruitmentService {
           location: dto.location,
           meetingUrl: dto.meetingUrl,
           calendarProvider: dto.calendarProvider,
+          clientRequestId: dto.clientRequestId,
+          calendarConnectionId: calendar?.connectionId,
+          externalCalendarId: calendar?.calendarId,
+          reminderMinutes: dto.reminderMinutes ?? 60,
+          additionalAttendees: dto.additionalAttendees ?? [],
           videoProvider:
             dto.videoProvider ??
             (dto.meetingUrl
@@ -556,7 +578,7 @@ export class RecruitmentService {
         interviewJoinUrl: dto.meetingUrl ?? "",
         interviewPlace: dto.location ?? "",
       };
-      await this.communications?.enqueueEvent(tx, {
+      if (!dto.calendarProvider) await this.communications?.enqueueEvent(tx, {
         tenantId,
         applicationId: dto.applicationId,
         interviewId: interview.id,
@@ -570,7 +592,7 @@ export class RecruitmentService {
         actorId: actor.sub,
         variables: { interviewDate, interviewLocation, ...datosDeEntrevista },
       });
-      await this.enqueueInterviewReminder(tx, {
+      if (!dto.calendarProvider) await this.enqueueInterviewReminder(tx, {
         tenantId,
         applicationId: dto.applicationId,
         interviewId: interview.id,
@@ -578,12 +600,13 @@ export class RecruitmentService {
         location: interviewLocation,
         actor,
         datos: datosDeEntrevista,
+        reminderMinutes: dto.reminderMinutes ?? 60,
       });
       return interview;
     });
     if (
-      dto.calendarProvider ||
-      dto.videoProvider === VideoConferenceProvider.ZOOM
+      created.calendarSyncStatus !== "SYNCED" && (dto.calendarProvider ||
+      dto.videoProvider === VideoConferenceProvider.ZOOM)
     ) {
       try {
         await this.calendars?.syncInterview(tenantId, created.id, "UPSERT");
@@ -780,6 +803,8 @@ export class RecruitmentService {
       throw new BadRequestException("endsAt must be after startsAt");
     const effectiveCalendarProvider =
       dto.calendarProvider ?? interview.calendarProvider;
+    if (dto.calendarProvider !== undefined && dto.calendarProvider !== interview.calendarProvider) throw new BadRequestException("Cancela la entrevista y crea otra para cambiar el calendario organizador.");
+    if (dto.timezone) { try { new Intl.DateTimeFormat("en", { timeZone: dto.timezone }).format(); } catch { throw new BadRequestException("Zona horaria inválida."); } }
     const effectiveVideoProvider = dto.videoProvider ?? interview.videoProvider;
     const effectiveMeetingUrl = dto.meetingUrl ?? interview.meetingUrl;
     this.assertProviderCombination(
@@ -824,6 +849,7 @@ export class RecruitmentService {
           location: dto.location,
           meetingUrl: dto.meetingUrl,
           notes: dto.notes,
+          icsSequence: wasRescheduled || isCancelled ? { increment: 1 } : undefined,
           calendarProvider: dto.calendarProvider,
           videoProvider: dto.videoProvider,
           ...(wasRescheduled || providerChanged
@@ -872,7 +898,7 @@ export class RecruitmentService {
           source: "ATS_INTERVIEW",
         },
       });
-      await this.communications?.enqueueEvent(tx, {
+      if (!updated.calendarProvider) await this.communications?.enqueueEvent(tx, {
         tenantId,
         applicationId: updated.applicationId,
         interviewId: id,
@@ -886,7 +912,7 @@ export class RecruitmentService {
         actorId: actor.sub,
         variables: { interviewDate, interviewLocation },
       });
-      if (!isCancelled) {
+      if (!isCancelled && !updated.calendarProvider) {
         await this.enqueueInterviewReminder(tx, {
           tenantId,
           applicationId: updated.applicationId,
@@ -942,10 +968,12 @@ export class RecruitmentService {
       actor: JwtPayload;
       /** Los mismos datos legibles que lleva el aviso de agendado. */
       datos?: Record<string, string>;
+      reminderMinutes?: number;
     },
   ) {
+    if (input.reminderMinutes === 0) return;
     const reminderAt = new Date(
-      Math.max(Date.now(), input.startsAt.getTime() - 24 * 60 * 60 * 1000),
+      Math.max(Date.now(), input.startsAt.getTime() - (input.reminderMinutes ?? 60) * 60 * 1000),
     );
     await this.communications?.enqueueEvent(tx, {
       tenantId: input.tenantId,

@@ -99,6 +99,7 @@ export class CommunicationDeliveryService {
       // texto citado— no cambia de comportamiento.
       text: cuerpo.text,
       html: cuerpo.html,
+      icalEvent: this.calendarAttachment(delivery.notification.payload),
       replyTo,
       headers: {
         'X-Correlation-Id': delivery.correlationId ?? delivery.id,
@@ -124,13 +125,14 @@ export class CommunicationDeliveryService {
     const timeout = setTimeout(() => controller.abort(), 12_000);
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'Idempotency-Key': delivery.id },
       body: JSON.stringify({
         from,
         to: [recipient],
         subject: delivery.notification.title,
         text: cuerpo.text,
         html: cuerpo.html,
+        attachments: this.calendarAttachment(delivery.notification.payload) ? [{ filename: "invitacion.ics", content: Buffer.from(this.calendarAttachment(delivery.notification.payload)!.content).toString("base64"), content_type: "text/calendar" }] : undefined,
         reply_to: replyTo,
         headers: {
           'X-Correlation-Id': delivery.correlationId ?? delivery.id,
@@ -216,6 +218,13 @@ export class CommunicationDeliveryService {
   }
 
   /** El `payload` es JSON libre: se lee con cuidado y sin confiar en su forma. */
+  private calendarAttachment(payload: unknown) {
+    if (!payload || typeof payload !== "object") return undefined;
+    const invitation = (payload as { calendarInvitation?: { method?: string; content?: string } }).calendarInvitation;
+    if (!invitation || !["REQUEST", "CANCEL"].includes(invitation.method ?? "") || typeof invitation.content !== "string") return undefined;
+    return { filename: "invitacion.ics", method: invitation.method!, content: invitation.content };
+  }
+
   private applicationIdFromPayload(payload: unknown) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
     const valor = (payload as Record<string, unknown>).applicationId;

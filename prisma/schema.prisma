@@ -1537,6 +1537,9 @@ enum OperationalEventType {
 }
 
 model Tenant {
+  calendarProviderSettings TenantCalendarProviderSettings[]
+  interviewSettings TenantInterviewSettings?
+
   id                            String                            @id @default(uuid())
   name                          String
   slug                          String                            @unique
@@ -5224,6 +5227,15 @@ model ApplicationStageTransitionApproval {
 }
 
 model ApplicationInterview {
+  clientRequestId String?
+  calendarConnectionId String?
+  externalCalendarId String?
+  externalCalendarUrl String?
+  additionalAttendees String[] @default([])
+  reminderMinutes Int @default(60)
+  invitationStatus String @default("PENDING")
+  invitationSentAt DateTime?
+
   id                   String                            @id @default(uuid())
   tenantId             String
   applicationId        String
@@ -5269,6 +5281,7 @@ model ApplicationInterview {
   evaluatorAssignments ScorecardEvaluatorAssignment[]
   communications       AtsMessage[]
 
+  @@unique([tenantId, clientRequestId])
   @@unique([calendarProvider, externalEventId])
   @@index([tenantId, startsAt])
   @@index([tenantId, completedAt])
@@ -8292,4 +8305,29 @@ model RestaurantInventoryIdempotencyRecord {
 
   @@unique([tenantId, userId, method, endpoint, idempotencyKey])
   @@index([tenantId, createdAt])
+}
+
+model TenantCalendarProviderSettings {
+  id String @id @default(uuid())
+  tenantId String
+  provider CalendarProvider
+  clientId String?
+  clientSecretEncrypted String?
+  authority String @default("common")
+  calendarId String @default("primary")
+  connectionId String?
+  oauthStateHash String?
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  @@unique([tenantId, provider])
+}
+
+model TenantInterviewSettings {
+  tenantId String @id
+  defaultModality String @default("CUSTOM")
+  durationMinutes Int @default(60)
+  reminderMinutes Int @default(60)
+  timezone String @default("America/New_York")
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }

@@ -1,3 +1,5 @@
+import { CompanyCalendarSettingsService } from "./company-calendar-settings.service";
+import { CompanyCalendarController } from "./company-calendar.controller";
 import { forwardRef, Module } from "@nestjs/common";
 import { ApplicationsModule } from "../applications/applications.module";
 import { ModuleAccessGuard } from "../common/guards/module-access.guard";
@@ -17,8 +19,9 @@ import { DomainEventsModule } from "../domain-events/domain-events.module";
 
 @Module({
   imports: [AtsCommunicationsModule, NotificationsModule, DomainEventsModule, forwardRef(() => ApplicationsModule)],
-  controllers: [RecruitmentController, InterviewSelfSchedulingController],
+  controllers: [CompanyCalendarController, RecruitmentController, InterviewSelfSchedulingController],
   providers: [
+    CompanyCalendarSettingsService,
     RecruitmentService,
     ScorecardsService,
     InterviewCalendarService,

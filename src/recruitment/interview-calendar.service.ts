@@ -1,8 +1,10 @@
+import { buildInterviewInvitation } from "./interview-invitation";
 import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
   Injectable,
+  Optional,
   NotFoundException,
 } from "@nestjs/common";
 import {
@@ -23,7 +25,12 @@ import {
 } from "./dto/recruitment.dto";
 import { CalendarTokenCryptoService } from "./calendar-token-crypto.service";
 
+import { createHash, randomBytes } from "node:crypto";
+import { CompanyCalendarSettingsService } from "./company-calendar-settings.service";
+
 type OAuthState = {
+  companyManaged?: boolean;
+  nonce?: string;
   tenantId: string;
   userId: string;
   provider: CalendarProvider;
@@ -43,22 +50,32 @@ export class InterviewCalendarService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CalendarTokenCryptoService,
+    @Optional() private readonly companySettings?: CompanyCalendarSettingsService,
   ) {}
 
-  getAuthorizationUrl(
+  async getAuthorizationUrl(
     tenantId: string,
     actor: JwtPayload,
     provider: CalendarProvider,
     redirectUri: string,
+    companyManaged = false,
   ) {
-    const config = this.providerConfig(provider);
+    this.validateRedirectUri(redirectUri);
+    if (companyManaged) this.companySettings!.assertProvider(provider);
+    const config = companyManaged ? await this.tenantProviderConfig(tenantId, provider) : this.providerConfig(provider);
     const state = this.crypto.signState({
       tenantId,
       userId: actor.sub,
       provider,
       redirectUri,
+      companyManaged,
+      nonce: randomBytes(32).toString("hex"),
       expiresAt: Date.now() + 10 * 60_000,
     });
+    if (companyManaged) {
+      const oauthStateHash = createHash("sha256").update(state).digest("hex");
+      await this.prisma.tenantCalendarProviderSettings.upsert({ where: { tenantId_provider: { tenantId, provider } }, create: { tenantId, provider, oauthStateHash }, update: { oauthStateHash } });
+    }
     const url = new URL(config.authorizationUrl);
     url.searchParams.set("client_id", config.clientId);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -77,15 +94,23 @@ export class InterviewCalendarService {
     actor: JwtPayload,
     provider: CalendarProvider,
     dto: CalendarOAuthDto,
+    companyManaged = false,
   ) {
+    this.validateRedirectUri(dto.redirectUri);
     this.verifyOAuthState(
       dto.state,
       tenantId,
       actor.sub,
       provider,
       dto.redirectUri,
+      companyManaged,
     );
-    const config = this.providerConfig(provider);
+    if (companyManaged) {
+      this.companySettings!.assertProvider(provider);
+      const consumed = await this.prisma.tenantCalendarProviderSettings.updateMany({ where: { tenantId, provider, oauthStateHash: createHash("sha256").update(dto.state).digest("hex") }, data: { oauthStateHash: null } });
+      if (consumed.count !== 1) throw new BadRequestException("La autorización expiró o ya fue utilizada. Vuelve a conectar la cuenta.");
+    }
+    const config = companyManaged ? await this.tenantProviderConfig(tenantId, provider) : this.providerConfig(provider);
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       code: dto.code,
@@ -104,6 +129,11 @@ export class InterviewCalendarService {
       );
     }
     const profile = await this.fetchProfile(provider, token.access_token);
+    const previous = await this.prisma.atsCalendarConnection.findUnique({ where: { tenantId_userId_provider: { tenantId, userId: actor.sub, provider } } });
+    if (previous && previous.externalAccountId !== profile.id) {
+      const pending = await this.prisma.applicationInterview.count({ where: { tenantId, calendarConnectionId: previous.id, status: { in: ["SCHEDULED", "CONFIRMED"] } } });
+      if (pending) throw new ConflictException("Esta cuenta tiene entrevistas pendientes. Cancélalas antes de sustituirla por otra cuenta.");
+    }
     const connection = await this.prisma.atsCalendarConnection.upsert({
       where: {
         tenantId_userId_provider: { tenantId, userId: actor.sub, provider },
@@ -130,7 +160,7 @@ export class InterviewCalendarService {
         accessTokenEncrypted: this.crypto.encrypt(token.access_token),
         refreshTokenEncrypted: token.refresh_token
           ? this.crypto.encrypt(token.refresh_token)
-          : undefined,
+          : previous?.externalAccountId === profile.id ? undefined : null,
         tokenExpiresAt: token.expires_in
           ? new Date(Date.now() + token.expires_in * 1000)
           : null,
@@ -138,6 +168,7 @@ export class InterviewCalendarService {
         lastError: null,
       },
     });
+    if (companyManaged) await this.prisma.tenantCalendarProviderSettings.update({ where: { tenantId_provider: { tenantId, provider } }, data: { connectionId: connection.id } });
     return this.safeConnection(connection);
   }
 
@@ -437,6 +468,8 @@ export class InterviewCalendarService {
       where: { id: interviewId, tenantId },
       include: {
         interviewer: { select: { id: true, email: true } },
+        application: { include: { candidate: true, vacancy: true } },
+        participants: { include: { user: { select: { email: true } } } },
       },
     });
     if (!interview) throw new NotFoundException("Interview not found");
@@ -448,7 +481,7 @@ export class InterviewCalendarService {
         meetingUrl = zoom?.meetingUrl ?? meetingUrl;
         externalMeetingId = zoom?.meetingId ?? externalMeetingId;
       }
-      let event: { eventId?: string; meetingUrl?: string; iCalUid?: string } =
+      let event: { eventId?: string; meetingUrl?: string; iCalUid?: string; calendarUrl?: string } =
         {};
       if (interview.calendarProvider === CalendarProvider.GOOGLE) {
         event = await this.syncGoogleEvent(interview, action, meetingUrl);
@@ -465,6 +498,7 @@ export class InterviewCalendarService {
           meetingUrl: event.meetingUrl ?? meetingUrl,
           externalEventId: event.eventId ?? interview.externalEventId,
           externalMeetingId,
+          externalCalendarUrl: event.calendarUrl ?? undefined,
           externalICalUid: event.iCalUid ?? interview.externalICalUid,
           calendarSyncStatus:
             action === "CANCEL"
@@ -473,6 +507,8 @@ export class InterviewCalendarService {
                 ? CalendarSyncStatus.SYNCED
                 : CalendarSyncStatus.NOT_CONNECTED,
           calendarSyncError: null,
+          invitationStatus: connected ? (action === "CANCEL" ? "CANCELLED" : "SENT") : undefined,
+          invitationSentAt: connected ? new Date() : undefined,
           calendarSyncedAt: connected ? new Date() : null,
           icsSequence:
             action === "UPSERT" ? { increment: 1 } : interview.icsSequence,
@@ -486,6 +522,7 @@ export class InterviewCalendarService {
       await this.prisma.applicationInterview.update({
         where: { id: interview.id },
         data: {
+          invitationStatus: "FAILED",
           calendarSyncStatus: CalendarSyncStatus.FAILED,
           calendarSyncError: message,
         },
@@ -496,7 +533,8 @@ export class InterviewCalendarService {
 
   async retrySync(tenantId: string, actor: JwtPayload, interviewId: string) {
     await this.assertInterviewAccess(tenantId, actor, interviewId);
-    return this.syncInterview(tenantId, interviewId, "UPSERT");
+    const interview = await this.prisma.applicationInterview.findFirstOrThrow({ where: { id: interviewId, tenantId } });
+    return this.syncInterview(tenantId, interviewId, interview.status === "CANCELED" ? "CANCEL" : "UPSERT");
   }
 
   async generateIcs(tenantId: string, actor: JwtPayload, interviewId: string) {
@@ -542,32 +580,22 @@ export class InterviewCalendarService {
   }
 
   private icsInvitation(interview: any) {
-    const uid = interview.externalICalUid ?? `${interview.id}@talentos`;
-    const cancelled = interview.status === InterviewStatus.CANCELED;
-    const lines = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//TalentOS//ATS Interviews//ES",
-      `METHOD:${cancelled ? "CANCEL" : "REQUEST"}`,
-      "BEGIN:VEVENT",
-      `UID:${this.icsEscape(uid)}`,
-      `SEQUENCE:${interview.icsSequence}`,
-      `DTSTAMP:${this.icsDate(new Date())}`,
-      `DTSTART:${this.icsDate(interview.startsAt)}`,
-      `DTEND:${this.icsDate(interview.endsAt)}`,
-      `SUMMARY:${this.icsEscape(interview.title)}`,
-      `DESCRIPTION:${this.icsEscape(`Entrevista para ${interview.application.vacancy.title}`)}`,
-      `LOCATION:${this.icsEscape(interview.meetingUrl || interview.location || "")}`,
-      `STATUS:${cancelled ? "CANCELLED" : "CONFIRMED"}`,
-      `ORGANIZER;CN=${this.icsEscape(`${interview.interviewer.firstName} ${interview.interviewer.lastName}`)}:MAILTO:${interview.interviewer.email}`,
-      `ATTENDEE;CN=${this.icsEscape(interview.application.candidate.fullName)};RSVP=TRUE:MAILTO:${interview.application.candidate.email}`,
-      "END:VEVENT",
-      "END:VCALENDAR",
-    ];
-    return {
-      filename: `entrevista-${interview.id}.ics`,
-      content: `${lines.join("\r\n")}\r\n`,
-    };
+    return buildInterviewInvitation(interview);
+  }
+
+  private inviteEmails(interview: any): string[] {
+    return [...new Set<string>([interview.application?.candidate?.email, interview.interviewer?.email, ...(interview.participants ?? []).filter((p: any) => p.status !== "DECLINED").map((p: any) => p.user?.email), ...(interview.additionalAttendees ?? [])].filter(Boolean).map((email: string) => email.trim().toLowerCase()))];
+  }
+
+  private async fetchExistingGoogleEvent(url: string, token: string) {
+    const response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(12_000), redirect: "error" });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new BadGatewayException(`Calendar provider returned HTTP ${response.status}`);
+    return response.json();
+  }
+
+  resolveCompanyConnection(tenantId: string, userId: string, provider: CalendarProvider) {
+    return this.companySettings?.resolve(tenantId, userId, provider);
   }
 
   private async syncGoogleEvent(
@@ -579,13 +607,14 @@ export class InterviewCalendarService {
       interview.tenantId,
       interview.interviewerUserId,
       CalendarProvider.GOOGLE,
+      interview.calendarConnectionId,
     );
-    const base =
-      "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+    const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(interview.externalCalendarId || "primary")}/events`;
     if (action === "CANCEL") {
-      if (interview.externalEventId) {
+      const eventId = interview.externalEventId || interview.id.replace(/-/g, "").toLowerCase();
+      if (eventId) {
         await this.fetchOk(
-          `${base}/${encodeURIComponent(interview.externalEventId)}?sendUpdates=none`,
+          `${base}/${encodeURIComponent(eventId)}?sendUpdates=all`,
           {
             method: "DELETE",
             headers: { authorization: `Bearer ${token}` },
@@ -596,7 +625,10 @@ export class InterviewCalendarService {
       return {};
     }
     const body: Record<string, unknown> = {
-      summary: "Entrevista TalentOS",
+      summary: interview.title,
+      attendees: this.inviteEmails(interview).map((email) => ({ email })),
+      location: interview.location || undefined,
+      reminders: { useDefault: false, overrides: interview.reminderMinutes > 0 ? [{ method: "popup", minutes: interview.reminderMinutes }] : [] },
       description: meetingUrl ? `Reunión ATS\n${meetingUrl}` : "Reunión ATS",
       start: {
         dateTime: interview.startsAt.toISOString(),
@@ -607,16 +639,26 @@ export class InterviewCalendarService {
         timeZone: interview.timezone,
       },
     };
-    if (interview.videoProvider === VideoConferenceProvider.GOOGLE_MEET) {
+    if (interview.videoProvider === VideoConferenceProvider.GOOGLE_MEET && !interview.meetingUrl) {
       body.conferenceData = {
         createRequest: {
-          requestId: `talentos-${interview.id}-${interview.icsSequence + 1}`,
+          requestId: `talentos-${interview.id}`,
         },
       };
     }
+    if (!interview.externalEventId) {
+      const eventId = interview.id.replace(/-/g, "").toLowerCase();
+      // A previous POST may have succeeded before our connection was interrupted.
+      const existing = await this.fetchExistingGoogleEvent(`${base}/${eventId}`, token);
+      if (existing) {
+        if (interview.videoProvider === "GOOGLE_MEET" && !existing.hangoutLink && !meetingUrl) throw new BadGatewayException("Google todavía no ha generado el enlace de Meet. Reintenta la sincronización.");
+        return { eventId: existing.id, calendarUrl: existing.htmlLink, iCalUid: existing.iCalUID, meetingUrl: existing.hangoutLink ?? meetingUrl };
+      }
+      body.id = eventId;
+    }
     const endpoint = interview.externalEventId
-      ? `${base}/${encodeURIComponent(interview.externalEventId)}?conferenceDataVersion=1&sendUpdates=none`
-      : `${base}?conferenceDataVersion=1&sendUpdates=none`;
+      ? `${base}/${encodeURIComponent(interview.externalEventId)}?conferenceDataVersion=1&sendUpdates=all`
+      : `${base}?conferenceDataVersion=1&sendUpdates=all`;
     const response = await this.fetchJson<any>(endpoint, {
       method: interview.externalEventId ? "PATCH" : "POST",
       headers: {
@@ -625,8 +667,10 @@ export class InterviewCalendarService {
       },
       body: JSON.stringify(body),
     });
+    if (interview.videoProvider === "GOOGLE_MEET" && !response.hangoutLink && !meetingUrl) throw new BadGatewayException("Google todavía no ha generado el enlace de Meet. Reintenta la sincronización.");
     return {
       eventId: response.id,
+      calendarUrl: response.htmlLink,
       iCalUid: response.iCalUID,
       meetingUrl: response.hangoutLink ?? meetingUrl,
     };
@@ -641,8 +685,9 @@ export class InterviewCalendarService {
       interview.tenantId,
       interview.interviewerUserId,
       CalendarProvider.MICROSOFT,
+      interview.calendarConnectionId,
     );
-    const base = "https://graph.microsoft.com/v1.0/me/events";
+    const base = interview.externalCalendarId && interview.externalCalendarId !== "primary" ? `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(interview.externalCalendarId)}/events` : "https://graph.microsoft.com/v1.0/me/events";
     if (action === "CANCEL") {
       if (interview.externalEventId) {
         await this.fetchOk(
@@ -657,7 +702,12 @@ export class InterviewCalendarService {
       return {};
     }
     const body = {
-      subject: "Entrevista TalentOS",
+      subject: interview.title,
+      transactionId: interview.externalEventId ? undefined : interview.id,
+      attendees: this.inviteEmails(interview).map((address) => ({ emailAddress: { address }, type: "required" })),
+      location: { displayName: interview.location || "" },
+      isReminderOn: interview.reminderMinutes > 0,
+      reminderMinutesBeforeStart: interview.reminderMinutes,
       body: {
         contentType: "Text",
         content: meetingUrl ? `Reunión ATS\n${meetingUrl}` : "Reunión ATS",
@@ -690,6 +740,7 @@ export class InterviewCalendarService {
     });
     return {
       eventId: response.id ?? interview.externalEventId,
+      calendarUrl: response.webLink,
       iCalUid: response.iCalUId,
       meetingUrl: response.onlineMeeting?.joinUrl ?? meetingUrl,
     };
@@ -864,10 +915,11 @@ export class InterviewCalendarService {
     tenantId: string,
     userId: string,
     provider: CalendarProvider,
+    connectionId?: string | null,
   ) {
-    const connection = await this.prisma.atsCalendarConnection.findUnique({
-      where: { tenantId_userId_provider: { tenantId, userId, provider } },
-    });
+    const connection = connectionId
+      ? await this.prisma.atsCalendarConnection.findFirst({ where: { id: connectionId, tenantId, provider } })
+      : await this.prisma.atsCalendarConnection.findUnique({ where: { tenantId_userId_provider: { tenantId, userId, provider } } });
     if (!connection || connection.status !== CalendarConnectionStatus.ACTIVE) {
       throw new BadRequestException(
         `${provider} calendar is not connected for the interviewer`,
@@ -889,7 +941,8 @@ export class InterviewCalendarService {
       });
       throw new BadRequestException(`${provider} calendar connection expired`);
     }
-    const config = this.providerConfig(provider);
+    const companyConfig = connectionId ? await this.companySettings?.config(tenantId, provider) : null;
+    const config = companyConfig?.connectionId === connection.id ? await this.tenantProviderConfig(tenantId, provider) : this.providerConfig(provider);
     const body = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: this.crypto.decrypt(connection.refreshTokenEncrypted),
@@ -917,6 +970,59 @@ export class InterviewCalendarService {
     return token.access_token;
   }
 
+  private validateRedirectUri(value: string) {
+    const origin = (process.env.FRONTEND_URL || "http://localhost").replace(/\/$/, "");
+    const allowed = process.env.CALENDAR_OAUTH_REDIRECT_URIS?.split(",").map((uri) => uri.trim()) ?? [`${origin}/ats/interviews`, ...["GOOGLE", "MICROSOFT", "ZOOM"].map((provider) => `${origin}/ats/interviews?calendarProvider=${provider}`), `${origin}/admin/company/calendar`];
+    if (!allowed.includes(value)) throw new BadRequestException("La URL de retorno OAuth no está autorizada.");
+  }
+
+  private async tenantProviderConfig(tenantId: string, provider: CalendarProvider) {
+    const saved = await this.companySettings?.config(tenantId, provider);
+    if (!saved?.clientId || !saved.clientSecretEncrypted) return this.providerConfig(provider);
+    const google = provider === CalendarProvider.GOOGLE;
+    const authority = saved.authority || "common";
+    return {
+      clientId: saved.clientId,
+      clientSecret: this.crypto.decrypt(saved.clientSecretEncrypted),
+      authorizationUrl: google ? "https://accounts.google.com/o/oauth2/v2/auth" : `https://login.microsoftonline.com/${authority}/oauth2/v2.0/authorize`,
+      tokenUrl: google ? "https://oauth2.googleapis.com/token" : `https://login.microsoftonline.com/${authority}/oauth2/v2.0/token`,
+      scopes: google ? ["openid", "email", "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.freebusy", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"] : ["openid", "email", "offline_access", "User.Read", "Calendars.ReadWrite"],
+    };
+  }
+
+  private async companyConnection(tenantId: string, provider: CalendarProvider) {
+    this.companySettings!.assertProvider(provider);
+    const config = await this.companySettings!.config(tenantId, provider);
+    const connection = config?.connectionId ? await this.prisma.atsCalendarConnection.findFirst({ where: { id: config.connectionId, tenantId, provider, status: "ACTIVE" } }) : null;
+    if (!connection) throw new BadRequestException("Conecta primero la cuenta de la empresa.");
+    return { config: config!, connection };
+  }
+
+  async listCompanyCalendars(tenantId: string, provider: CalendarProvider) {
+    const { connection } = await this.companyConnection(tenantId, provider);
+    const token = await this.accessToken(tenantId, connection.userId, provider, connection.id);
+    const response = await this.fetchJson<any>(provider === "GOOGLE" ? "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer&maxResults=250" : "https://graph.microsoft.com/v1.0/me/calendars?$select=id,name,canEdit", { headers: { authorization: `Bearer ${token}` } });
+    return provider === "GOOGLE" ? (response.items ?? []).map((item: any) => ({ id: item.id, name: item.summary })) : (response.value ?? []).filter((item: any) => item.canEdit).map((item: any) => ({ id: item.id, name: item.name }));
+  }
+
+  async testCompanyConnection(tenantId: string, provider: CalendarProvider) {
+    const { connection, config } = await this.companyConnection(tenantId, provider);
+    const token = await this.accessToken(tenantId, connection.userId, provider, connection.id);
+    await this.fetchJson(provider === "GOOGLE" ? `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?maxResults=1` : config.calendarId === "primary" ? "https://graph.microsoft.com/v1.0/me/calendar/events?$top=1" : `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(config.calendarId)}/events?$top=1`, { headers: { authorization: `Bearer ${token}` } });
+    await this.prisma.atsCalendarConnection.update({ where: { id: connection.id }, data: { lastSyncedAt: new Date(), lastError: null } });
+    return { success: true, email: connection.externalEmail };
+  }
+
+  async disconnectCompany(tenantId: string, provider: CalendarProvider) {
+    const { connection } = await this.companyConnection(tenantId, provider);
+    await this.prisma.$transaction([
+      this.prisma.atsCalendarConnection.update({ where: { id: connection.id }, data: { status: "REVOKED", accessTokenEncrypted: "", refreshTokenEncrypted: null, tokenExpiresAt: null } }),
+      this.prisma.tenantCalendarProviderSettings.update({ where: { tenantId_provider: { tenantId, provider } }, data: { connectionId: null, oauthStateHash: null } }),
+      this.prisma.tenantInterviewSettings.updateMany({ where: { tenantId, defaultModality: provider === "GOOGLE" ? "GOOGLE_MEET" : "MICROSOFT_TEAMS" }, data: { defaultModality: "CUSTOM" } }),
+    ]);
+    return { disconnected: true };
+  }
+
   private providerConfig(provider: CalendarProvider) {
     if (provider === CalendarProvider.GOOGLE) {
       return {
@@ -929,6 +1035,7 @@ export class InterviewCalendarService {
           "email",
           "https://www.googleapis.com/auth/calendar.events",
           "https://www.googleapis.com/auth/calendar.freebusy",
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
         ],
       };
     }
@@ -1022,9 +1129,9 @@ export class InterviewCalendarService {
         redirect: "error",
       });
       if (!response.ok) {
-        const detail = (await response.text()).slice(0, 500);
+        await response.text();
         throw new BadGatewayException(
-          `Calendar provider returned HTTP ${response.status}: ${detail}`,
+          `Calendar provider returned HTTP ${response.status}`,
         );
       }
       if (response.status === 204) return {} as T;
@@ -1059,6 +1166,7 @@ export class InterviewCalendarService {
     userId: string,
     provider: CalendarProvider,
     redirectUri: string,
+    companyManaged = false,
   ) {
     let payload: OAuthState;
     try {
@@ -1067,6 +1175,8 @@ export class InterviewCalendarService {
       throw new BadRequestException("Invalid OAuth state");
     }
     if (
+      Boolean(payload.companyManaged) !== companyManaged ||
+      !Number.isFinite(payload.expiresAt) ||
       payload.expiresAt < Date.now() ||
       payload.tenantId !== tenantId ||
       payload.userId !== userId ||

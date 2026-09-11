@@ -9,6 +9,7 @@ import {
 import { JobPublicationStatus, Prisma, VacancyStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { normalizeOffsetPagination } from '../common/utils/pagination.util';
+import { defaultVacancyStages } from './default-vacancy-stages';
 import { CreateVacancyDto } from './dto/create-vacancy.dto';
 import { CreateVacancyFormTemplateDto } from './dto/create-vacancy-form-template.dto';
 import { ListVacanciesDto } from './dto/list-vacancies.dto';
@@ -51,7 +52,8 @@ export class VacanciesService {
         throw new BadRequestException('The personnel requisition must be approved before creating a vacancy');
       }
     }
-    this.assertUniqueStages(dto.stages ?? []);
+    const stages = dto.stages?.length ? dto.stages : defaultVacancyStages();
+    this.assertUniqueStages(stages);
     await this.assertResponsiblesCanAccessBranch(
       tenantId,
       dto.branchId,
@@ -100,9 +102,9 @@ export class VacanciesService {
         })),
       });
 
-      if (dto.stages?.length) {
+      {
         await tx.vacancyStage.createMany({
-          data: dto.stages.map((stage) => ({
+          data: stages.map((stage) => ({
             tenantId,
             vacancyId: vacancy.id,
             code: stage.code.trim().toUpperCase(),

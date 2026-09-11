@@ -1,3 +1,4 @@
+import { IsEmail } from "class-validator";
 import {
   ApplicationStatus,
   CalendarProvider,
@@ -173,6 +174,9 @@ export class ListInterviewsDto extends OffsetPaginationQueryDto {
 }
 
 export class ScheduleInterviewDto {
+  @IsOptional() @IsUUID() clientRequestId?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(10080) reminderMinutes?: number;
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsEmail({}, { each: true }) additionalAttendees?: string[];
   @IsUUID()
   applicationId!: string;
 

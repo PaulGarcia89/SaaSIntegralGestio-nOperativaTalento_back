@@ -107,6 +107,21 @@ describe('VacanciesService', () => {
     expect(result).toEqual(expect.objectContaining({ id: 'vacancy-1' }));
   });
 
+  it.each([undefined, []])('creates the default process when stages are %s', async (stages) => {
+    await service.create('tenant-1', actor, { branchId: 'branch-1', title: 'Supervisor', stages });
+    const created = tx.vacancyStage.createMany.mock.calls[0][0].data;
+    expect(created.map((stage: { applicationStatus: string }) => stage.applicationStatus)).toEqual([
+      'SUBMITTED', 'REVIEWING', 'INTERVIEW', 'APPROVED', 'REJECTED', 'HIRED',
+    ]);
+    const codes = created.map((stage: { code: string }) => stage.code);
+    for (const stage of created) {
+      expect(stage.tenantId).toBe('tenant-1');
+      expect(stage.vacancyId).toBe('vacancy-1');
+      expect(stage.allowedNextStageCodes.every((code: string) => codes.includes(code))).toBe(true);
+    }
+    expect(created.find((stage: { code: string }) => stage.code === 'DECISION').requiredFields).toContain('interview.completed');
+  });
+
   it('rejects duplicated stage codes before creating a vacancy', async () => {
     await expect(
       service.create('tenant-1', actor, {

@@ -1,3 +1,4 @@
+import { buildInterviewInvitation } from "../recruitment/interview-invitation";
 import {
   BadRequestException,
   Injectable,
@@ -148,6 +149,8 @@ export class AtsCommunicationsService {
     if (!application)
       throw new NotFoundException("Application not found for communication");
 
+    const interview = input.interviewId ? await tx.applicationInterview.findFirst({ where: { id: input.interviewId, tenantId: input.tenantId, applicationId: input.applicationId }, include: { interviewer: true, application: { include: { candidate: true, vacancy: true } }, participants: { include: { user: true } } } }) : null;
+    const calendarInvitation = interview && !interview.calendarProvider && ["INTERVIEW_SCHEDULED", "INTERVIEW_RESCHEDULED", "INTERVIEW_CANCELLED"].includes(input.type) ? buildInterviewInvitation(interview) : undefined;
     const conversation = await tx.atsConversation.upsert({
       where: { applicationId: application.id },
       create: {
@@ -206,7 +209,7 @@ export class AtsCommunicationsService {
                 locale: candidateLocale,
               },
             ]
-          : application.vacancy.responsibles.map(({ user }) => ({
+          : interview ? [...new Map([interview.interviewer, ...interview.participants.filter((p) => p.status !== "DECLINED").map((p) => p.user)].map((user) => [user.email.toLowerCase(), { email: user.email, name: `${user.firstName} ${user.lastName}`.trim(), userId: user.id as string | null, locale: normalizeLocale(user.preferredLocale) }])).values(), ...interview.additionalAttendees.map((email) => ({ email, name: email, userId: null, locale: candidateLocale }))] : application.vacancy.responsibles.map(({ user }) => ({
               email: user.email,
               name: `${user.firstName} ${user.lastName}`.trim(),
               userId: user.id,
@@ -261,6 +264,7 @@ export class AtsCommunicationsService {
             payload: {
               applicationId: application.id,
               communicationType: input.type,
+              ...(calendarInvitation ? { calendarInvitation } : {}),
             },
           },
         });

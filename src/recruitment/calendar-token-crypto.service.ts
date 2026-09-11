@@ -42,6 +42,7 @@ export class CalendarTokenCryptoService {
   }
 
   verifyState<T>(state: string): T {
+    if (state.split(".").length !== 2) throw new Error("Invalid OAuth state");
     const [body, signature] = state.split(".");
     if (!body || !signature) throw new Error("Invalid OAuth state");
     const actual = Buffer.from(signature);
@@ -62,6 +63,7 @@ export class CalendarTokenCryptoService {
   }
 
   private encryptionKey() {
+    if (process.env.NODE_ENV === "production" && !process.env.CALENDAR_TOKEN_ENCRYPTION_KEY && !process.env.JWT_REFRESH_SECRET) throw new Error("Calendar encryption key is required");
     return createHash("sha256")
       .update(
         process.env.CALENDAR_TOKEN_ENCRYPTION_KEY ??
@@ -72,6 +74,7 @@ export class CalendarTokenCryptoService {
   }
 
   private stateSecret() {
+    if (process.env.NODE_ENV === "production" && !process.env.CALENDAR_OAUTH_STATE_SECRET && !process.env.JWT_ACCESS_SECRET) throw new Error("Calendar OAuth state secret is required");
     return (
       process.env.CALENDAR_OAUTH_STATE_SECRET ??
       process.env.JWT_ACCESS_SECRET ??
