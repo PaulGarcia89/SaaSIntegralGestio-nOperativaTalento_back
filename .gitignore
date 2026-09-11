@@ -11,3 +11,6 @@ tmp
 deploy/
 .env.lan
 .env.*.local
+
+# Local database backups
+backups/

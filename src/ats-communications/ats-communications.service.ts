@@ -240,9 +240,10 @@ export class AtsCommunicationsService {
           messages.push(existing);
           continue;
         }
-        const subject = input.overrideSubject?.trim() || this.render(definition.subject, variables);
+        const variablesDelDestinatario = this.variablesDeEntrevista(variables, recipient.locale);
+        const subject = input.overrideSubject?.trim() || this.render(definition.subject, variablesDelDestinatario);
         const body =
-          input.overrideBody?.trim() || this.render(definition.body, variables);
+          input.overrideBody?.trim() || this.render(definition.body, variablesDelDestinatario);
         const notification = await tx.notification.create({
           data: {
             tenantId: input.tenantId,
@@ -587,6 +588,73 @@ export class AtsCommunicationsService {
         { version: "desc" },
       ],
     });
+  }
+
+  /*
+   * Datos de la entrevista, escritos para una persona.
+   *
+   * El correo decía «tu entrevista fue programada para
+   * 2026-11-09T23:10:00.000Z»: la marca de tiempo cruda, en UTC, sin decir el
+   * día de la semana ni en qué huso está. Quien lo recibe tiene que traducirla
+   * mentalmente, y si se equivoca pierde la entrevista.
+   *
+   * Aquí se convierte en «lunes, 9 de noviembre de 2026, 18:10 (hora de
+   * America/New_York)» en el idioma de quien lo recibe, y se arma un bloque con
+   * el resto de lo acordado: formato, duración, quién entrevista y dónde o por
+   * dónde conectarse. Lo que no se sabe, no se escribe.
+   */
+  private variablesDeEntrevista(
+    variables: Record<string, string>,
+    locale: SupportedLocale,
+  ): Record<string, string> {
+    const iso = variables.interviewStartsAt;
+    if (!iso) return variables;
+    const fecha = new Date(iso);
+    if (Number.isNaN(fecha.getTime())) return variables;
+
+    const zona = variables.interviewTimezone || "UTC";
+    const idioma = locale === "en" ? "en-US" : "es-ES";
+    const legible = (() => {
+      try {
+        return new Intl.DateTimeFormat(idioma, {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: zona,
+        }).format(fecha);
+      } catch {
+        // Una zona horaria inválida no puede tumbar el aviso: se cae a UTC.
+        return new Intl.DateTimeFormat(idioma, { dateStyle: "full", timeStyle: "short", timeZone: "UTC" }).format(fecha);
+      }
+    })();
+
+    const tipos: Record<string, { es: string; en: string }> = {
+      VIRTUAL: { es: "Por videollamada", en: "By video call" },
+      PRESENTIAL: { es: "Presencial", en: "In person" },
+      PHONE: { es: "Por teléfono", en: "By phone" },
+    };
+    const tipo = tipos[variables.interviewType ?? ""];
+    const etiquetas = locale === "en"
+      ? { cuando: "When", formato: "Format", duracion: "Duration", quien: "With", donde: "Where", enlace: "Link", minutos: "minutes", zona: "time in" }
+      : { cuando: "Cuándo", formato: "Formato", duracion: "Duración", quien: "Con", donde: "Dónde", enlace: "Enlace", minutos: "minutos", zona: "hora de" };
+
+    const lineas = [
+      `${etiquetas.cuando}: ${legible} (${etiquetas.zona} ${zona})`,
+      tipo ? `${etiquetas.formato}: ${locale === "en" ? tipo.en : tipo.es}` : "",
+      variables.interviewDurationMinutes ? `${etiquetas.duracion}: ${variables.interviewDurationMinutes} ${etiquetas.minutos}` : "",
+      variables.interviewerName ? `${etiquetas.quien}: ${variables.interviewerName}` : "",
+      variables.interviewJoinUrl ? `${etiquetas.enlace}: ${variables.interviewJoinUrl}` : "",
+      variables.interviewPlace ? `${etiquetas.donde}: ${variables.interviewPlace}` : "",
+    ].filter(Boolean);
+
+    return {
+      ...variables,
+      interviewDate: legible,
+      interviewDetails: lineas.join("\n"),
+    };
   }
 
   private render(

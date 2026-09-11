@@ -1,3 +1,4 @@
+import { assertInterviewStageRequirements } from './interview-stage-requirements';
 import {
   BadRequestException,
   ConflictException,
@@ -1143,6 +1144,7 @@ export class ApplicationsService {
     if (changesStage && targetStage) {
       this.assertTransitionAllowed(application, targetStage, dto.reason);
       this.assertRequiredFields(application, targetStage);
+      assertInterviewStageRequirements(application, targetStatus);
       // Tenant/platform administrators can make controlled stage changes directly.
       // Approval gates remain active for recruiters and other operational roles.
       if (targetStage.requiresApproval && !this.canBypassTransitionApproval(actor)) {
@@ -1462,6 +1464,11 @@ export class ApplicationsService {
       });
     if (!request)
       throw new NotFoundException("Pending transition request not found");
+    if (approved) {
+      this.assertTransitionAllowed(application, request.toStage, request.reason ?? undefined);
+      this.assertRequiredFields(application, request.toStage);
+      assertInterviewStageRequirements(application, request.toStage.applicationStatus);
+    }
     if (approved && request.requestedByUserId === actor.sub && !allowRequesterApproval && !this.canBypassTransitionApproval(actor)) {
       throw new BadRequestException(
         "The requester cannot approve their own transition",

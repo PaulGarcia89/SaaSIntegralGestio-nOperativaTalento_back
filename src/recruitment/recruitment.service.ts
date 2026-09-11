@@ -295,6 +295,7 @@ export class RecruitmentService {
     dto: ScheduleInterviewDto,
   ) {
     const startsAt = this.parseDate(dto.startsAt, "startsAt");
+    if (startsAt.getTime() <= Date.now()) throw new BadRequestException("Elige una fecha y hora futuras para la entrevista.");
     const endsAt = this.parseDate(dto.endsAt, "endsAt");
     if (endsAt <= startsAt)
       throw new BadRequestException("endsAt must be after startsAt");
@@ -403,6 +404,12 @@ export class RecruitmentService {
         "A hiring stage cannot be used to schedule an interview",
       );
     }
+    // Scheduling must not bypass the configured transitions or approval/field gates.
+    const autoAdvance = Boolean(pipelineStage
+      && pipelineStage.applicationStatus === "INTERVIEW"
+      && application.currentStage?.allowedNextStageCodes.includes(pipelineStage.code)
+      && !pipelineStage.requiresApproval
+      && !pipelineStage.requiredFields.length);
     const created = await this.prisma.$transaction(async (tx) => {
       const interview = await tx.applicationInterview.create({
         data: {
@@ -467,11 +474,11 @@ export class RecruitmentService {
       await tx.vacancyApplication.update({
         where: { id: dto.applicationId },
         data: {
-          status: pipelineStage?.applicationStatus ?? "INTERVIEW",
-          ...(pipelineStage
+          ...(autoAdvance ? { status: "INTERVIEW" as const } : {}),
+          ...(autoAdvance && pipelineStage
             ? { currentStage: { connect: { id: pipelineStage.id } } }
             : {}),
-          ...(pipelineStage && pipelineStage.id !== application.currentStageId
+          ...(autoAdvance && pipelineStage && pipelineStage.id !== application.currentStageId
             ? { stageEnteredAt: new Date() }
             : {}),
           interviewType: dto.type,
@@ -497,7 +504,7 @@ export class RecruitmentService {
                 },
                 source: "ATS_INTERVIEW",
               },
-              ...(pipelineStage &&
+              ...(autoAdvance && pipelineStage &&
               pipelineStage.id !== application.currentStageId
                 ? [
                     {
@@ -531,6 +538,24 @@ export class RecruitmentService {
       });
       const interviewDate = startsAt.toISOString();
       const interviewLocation = dto.meetingUrl || dto.location || "";
+      /*
+       * Datos crudos: la fecha va en ISO y la zona por separado porque quien
+       * sabe en qué idioma escribir es `enqueueEvent`, que resuelve el idioma
+       * de cada destinatario. Formatear aquí obligaría a adivinarlo.
+       */
+      const interviewer = await tx.user.findUnique({
+        where: { id: dto.interviewerUserId },
+        select: { firstName: true, lastName: true },
+      });
+      const datosDeEntrevista = {
+        interviewStartsAt: startsAt.toISOString(),
+        interviewTimezone: dto.timezone ?? "UTC",
+        interviewType: dto.type,
+        interviewDurationMinutes: String(Math.max(1, Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000))),
+        interviewerName: interviewer ? `${interviewer.firstName} ${interviewer.lastName}`.trim() : "",
+        interviewJoinUrl: dto.meetingUrl ?? "",
+        interviewPlace: dto.location ?? "",
+      };
       await this.communications?.enqueueEvent(tx, {
         tenantId,
         applicationId: dto.applicationId,
@@ -543,7 +568,7 @@ export class RecruitmentService {
         deduplicationSuffix: `${interview.id}:${interviewDate}`,
         actorType: "USER",
         actorId: actor.sub,
-        variables: { interviewDate, interviewLocation },
+        variables: { interviewDate, interviewLocation, ...datosDeEntrevista },
       });
       await this.enqueueInterviewReminder(tx, {
         tenantId,
@@ -552,6 +577,7 @@ export class RecruitmentService {
         startsAt,
         location: interviewLocation,
         actor,
+        datos: datosDeEntrevista,
       });
       return interview;
     });
@@ -914,6 +940,8 @@ export class RecruitmentService {
       startsAt: Date;
       location: string;
       actor: JwtPayload;
+      /** Los mismos datos legibles que lleva el aviso de agendado. */
+      datos?: Record<string, string>;
     },
   ) {
     const reminderAt = new Date(
@@ -935,6 +963,7 @@ export class RecruitmentService {
       variables: {
         interviewDate: input.startsAt.toISOString(),
         interviewLocation: input.location,
+        ...(input.datos ?? {}),
       },
     });
   }

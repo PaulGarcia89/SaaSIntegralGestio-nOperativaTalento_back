@@ -22,3 +22,6 @@ storage
 *.bak
 *.pem
 *.key
+
+# Local database backups
+backups/
